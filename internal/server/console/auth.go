@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"net"
 	"net/http"
 	"strings"
@@ -106,6 +105,7 @@ func (s *Server) toLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setCookie(w http.ResponseWriter, value string, maxAge int) {
+	//nolint:gosec // Secure follows EXCUBRA_OVERLAY_TLS (ADR-0011); plain HTTP exists only inside the encrypted overlay
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: value, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
 }
 
@@ -191,5 +191,3 @@ func clientIP(r *http.Request) string {
 	}
 	return host
 }
-
-var errForbidden = errors.New("nicht erlaubt")

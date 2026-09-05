@@ -5,7 +5,6 @@ package console
 
 import (
 	"bytes"
-	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -305,7 +303,3 @@ func humanDur(d time.Duration) string {
 		return fmt.Sprintf("%d Tage", int(d.Hours()/24))
 	}
 }
-
-func queryEscape(s string) string { return url.QueryEscape(s) }
-
-func ctxOf(r *http.Request) context.Context { return r.Context() }
