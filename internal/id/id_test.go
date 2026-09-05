@@ -3,6 +3,7 @@ package id
 import (
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -67,5 +68,20 @@ func TestSecret(t *testing.T) {
 	}
 	if s := Secret(32); len(s) != 52 {
 		t.Fatalf("Secret(32) has %d chars, want 52", len(s))
+	}
+}
+
+func TestTimeOf(t *testing.T) {
+	at := time.Date(2026, 9, 5, 10, 0, 0, 123_000_000, time.UTC)
+	s := NewSortable("evt", at)
+	got, ok := TimeOf(s)
+	if !ok || !got.Equal(at) {
+		t.Fatalf("TimeOf(%s) = %v, %v; want %v", s, got, ok, at)
+	}
+	if _, ok := TimeOf("box_k7m2x9q4t8r3"); ok {
+		t.Fatal("random id decoded as sortable")
+	}
+	if _, ok := TimeOf("evt_" + strings.Repeat("u", 26)); ok {
+		t.Fatal("invalid alphabet accepted")
 	}
 }

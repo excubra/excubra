@@ -68,7 +68,7 @@ func ParseEnrollmentKey(s string) (EnrollmentKey, error) {
 	s = strings.TrimSpace(s)
 	const prefix = "EX0:1:"
 	if !strings.HasPrefix(s, prefix) {
-		return EnrollmentKey{}, errors.New("enrollment key: must start with EX0:1:")
+		return EnrollmentKey{}, errors.New("enrollment key: missing the EX0:1 prefix")
 	}
 	rest := s[len(prefix):]
 	var host string

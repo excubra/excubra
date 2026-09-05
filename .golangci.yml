@@ -22,7 +22,7 @@ linters:
   exclusions:
     rules:
       - path: _test\.go
-        linters: [gosec, noctx, bodyclose]
+        linters: [gosec, noctx, bodyclose, errcheck, unparam]
 
 formatters:
   enable:

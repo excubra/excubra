@@ -1,0 +1,13 @@
+{
+  "event_id": "evt_01k4c0ffee0000000000000009",
+  "type": "test.ping",
+  "severity": "info",
+  "occurred_at": "2026-09-04T08:00:00Z",
+  "received_at": "2026-09-04T08:00:00Z",
+  "tenant_id": "ten_kundea",
+  "source": "console",
+  "details": {
+    "target_id": "tgt_crm",
+    "triggered_by": "jeremia"
+  }
+}

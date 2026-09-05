@@ -1,0 +1,25 @@
+{
+  "event_id": "evt_01k4c0ffee0000000000000004",
+  "type": "host.up",
+  "severity": "info",
+  "occurred_at": "2026-09-04T09:47:00Z",
+  "received_at": "2026-09-04T09:47:00Z",
+  "since": "2026-09-04T09:46:00Z",
+  "tenant_id": "ten_kundea",
+  "site_id": "site_ludwigshafen",
+  "box_id": "box_0042",
+  "host_id": "host_fortigate",
+  "source": "server.state",
+  "host": {
+    "name": "FortiGate 60F",
+    "ip": "192.168.1.1",
+    "mac": "00:09:0f:aa:bb:cc",
+    "vendor": "Fortinet"
+  },
+  "details": {
+    "box_time": "2026-09-04T09:46:58Z",
+    "consecutive_successes": 2,
+    "down_for_s": 480
+  },
+  "link": "https://ex0.viico.internal/hosts/host_fortigate"
+}

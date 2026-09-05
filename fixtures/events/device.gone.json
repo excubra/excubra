@@ -1,0 +1,21 @@
+{
+  "event_id": "evt_01k4c0ffee0000000000000006",
+  "type": "device.gone",
+  "severity": "info",
+  "occurred_at": "2026-09-05T10:20:00Z",
+  "received_at": "2026-09-05T10:20:00Z",
+  "since": "2026-09-04T10:15:00Z",
+  "tenant_id": "ten_kundea",
+  "site_id": "site_ludwigshafen",
+  "box_id": "box_0042",
+  "device_id": "dev_7m2x9q4t8r3w",
+  "source": "server.discovery",
+  "device": {
+    "ip": "192.168.1.77",
+    "mac": "3c:2a:f4:11:22:33",
+    "vendor": "Brother Industries",
+    "hostname": "BRW3C2AF4112233",
+    "last_seen": "2026-09-04T10:15:00Z"
+  },
+  "link": "https://ex0.viico.internal/devices/dev_7m2x9q4t8r3w"
+}

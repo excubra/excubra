@@ -81,8 +81,9 @@ type Host struct {
 	RunStart  time.Time // first round of the current consecutive run
 	DownSince time.Time // when Observed last became Down
 
-	LastFailedChecks []string  // labels of the checks that failed in the last failed round
-	LastBoxTime      time.Time // box time of the last round applied
+	LastFailedChecks []string           // labels of the checks that failed in the last failed round
+	LastChecks       []wire.CheckResult // results of the last round applied, for console and API
+	LastBoxTime      time.Time          // box time of the last round applied
 }
 
 // Scope of a maintenance window.
@@ -444,6 +445,7 @@ func (m *Machine) EndMaintenance(id string, at time.Time) []event.Event {
 func (m *Machine) applyRound(h *Host, r wire.Round, at time.Time) {
 	m.dirtyHosts[h.ID] = struct{}{}
 	h.LastBoxTime = r.At
+	h.LastChecks = append([]wire.CheckResult(nil), r.Checks...)
 	if r.OK {
 		if h.Successes == 0 {
 			h.RunStart = at
