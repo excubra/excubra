@@ -1,0 +1,29 @@
+{{define "content"}}
+{{with .Data}}
+<h1>Wartung</h1>
+<section class="card">
+  <h2>Aktive Fenster</h2>
+  {{if .Windows}}<table><thead><tr><th>Bereich</th><th>Ziel</th><th>bis</th><th>Grund</th><th>gesetzt von</th><th></th></tr></thead><tbody>
+  {{range .Windows}}<tr><td>{{.Scope}}</td><td>{{.TargetName}} <small>{{.TargetID}}</small></td><td>{{ts .Until}} ({{ago .Until}})</td><td>{{.Reason}}</td><td>{{.SetBy}}</td>
+  <td><form method="post" action="/maintenance/{{.ID}}/end" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Beenden</button></form></td></tr>{{end}}
+  </tbody></table>{{else}}<p class="hint">Keine. Während eines Fensters gibt es keine host-Ereignisse; am Ende genau einen Übergang, falls sich etwas geändert hat.</p>{{end}}
+</section>
+<section class="card">
+  <h2>Fenster setzen</h2>
+  <form method="post" action="/maintenance" class="row">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Bereich <select name="scope"><option value="host">Host</option><option value="site">Standort</option><option value="tenant">Mandant</option></select></label>
+    <label>Ziel <input name="target_id" list="targets" placeholder="host_…, site_…, ten_…" required>
+      <datalist id="targets">
+        {{range .Hosts}}<option value="{{.ID}}">{{.Name}} (Host)</option>{{end}}
+        {{range .Sites}}<option value="{{.ID}}">{{.Name}} (Standort)</option>{{end}}
+        {{range .Tenants}}<option value="{{.ID}}">{{.Name}} (Mandant)</option>{{end}}
+      </datalist>
+    </label>
+    <label>bis <input type="datetime-local" name="until" required></label>
+    <label>Grund <input name="reason"></label>
+    <button>Setzen</button>
+  </form>
+</section>
+{{end}}
+{{end}}

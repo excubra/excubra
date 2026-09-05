@@ -30,6 +30,7 @@ edited in the console.
 | `EXCUBRA_UPDATE_BASE_URL` | GitHub Releases | where update metadata points |
 | `EXCUBRA_LOG_LEVEL` | `info` | `debug` · `info` · `warn` |
 | `EXCUBRA_LOG_FORMAT` | `text` | `text` · `json` |
+| `EXCUBRA_TIMEZONE` | `Europe/Berlin` | IANA zone the console displays times in; storage and API stay UTC |
 
 Startup validation refuses to run with an unsafe overlay address and prints exactly
 what is wrong. Secrets never live in variables: the CA key is a file, webhook secrets

@@ -1,0 +1,9 @@
+{{define "content"}}
+{{with .Data}}
+<section class="card narrow">
+  <h1>{{.Status}}</h1>
+  <p>{{.Message}}</p>
+  <p><a href="/status">Zurück zum Status</a></p>
+</section>
+{{end}}
+{{end}}

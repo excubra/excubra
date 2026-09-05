@@ -394,6 +394,13 @@ func (e *Engine) EndMaintenance(ctx context.Context, maintID, actor string) erro
 	return e.audit(ctx, actor, "maintenance.end", maintID, "")
 }
 
+// Maintenances returns every active window.
+func (e *Engine) Maintenances() []state.Maintenance {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.m.Maintenances()
+}
+
 // MaintenanceFor finds active windows covering a target (host, site or tenant id).
 func (e *Engine) MaintenanceFor(targetID string) []state.Maintenance {
 	e.mu.Lock()

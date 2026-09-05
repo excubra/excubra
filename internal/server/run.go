@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/api"
+	"github.com/excubra/excubra/internal/server/console"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/ingest"
 	"github.com/excubra/excubra/internal/server/store"
@@ -115,15 +117,23 @@ func run(envFile string) error {
 		MaxHeaderBytes:    16 << 10,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
+	loc, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		return err
+	}
+	ingestPort, _ := strconv.Atoi(func() string { _, p := cfg.IngestHostPort(); return p }())
+	con, err := console.New(eng, st, ca, log, loc, ingestHost, ingestPort)
+	if err != nil {
+		return err
+	}
+	con.Secure = cfg.OverlayTLS == "internal"
 	overlayMux := http.NewServeMux()
 	overlayMux.Handle("/v1/", api.New(eng, st, log).Handler())
 	overlayMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = fmt.Fprintf(w, "ok %s\n", version.Version)
 	})
-	overlayMux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "excubra console: not built yet", http.StatusNotFound)
-	})
+	overlayMux.Handle("/", con.Handler())
 	overlaySrv := &http.Server{
 		Addr:              cfg.OverlayListen,
 		Handler:           overlayMux,

@@ -1,0 +1,58 @@
+{{define "content"}}
+{{with .Data}}
+<h1><span class="dot {{.Row.StateClass}}"></span> {{.View.Name}} <small>{{.View.ID}}</small></h1>
+<p class="crumbs"><a href="/tenants">{{.Tenant.Name}}</a> · <a href="/sites/{{.Site.ID}}/inventory">{{.Site.Name}}</a> · Box <a href="/boxes/{{.Box.ID}}">{{if .Box.Name}}{{.Box.Name}}{{else}}{{.Box.ID}}{{end}}</a></p>
+
+<div class="grid">
+<section class="card">
+  <h2>Zustand</h2>
+  <dl>
+    <dt>Beobachtet</dt><dd>{{.Row.StateLabel}} {{if .View.Suppressed}}<span class="tag">{{.View.Suppressed}}</span>{{end}}</dd>
+    <dt>Gemeldet</dt><dd>{{.View.State.Reported}}</dd>
+    <dt>Seit</dt><dd>{{ts .View.State.Since}} ({{ago .View.State.Since}})</dd>
+    <dt>Letzter Check</dt><dd>{{ts .View.State.LastBoxTime}}</dd>
+    <dt>Zähler</dt><dd>{{.View.State.Failures}} Fehlschläge / {{.View.State.Successes}} Erfolge in Folge</dd>
+    <dt>Checks</dt><dd>{{.Row.Checks}}</dd>
+    <dt>24 h</dt><dd>{{printf "%.1f" .Availability}} % verfügbar, {{.Failed}} von {{.Rounds}} Runden fehlgeschlagen</dd>
+  </dl>
+  {{if .Windows}}<h3>Aktive Wartung</h3><ul>{{range .Windows}}<li>{{.Scope}} {{.TargetID}} bis {{ts .Until}} {{if .Reason}}— {{.Reason}}{{end}}</li>{{end}}</ul>{{end}}
+  <form method="post" action="/hosts/{{.View.ID}}/maintenance" class="row">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Wartung bis <input type="datetime-local" name="until" required></label>
+    <label>Grund <input name="reason" placeholder="z. B. Firmware-Update"></label>
+    <button>Wartung setzen</button>
+  </form>
+  {{if .Windows}}<form method="post" action="/hosts/{{.View.ID}}/maintenance" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="end"><button class="secondary">Wartung dieses Hosts beenden</button></form>{{end}}
+</section>
+
+<section class="card">
+  <h2>Einstellungen</h2>
+  <form method="post" action="/hosts/{{.View.ID}}">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Name <input name="name" value="{{.View.Name}}" required></label>
+    <label>Adresse (IP oder Name) <input name="address" value="{{.View.Address}}" required></label>
+    <fieldset><legend>Checks (alle 30 s)</legend>
+      <label class="check"><input type="checkbox" name="icmp" value="1" {{if .Form.ICMP}}checked{{end}}> ICMP-Ping</label>
+      <label>TCP-Port <input name="tcp_port" type="number" min="1" max="65535" value="{{if .Form.TCPPort}}{{.Form.TCPPort}}{{end}}" placeholder="z. B. 443"></label>
+      <label>HTTP-URL <input name="http_url" value="{{.Form.HTTPURL}}" placeholder="https://…"></label>
+    </fieldset>
+    <label>Uplink dieses Hosts (Firewall/Router)
+      <select name="parent_id"><option value="">— keiner —</option>{{range .Siblings}}<option value="{{.ID}}" {{if eq .ID $.Data.View.ParentID}}selected{{end}}>{{.Name}} ({{.Address}})</option>{{end}}</select>
+    </label>
+    <label class="check"><input type="checkbox" name="is_uplink" value="1" {{if .View.IsUplink}}checked{{end}}> Dieser Host ist ein Uplink (Ausfall unterdrückt seine Kinder)</label>
+    <button>Speichern</button>
+  </form>
+  <form method="post" action="/hosts/{{.View.ID}}/delete" class="inline danger" onsubmit="return confirm('Host nicht mehr überwachen?')">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Nicht mehr überwachen</button>
+  </form>
+</section>
+</div>
+
+<section class="card">
+  <h2>Ereignisse der letzten 24 h</h2>
+  {{if .Events}}<table><thead><tr><th>Zeit</th><th>Typ</th><th>Details</th></tr></thead><tbody>
+  {{range .Events}}<tr><td>{{ts .OccurredAt}}</td><td><code>{{.Type}}</code></td><td class="muted">{{if .Since}}seit {{tsp .Since}}{{end}} {{range $k, $v := .Details}}{{$k}}={{$v}} {{end}}</td></tr>{{end}}
+  </tbody></table>{{else}}<p class="hint">Keine.</p>{{end}}
+</section>
+{{end}}
+{{end}}

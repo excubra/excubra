@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · EX0</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/htmx.min.js" defer></script>
+</head>
+<body hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<header class="top">
+  <a class="brand" href="/status">EX0<span>console</span></a>
+  {{if .User}}
+  <nav>
+    <a href="/status" {{if eq .Path "/status"}}class="on"{{end}}>Status</a>
+    <a href="/boxes" {{if eq .Path "/boxes"}}class="on"{{end}}>Boxen</a>
+    <a href="/tenants" {{if eq .Path "/tenants"}}class="on"{{end}}>Mandanten</a>
+    <a href="/maintenance" {{if eq .Path "/maintenance"}}class="on"{{end}}>Wartung</a>
+    <a href="/webhooks" {{if eq .Path "/webhooks"}}class="on"{{end}}>Webhooks</a>
+    <a href="/keys" {{if eq .Path "/keys"}}class="on"{{end}}>Keys</a>
+    <a href="/tokens" {{if eq .Path "/tokens"}}class="on"{{end}}>Tokens</a>
+    <a href="/audit" {{if eq .Path "/audit"}}class="on"{{end}}>Audit</a>
+  </nav>
+  <form method="post" action="/logout" class="inline">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <span class="user">{{.User}}</span>
+    <button class="link">Abmelden</button>
+  </form>
+  {{end}}
+</header>
+<main>
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+{{template "content" .}}
+</main>
+<footer>excubra {{version}} · Konsole nur im Overlay · Zeiten in lokaler Zone</footer>
+</body>
+</html>

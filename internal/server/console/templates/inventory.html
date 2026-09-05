@@ -1,0 +1,36 @@
+{{define "content"}}
+{{with .Data}}
+<h1>Inventar {{.Site.Name}} <small>{{.Tenant.Name}}</small></h1>
+{{if not .Boxes}}<p class="err">Diesem Standort ist keine Box zugeordnet — ohne Box kein Inventar und keine Checks. <a href="/boxes">Boxen</a></p>{{end}}
+{{if not .Devices}}<p class="hint">Noch keine Geräte gesehen. Die Box meldet Geräte mit jedem Heartbeat.</p>{{end}}
+{{range .Devices}}
+<details class="device {{if .Ignored}}ignored{{end}}" id="{{.ID}}">
+  <summary>
+    <span class="dot {{if .GoneAt}}unknown{{else if .Monitored}}up{{else}}new{{end}}"></span>
+    <code>{{.IP}}</code> <code class="muted">{{.MAC}}</code> {{.Vendor}} {{if .Hostname}}<strong>{{.Hostname}}</strong>{{end}}
+    <span class="muted">zuletzt {{ago .LastSeen}}{{if .GoneAt}}, seit {{tsp .GoneAt}} verschwunden{{end}}</span>
+    {{if .Monitored}}<a class="tag" href="/hosts/{{.HostID}}">überwacht</a>{{else if .Ignored}}<span class="tag">ignoriert</span>{{else}}<span class="tag new">neu</span>{{end}}
+  </summary>
+  <div class="row">
+    {{if not .Monitored}}
+    <form method="post" action="/devices/{{.ID}}/monitor" class="row">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <label>Name <input name="name" value="{{.Hostname}}" placeholder="{{.IP}}"></label>
+      <label>Box <select name="box_id">{{range $.Data.Boxes}}<option value="{{.ID}}">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</option>{{end}}</select></label>
+      <label class="check"><input type="checkbox" name="icmp" value="1" checked> ICMP</label>
+      <label>TCP-Port <input name="tcp_port" type="number" min="1" max="65535" placeholder="443"></label>
+      <label>HTTP-URL <input name="http_url" placeholder="https://…"></label>
+      <label class="check"><input type="checkbox" name="is_uplink" value="1"> Uplink</label>
+      <button>Monitoren</button>
+    </form>
+    <form method="post" action="/devices/{{.ID}}/ignore" class="inline">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="ignored" value="{{if .Ignored}}0{{else}}1{{end}}">
+      <button class="secondary">{{if .Ignored}}Nicht mehr ignorieren{{else}}Ignorieren{{end}}</button>
+    </form>
+    {{end}}
+    <span class="muted">zuerst gesehen {{ts .FirstSeen}} · {{.ID}}</span>
+  </div>
+</details>
+{{end}}
+{{end}}
+{{end}}

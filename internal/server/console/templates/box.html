@@ -1,0 +1,63 @@
+{{define "content"}}
+{{with .Data}}
+<h1><span class="dot {{if eq .Row.State.Status "silent"}}down{{else}}up{{end}}"></span> {{if .Row.Name}}{{.Row.Name}}{{else}}{{.Row.ID}}{{end}} <small>{{.Row.ID}}</small></h1>
+<div class="grid">
+<section class="card">
+  <h2>Box</h2>
+  <dl>
+    <dt>Zustand</dt><dd>{{.Row.State.Status}} — Heartbeat {{if .Row.State.LastHeartbeat.IsZero}}noch keiner{{else}}{{ago .Row.State.LastHeartbeat}} ({{ts .Row.State.LastHeartbeat}}){{end}}</dd>
+    <dt>Zugeordnet</dt><dd>{{if .Row.Assigned}}{{.Row.TenantName}} · {{.Row.SiteName}}{{else}}<strong>nein</strong>{{end}}</dd>
+    <dt>Hardware</dt><dd><code>{{.Row.HWID}}</code> · {{.Row.OS}}/{{.Row.Arch}} · Uptime {{.Row.UptimeS}} s</dd>
+    <dt>Agent</dt><dd>{{.Row.AgentVersion}} · Kanal {{.Row.Channel}}</dd>
+    <dt>NetBird</dt><dd>{{if .Row.NetbirdStatus}}{{.Row.NetbirdStatus}} {{.Row.NetbirdIP}}{{else}}nicht gemeldet{{end}}</dd>
+    <dt>Zertifikat</dt><dd>Serial <code>{{.Row.CertSerial}}</code>, gültig bis {{ts .Row.CertNotAfter}}</dd>
+    <dt>Enrollt</dt><dd>{{ts .Row.EnrolledAt}}</dd>
+    <dt>CA-Fingerprint</dt><dd><code>{{.Fingerprint}}</code></dd>
+  </dl>
+  <form method="post" action="/boxes/{{.Row.ID}}/assign" class="row">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Standort
+      <select name="site_id"><option value="">— nicht zugeordnet —</option>
+      {{range .Sites}}<option value="{{.ID}}" {{if eq .ID $.Data.Row.SiteID}}selected{{end}}>{{index $.Data.TenantNames .TenantID}} · {{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <button>Zuordnen</button>
+  </form>
+  {{if not .Sites}}<p class="hint">Erst unter <a href="/tenants">Mandanten</a> einen Standort anlegen.</p>{{end}}
+</section>
+
+<section class="card">
+  <h2>Einstellungen</h2>
+  <form method="post" action="/boxes/{{.Row.ID}}/settings">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Name <input name="name" value="{{.Row.Name}}" placeholder="z. B. Büro Ludwigshafen"></label>
+    <label>Update-Kanal <select name="channel"><option value="stable" {{if eq .Row.Channel "stable"}}selected{{end}}>stable</option><option value="canary" {{if eq .Row.Channel "canary"}}selected{{end}}>canary</option></select></label>
+    <label>Discovery <select name="discovery_mode"><option value="sweep" {{if eq .Row.DiscoveryMode "sweep"}}selected{{end}}>passiv + Sweep alle 15 min</option><option value="passive" {{if eq .Row.DiscoveryMode "passive"}}selected{{end}}>nur passiv</option></select></label>
+    <label>Weitere Subnetze (ICMP-Sweep, CIDR je Zeile, max. 8)<textarea name="discovery_subnets" rows="3">{{.Subnets}}</textarea></label>
+    <button>Speichern</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>NetBird-Übergabe</h2>
+  {{if .Netbird}}<p>Hinterlegt für <code>{{.Netbird.ManagementURL}}</code>, {{if .Netbird.ClaimedAt}}abgeholt {{tsp .Netbird.ClaimedAt}}{{else}}<strong>noch nicht abgeholt</strong>{{end}}.</p>
+  <form method="post" action="/boxes/{{.Row.ID}}/netbird" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="clear"><button class="secondary">Entfernen</button></form>
+  {{else}}<p class="hint">Kein Schlüssel hinterlegt. Die Box holt ihn genau einmal ab und setzt sich damit in den Kunden-Stack.</p>{{end}}
+  <form method="post" action="/boxes/{{.Row.ID}}/netbird">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Management-URL <input name="management_url" placeholder="https://kunde.vpn.viico-cloud.de"></label>
+    <label>Setup-Key <input name="setup_key" autocomplete="off"></label>
+    <button>Hinterlegen</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Hosts dieser Box <small>{{len .Hosts}}</small></h2>
+  {{if .Hosts}}<ul>{{range .Hosts}}<li><a href="/hosts/{{.ID}}">{{.Name}}</a> <code>{{.Address}}</code></li>{{end}}</ul>{{else}}<p class="hint">Keine.</p>{{end}}
+  <h2>Gefahrenzone</h2>
+  <form method="post" action="/boxes/{{.Row.ID}}/revoke" class="inline" onsubmit="return confirm('Zertifikat sperren? Die Box kann sich danach nicht mehr melden.')"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Widerrufen</button></form>
+  <form method="post" action="/boxes/{{.Row.ID}}/delete" class="inline" onsubmit="return confirm('Box samt Hosts löschen?')"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Löschen</button></form>
+</section>
+</div>
+{{end}}
+{{end}}

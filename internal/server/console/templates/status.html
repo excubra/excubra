@@ -1,0 +1,6 @@
+{{define "content"}}
+<h1>Status</h1>
+<div id="status" hx-get="/status/table" hx-trigger="every 30s" hx-swap="innerHTML">
+{{template "status_table" .Data}}
+</div>
+{{end}}

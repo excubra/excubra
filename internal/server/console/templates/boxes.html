@@ -1,0 +1,29 @@
+{{define "content"}}
+{{with .Data}}
+<h1>Boxen</h1>
+<h2>Nicht zugeordnet <small>{{len .Unassigned}}</small></h2>
+{{if .Unassigned}}
+<table><thead><tr><th>Box</th><th>Hardware</th><th>Agent</th><th>Enrollt</th><th>Heartbeat</th><th></th></tr></thead><tbody>
+{{range .Unassigned}}<tr>
+  <td><a href="/boxes/{{.ID}}">{{.ID}}</a></td><td><code>{{.HWID}}</code> {{.OS}}/{{.Arch}}</td><td>{{.AgentVersion}}</td><td>{{ts .EnrolledAt}}</td>
+  <td>{{if .State.LastHeartbeat.IsZero}}noch keiner{{else}}{{ago .State.LastHeartbeat}}{{end}}</td>
+  <td><a class="button" href="/boxes/{{.ID}}">Zuordnen</a></td>
+</tr>{{end}}
+</tbody></table>
+{{else}}<p class="hint">Keine. Neue Boxen erscheinen hier nach dem Enrollment mit einem <a href="/keys">Key</a>.</p>{{end}}
+
+<h2>Zugeordnet <small>{{len .Assigned}}</small></h2>
+{{if .Assigned}}
+<table><thead><tr><th></th><th>Box</th><th>Mandant · Standort</th><th>Agent</th><th>NetBird</th><th>Heartbeat</th><th>Platte frei</th></tr></thead><tbody>
+{{range .Assigned}}<tr>
+  <td><span class="dot {{if eq .State.Status "silent"}}down{{else}}up{{end}}"></span></td>
+  <td><a href="/boxes/{{.ID}}">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</a></td>
+  <td>{{.TenantName}} · {{.SiteName}}</td><td>{{.AgentVersion}} <span class="tag">{{.Channel}}</span></td>
+  <td>{{if .NetbirdStatus}}{{.NetbirdStatus}} {{.NetbirdIP}}{{else}}–{{end}}</td>
+  <td>{{ago .State.LastHeartbeat}}</td>
+  <td>{{if .DiskTotalBytes}}{{gb .DiskFreeBytes}} von {{gb .DiskTotalBytes}} GB{{else}}–{{end}}</td>
+</tr>{{end}}
+</tbody></table>
+{{else}}<p class="hint">Keine.</p>{{end}}
+{{end}}
+{{end}}

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 )
 
 // Config is everything the server reads from the environment (ADR-0009). All other
@@ -23,6 +24,7 @@ type Config struct {
 	UpdateBaseURL    string
 	LogLevel         string
 	LogFormat        string
+	Timezone         string // IANA name used by the console for display; storage stays UTC
 }
 
 // DefaultEnvFile is read when it exists and no --env-file was given.
@@ -69,6 +71,7 @@ func LoadConfig(envFile string, getenv func(string) string) (Config, error) {
 		UpdateBaseURL:    get("EXCUBRA_UPDATE_BASE_URL", "https://github.com/excubra/excubra/releases/download"),
 		LogLevel:         get("EXCUBRA_LOG_LEVEL", "info"),
 		LogFormat:        get("EXCUBRA_LOG_FORMAT", "text"),
+		Timezone:         get("EXCUBRA_TIMEZONE", "Europe/Berlin"),
 	}
 	return c, c.Validate()
 }
@@ -143,6 +146,9 @@ func (c Config) Validate() error {
 	case "text", "json":
 	default:
 		errs = append(errs, fmt.Errorf("EXCUBRA_LOG_FORMAT %q must be text or json", c.LogFormat))
+	}
+	if _, err := time.LoadLocation(c.Timezone); err != nil {
+		errs = append(errs, fmt.Errorf("EXCUBRA_TIMEZONE %q is not a known IANA zone", c.Timezone))
 	}
 	return errors.Join(errs...)
 }
