@@ -1,0 +1,10 @@
+[Unit]
+Description=EX0: consistent backup into /var/backups/excubra (sync it to append-only object storage afterwards)
+
+[Service]
+Type=oneshot
+User=excubra
+EnvironmentFile=/etc/excubra/server.env
+ExecStart=/usr/local/bin/excubra server backup /var/backups/excubra
+# Example for the off-site copy — uncomment and configure rclone for the excubra user:
+# ExecStartPost=/usr/bin/rclone sync /var/backups/excubra remote:excubra-backup --immutable

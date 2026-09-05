@@ -1,0 +1,47 @@
+# EX0 server (ADR-0009). Install: cp to /etc/systemd/system/, create the
+# excubra user, put settings in /etc/excubra/server.env, systemctl enable --now.
+[Unit]
+Description=EX0 server (excubra)
+Documentation=https://github.com/excubra/excubra
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=excubra
+Group=excubra
+EnvironmentFile=/etc/excubra/server.env
+ExecStart=/usr/local/bin/excubra server run
+Restart=always
+RestartSec=5
+# exit code 75 is the self-update handshake (ADR-0006); every other exit restarts too
+SuccessExitStatus=75
+StateDirectory=excubra
+StateDirectoryMode=0700
+LimitNOFILE=65536
+
+# Bind :443 without root
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+
+# Hardening: the server writes only to its data directory
+ProtectSystem=strict
+ReadWritePaths=/var/lib/excubra
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

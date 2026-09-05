@@ -1,0 +1,47 @@
+# EX0 agent on a box (ADR-0007, "the agent must never do harm").
+# The installer creates the excubra-agent user and /var/lib/excubra-agent.
+[Unit]
+Description=EX0 agent (excubra)
+Documentation=https://github.com/excubra/excubra
+After=network-online.target
+Wants=network-online.target
+# keep restarting forever; a box nobody can reach must never give up
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=excubra-agent
+Group=excubra-agent
+ExecStart=/usr/local/bin/excubra agent run
+Restart=always
+RestartSec=5
+SuccessExitStatus=75
+StateDirectory=excubra-agent
+StateDirectoryMode=0700
+
+# ICMP echo, ARP and AF_PACKET need CAP_NET_RAW — nothing else
+CapabilityBoundingSet=CAP_NET_RAW
+AmbientCapabilities=CAP_NET_RAW
+NoNewPrivileges=yes
+
+# Resource fence: the agent may never starve the box
+CPUQuota=20%
+MemoryMax=256M
+TasksMax=64
+
+# The agent reads the system and writes only its state directory (and the
+# binary path during a self-update, hence /usr/local/bin)
+ProtectSystem=strict
+ReadWritePaths=/var/lib/excubra-agent /usr/local/bin
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_PACKET AF_NETLINK
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

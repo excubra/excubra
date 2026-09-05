@@ -1,0 +1,20 @@
+# Example: one server, one volume, one env file. The overlay port must be
+# published on the NetBird interface address of the host, never on 0.0.0.0.
+services:
+  excubra:
+    image: ghcr.io/excubra/excubra:latest
+    restart: unless-stopped
+    env_file: /etc/excubra/server.env
+    environment:
+      EXCUBRA_INGEST_LISTEN: ":8443"
+      # inside the container the overlay listener may bind any address; the
+      # port mapping below restricts it to the host's NetBird address
+      EXCUBRA_OVERLAY_LISTEN: "0.0.0.0:8080"
+      EXCUBRA_OVERLAY_ALLOW_ANY: "1"
+    ports:
+      - "443:8443"                 # public ingest
+      - "100.64.0.10:8080:8080"    # console + API, NetBird interface only
+    volumes:
+      - excubra-data:/var/lib/excubra
+volumes:
+  excubra-data:
