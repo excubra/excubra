@@ -1,0 +1,46 @@
+{{define "content"}}
+{{with .Data}}
+<h1>Webhook-Ziele</h1>
+{{if .NewSecret}}<section class="card secret">
+  <h2>Secret für „{{.NewTarget.Name}}" — wird nur einmal angezeigt</h2>
+  <pre>{{.NewSecret}}</pre>
+  <p class="hint">Damit prüft der Empfänger <code>X-EX0-Signature</code>: HMAC-SHA256 über <code>timestamp + "." + body</code>. Beispiele liegen im Repo unter <code>fixtures/events/</code>.</p>
+</section>{{end}}
+{{range .Targets}}
+<section class="card">
+  <h2>{{.Name}} <small>{{.ID}}</small> {{if not .Enabled}}<span class="tag">deaktiviert</span>{{end}}</h2>
+  <form method="post" action="/webhooks/{{.ID}}" class="row">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Name <input name="name" value="{{.Name}}" required></label>
+    <label>URL <input name="url" value="{{.URL}}" required size="40"></label>
+    <label>Mandant <select name="tenant_scope"><option value="*" {{if eq .TenantScope "*"}}selected{{end}}>alle</option>{{range $.Data.Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+    <label class="check"><input type="checkbox" name="enabled" value="1" {{if .Enabled}}checked{{end}}> aktiv</label>
+    <label class="check"><input type="checkbox" name="rotate_secret" value="1"> Secret neu erzeugen</label>
+    <button>Speichern</button>
+  </form>
+  <form method="post" action="/webhooks/{{.ID}}/test" class="inline">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <select name="tenant_id"><option value="">Mandant für test.ping</option>{{range $.Data.Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
+    <button class="secondary">Test-Ereignis senden</button>
+  </form>
+  <form method="post" action="/webhooks/{{.ID}}/delete" class="inline" onsubmit="return confirm('Ziel löschen?')"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Löschen</button></form>
+</section>
+{{end}}
+<section class="card">
+  <h2>Neues Ziel</h2>
+  <form method="post" action="/webhooks" class="row">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Name <input name="name" placeholder="VIICO-CRM" required></label>
+    <label>URL <input name="url" placeholder="https://crm.example/ex0/webhook" required size="40"></label>
+    <label>Mandant <select name="tenant_scope"><option value="*">alle</option>{{range .Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+    <button>Anlegen</button>
+  </form>
+</section>
+<section class="card">
+  <h2>Fehlgeschlagene Zustellungen (7 Tage)</h2>
+  {{if .Failed}}<table><thead><tr><th>Ereignis</th><th>Ziel</th><th>Versuche</th><th>letzter Status</th><th>Fehler</th></tr></thead><tbody>
+  {{range .Failed}}<tr><td><code>{{.EventID}}</code></td><td>{{.TargetName}}</td><td>{{.Attempts}}</td><td>{{.LastStatus}}</td><td class="muted">{{.LastError}}</td></tr>{{end}}
+  </tbody></table>{{else}}<p class="hint">Keine.</p>{{end}}
+</section>
+{{end}}
+{{end}}

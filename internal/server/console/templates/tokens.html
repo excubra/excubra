@@ -1,0 +1,27 @@
+{{define "content"}}
+{{with .Data}}
+<h1>API-Tokens</h1>
+{{if .NewToken}}<section class="card secret">
+  <h2>Token „{{.NewName}}" — wird nur einmal angezeigt</h2>
+  <pre>{{.NewToken}}</pre>
+  <p class="hint">Verwendung: <code>Authorization: Bearer …</code> gegen die Status-API unter <code>/v1/</code> auf diesem Listener.</p>
+</section>{{end}}
+<section class="card">
+  <h2>Token erzeugen</h2>
+  <form method="post" action="/tokens" class="row">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Name <input name="name" placeholder="crm" required></label>
+    <label>Mandanten <select name="tenants" multiple size="4"><option value="*" selected>alle</option>{{range .Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+    <button>Erzeugen</button>
+  </form>
+</section>
+<section class="card">
+  <h2>Alle Tokens</h2>
+  <table><thead><tr><th>Token</th><th>Name</th><th>Mandanten</th><th>erzeugt</th><th>zuletzt benutzt</th><th>Status</th><th></th></tr></thead><tbody>
+  {{range .Tokens}}<tr><td><code>{{.ID}}</code></td><td>{{.Name}}</td><td>{{join .Tenants ", "}}</td><td>{{ts .CreatedAt}}</td><td>{{agop .LastUsedAt}}</td>
+  <td>{{if .RevokedAt}}widerrufen{{else}}aktiv{{end}}</td>
+  <td>{{if not .RevokedAt}}<form method="post" action="/tokens/{{.ID}}/revoke" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Widerrufen</button></form>{{end}}</td></tr>{{end}}
+  </tbody></table>
+</section>
+{{end}}
+{{end}}

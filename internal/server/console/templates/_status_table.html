@@ -1,0 +1,39 @@
+{{define "status_table"}}
+<div class="counts">
+  <span class="pill up">{{.Up}} erreichbar</span>
+  <span class="pill down">{{.Down}} ausgefallen</span>
+  <span class="pill maint">{{.Maint}} Wartung</span>
+  <span class="pill unknown">{{.Unknown}} unbekannt</span>
+  {{if .Silent}}<span class="pill down">{{.Silent}} Box{{if gt .Silent 1}}en{{end}} schweig{{if gt .Silent 1}}en{{else}}t{{end}}</span>{{end}}
+</div>
+{{if not .Tenants}}<p class="hint">Noch keine Mandanten. Unter <a href="/tenants">Mandanten</a> anlegen, dann eine Box zuordnen.</p>{{end}}
+{{range .Tenants}}
+<h2>{{.Tenant.Name}} <small>{{.Tenant.ID}}</small></h2>
+{{if not .Sites}}<p class="hint">Keine Standorte.</p>{{end}}
+{{range .Sites}}
+<h3>{{.Site.Name}} <small>{{.Site.ID}}</small>
+  {{range .Boxes}}<a class="pill {{if eq .State.Status "silent"}}down{{else}}up{{end}}" href="/boxes/{{.ID}}" title="Heartbeat {{ago .State.LastHeartbeat}}">Box {{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}: {{.State.Status}}</a>{{end}}
+  {{if not .Boxes}}<span class="pill unknown">keine Box zugeordnet</span>{{end}}
+  <a class="small" href="/sites/{{.Site.ID}}/inventory">Inventar</a>
+</h3>
+{{if .Hosts}}
+<table>
+<thead><tr><th></th><th>Host</th><th>Adresse</th><th>Zustand</th><th>seit</th><th>letzter Check</th><th>Checks</th></tr></thead>
+<tbody>
+{{range .Hosts}}
+<tr>
+  <td><span class="dot {{.StateClass}}"></span></td>
+  <td><a href="/hosts/{{.ID}}">{{.Name}}</a>{{if .IsUplink}} <span class="tag">Uplink</span>{{end}}{{if .ParentID}} <span class="tag">↑ {{.ParentID}}</span>{{end}}</td>
+  <td><code>{{.Address}}</code></td>
+  <td>{{.StateLabel}}</td>
+  <td>{{if .State.Since.IsZero}}–{{else}}{{ago .State.Since}}{{end}}</td>
+  <td>{{if .State.LastBoxTime.IsZero}}–{{else}}{{ago .State.LastBoxTime}}{{end}}</td>
+  <td class="muted">{{.Checks}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="hint">Noch kein Host überwacht — im <a href="/sites/{{.Site.ID}}/inventory">Inventar</a> Geräte auf „monitoren" setzen.</p>{{end}}
+{{end}}
+{{end}}
+{{end}}

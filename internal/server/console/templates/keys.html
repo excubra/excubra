@@ -1,0 +1,30 @@
+{{define "content"}}
+{{with .Data}}
+<h1>Enrollment-Keys</h1>
+{{if .New}}<section class="card secret">
+  <h2>Neue Keys — werden nur einmal angezeigt</h2>
+  <pre>{{range .New}}{{.}}
+{{end}}</pre>
+  <p class="hint">Auf die Box: als Datei <code>/etc/excubra/enroll</code> ins Image legen oder <code>excubra agent enroll --key …</code>. Jeder Key funktioniert genau einmal und trägt keinen Mandanten — die Zuordnung passiert hier unter Boxen.</p>
+</section>{{end}}
+<section class="card">
+  <h2>Keys erzeugen</h2>
+  <form method="post" action="/keys" class="row">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label>Anzahl <input name="count" type="number" min="1" max="100" value="1"></label>
+    <label>Gültig (Tage) <input name="days" type="number" min="1" max="365" value="30"></label>
+    <label>Notiz <input name="note" placeholder="z. B. Charge September"></label>
+    <button>Erzeugen</button>
+  </form>
+  <p class="hint">Ingest in den Keys: <code>{{.Ingest}}</code></p>
+</section>
+<section class="card">
+  <h2>Alle Keys</h2>
+  <table><thead><tr><th>Key</th><th>Notiz</th><th>erzeugt</th><th>läuft ab</th><th>Status</th><th></th></tr></thead><tbody>
+  {{range .Keys}}<tr><td><code>{{.ID}}</code></td><td>{{.Note}}</td><td>{{ts .CreatedAt}}</td><td>{{ts .ExpiresAt}}</td>
+  <td>{{if .UsedAt}}benutzt {{tsp .UsedAt}} von <a href="/boxes/{{.UsedByBox}}">{{.UsedByBox}}</a>{{else if .RevokedAt}}widerrufen{{else}}offen{{end}}</td>
+  <td>{{if and (not .UsedAt) (not .RevokedAt)}}<form method="post" action="/keys/{{.ID}}/revoke" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Widerrufen</button></form>{{end}}</td></tr>{{end}}
+  </tbody></table>
+</section>
+{{end}}
+{{end}}

@@ -1,0 +1,13 @@
+{{define "content"}}
+<section class="card narrow">
+  <h1>Anmelden</h1>
+  {{with .Data}}{{if .Error}}<p class="err">{{.Error}}</p>{{end}}{{end}}
+  <form method="post" action="/login" autocomplete="off">
+    <label>Benutzer <input name="user" required autofocus autocomplete="username"></label>
+    <label>Passwort <input name="password" type="password" required autocomplete="current-password"></label>
+    <label>TOTP-Code <input name="totp" inputmode="numeric" pattern="[0-9]{6}" required autocomplete="one-time-code"></label>
+    <button>Anmelden</button>
+  </form>
+  <p class="hint">Konten werden auf dem Server angelegt: <code>excubra server user add &lt;name&gt;</code></p>
+</section>
+{{end}}

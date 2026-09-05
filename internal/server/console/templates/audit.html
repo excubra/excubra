@@ -1,0 +1,9 @@
+{{define "content"}}
+{{with .Data}}
+<h1>Audit-Log</h1>
+<table><thead><tr><th>Zeit</th><th>Wer</th><th>Aktion</th><th>Ziel</th><th>Details</th></tr></thead><tbody>
+{{range .Entries}}<tr><td>{{ts .At}}</td><td>{{.Actor}}</td><td><code>{{.Action}}</code></td><td><code>{{.Target}}</code></td><td class="muted">{{.Summary}}</td></tr>{{end}}
+</tbody></table>
+{{if .Next}}<p><a href="/audit?before={{.Next}}">Ältere Einträge</a></p>{{end}}
+{{end}}
+{{end}}
