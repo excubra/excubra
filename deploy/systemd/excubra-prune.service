@@ -1,0 +1,8 @@
+[Unit]
+Description=EX0: delete day files older than the retention (ADR-0005)
+
+[Service]
+Type=oneshot
+User=excubra
+EnvironmentFile=/etc/excubra/server.env
+ExecStart=/usr/local/bin/excubra server prune --keep 90

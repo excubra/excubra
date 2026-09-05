@@ -1,0 +1,7 @@
+[Unit]
+Description=EX0: monthly restore test — a backup without a rehearsed restore is decoration
+
+[Service]
+Type=oneshot
+User=excubra
+ExecStart=/usr/local/bin/excubra-restore-test /var/backups/excubra
