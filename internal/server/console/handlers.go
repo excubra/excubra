@@ -982,7 +982,7 @@ func validTargetForm(r *http.Request) (string, string, string, error) {
 	if scope == "" {
 		scope = "*"
 	}
-	if name == "" || !(strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://")) {
+	if name == "" || (!strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://")) {
 		return "", "", "", errors.New("Name und URL (http:// oder https://) sind Pflicht")
 	}
 	return name, u, scope, nil
