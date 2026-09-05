@@ -68,7 +68,7 @@ func LoadOrCreateCA(dir string) (*CA, error) {
 	case errors.Is(errC, fs.ErrNotExist) && errors.Is(errK, fs.ErrNotExist):
 		// create below
 	default:
-		return nil, fmt.Errorf("pki: CA files inconsistent in %s (cert: %v, key: %v)", dir, errC, errK)
+		return nil, fmt.Errorf("pki: CA files inconsistent in %s (cert: %w, key: %w)", dir, errC, errK)
 	}
 
 	key, err := GenerateKey()
@@ -301,9 +301,14 @@ func AgentTLSConfig(caFingerprint, host string, clientCert *tls.Certificate) *tl
 	cfg := &tls.Config{
 		MinVersion:         tls.VersionTLS13,
 		ServerName:         host,
-		InsecureSkipVerify: true, //nolint:gosec // verification is done in VerifyPeerCertificate against the pinned CA
-		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			return VerifyPinned(rawCerts, caFingerprint, host)
+		InsecureSkipVerify: true, //nolint:gosec // verification is done in VerifyConnection against the pinned CA
+		// VerifyConnection (not VerifyPeerCertificate) also runs for resumed sessions.
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			raw := make([][]byte, 0, len(cs.PeerCertificates))
+			for _, c := range cs.PeerCertificates {
+				raw = append(raw, c.Raw)
+			}
+			return VerifyPinned(raw, caFingerprint, host)
 		},
 	}
 	if clientCert != nil {

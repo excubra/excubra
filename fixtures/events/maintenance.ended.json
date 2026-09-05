@@ -1,0 +1,18 @@
+{
+  "event_id": "evt_01k4c0ffee0000000000000008",
+  "type": "maintenance.ended",
+  "severity": "info",
+  "occurred_at": "2026-09-04T20:00:00Z",
+  "received_at": "2026-09-04T20:00:00Z",
+  "tenant_id": "ten_kundea",
+  "site_id": "site_ludwigshafen",
+  "box_id": "box_0042",
+  "host_id": "host_fortigate",
+  "source": "server.maintenance",
+  "maintenance": {
+    "scope": "host",
+    "reason": "firmware update",
+    "ended": "expired"
+  },
+  "link": "https://ex0.viico.internal/hosts/host_fortigate"
+}

@@ -1,0 +1,233 @@
+package server
+
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	"github.com/excubra/excubra/internal/event"
+	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/server/api"
+	"github.com/excubra/excubra/internal/server/core"
+	"github.com/excubra/excubra/internal/server/ingest"
+	"github.com/excubra/excubra/internal/server/store"
+	"github.com/excubra/excubra/internal/server/webhook"
+	"github.com/excubra/excubra/internal/version"
+)
+
+// certProvider hands the current ingest certificate to the TLS stack and lets the
+// renewal loop swap it without a restart.
+type certProvider struct {
+	cert atomic.Pointer[tls.Certificate]
+}
+
+func (p *certProvider) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	c := p.cert.Load()
+	if c == nil {
+		return nil, errors.New("no certificate")
+	}
+	return c, nil
+}
+
+func newLogger(cfg Config) *slog.Logger {
+	var level slog.Level
+	_ = level.UnmarshalText([]byte(cfg.LogLevel))
+	opts := &slog.HandlerOptions{Level: level}
+	if cfg.LogFormat == "json" {
+		return slog.New(slog.NewJSONHandler(os.Stdout, opts))
+	}
+	return slog.New(slog.NewTextHandler(os.Stdout, opts))
+}
+
+// run starts both listeners, the ticker and the webhook worker, and stops them on
+// SIGINT/SIGTERM.
+func run(envFile string) error {
+	cfg, err := LoadConfig(envFile, os.Getenv)
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg)
+	slog.SetDefault(log)
+	log.Info("excubra server starting", "version", version.Version, "data", cfg.DataDir)
+
+	if err := checkOverlayAddress(cfg); err != nil {
+		return err
+	}
+	st, err := store.Open(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+
+	caDir := filepath.Join(cfg.DataDir, "ca")
+	ca, err := pki.LoadOrCreateCA(caDir)
+	if err != nil {
+		return err
+	}
+	ingestHost, _ := cfg.IngestHostPort()
+	srvCert, err := ca.LoadOrCreateServerCert(caDir, ingestHost)
+	if err != nil {
+		return err
+	}
+	prov := &certProvider{}
+	prov.cert.Store(&srvCert)
+	log.Info("internal CA ready", "fingerprint", ca.Fingerprint(), "ingest_host", ingestHost)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	deliverer := webhook.New(st, version.Version, log)
+	base := cfg.ConsoleBaseURL()
+	deliverer.Link = func(ev event.Event) string {
+		switch {
+		case ev.HostID != "":
+			return base + "/hosts/" + ev.HostID
+		case ev.DeviceID != "":
+			return base + "/devices/" + ev.DeviceID
+		case ev.BoxID != "":
+			return base + "/boxes/" + ev.BoxID
+		}
+		return base + "/tenants/" + ev.TenantID
+	}
+	eng, err := core.Load(ctx, st, deliverer, log)
+	if err != nil {
+		return err
+	}
+
+	ingestSrv := &http.Server{
+		Addr:              cfg.IngestListen,
+		Handler:           ingest.New(eng, st, ca, log).Handler(),
+		TLSConfig:         pki.IngestTLSConfig(ca, prov.get),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+	}
+	overlayMux := http.NewServeMux()
+	overlayMux.Handle("/v1/", api.New(eng, st, log).Handler())
+	overlayMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = fmt.Fprintf(w, "ok %s\n", version.Version)
+	})
+	overlayMux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "excubra console: not built yet", http.StatusNotFound)
+	})
+	overlaySrv := &http.Server{
+		Addr:              cfg.OverlayListen,
+		Handler:           overlayMux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+	}
+	if cfg.OverlayTLS == "internal" {
+		host, _, _ := net.SplitHostPort(cfg.OverlayListen)
+		oc, _, _, err := ca.IssueServer(host, pki.ServerCertValidity)
+		if err != nil {
+			return err
+		}
+		overlaySrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{oc}}
+	}
+
+	errc := make(chan error, 2)
+	go func() {
+		log.Info("ingest listening", "addr", cfg.IngestListen)
+		errc <- ingestSrv.ListenAndServeTLS("", "")
+	}()
+	go func() {
+		log.Info("overlay listening", "addr", cfg.OverlayListen, "tls", cfg.OverlayTLS)
+		if overlaySrv.TLSConfig != nil {
+			errc <- overlaySrv.ListenAndServeTLS("", "")
+		} else {
+			errc <- overlaySrv.ListenAndServe()
+		}
+	}()
+	go eng.RunTicker(ctx, 10*time.Second)
+	go deliverer.Run(ctx, 5*time.Second)
+	go renewLoop(ctx, ca, caDir, ingestHost, prov, log)
+	if cfg.OverlayAllowAny {
+		go func() {
+			t := time.NewTicker(time.Minute)
+			defer t.Stop()
+			for {
+				log.Warn("EXCUBRA_OVERLAY_ALLOW_ANY is set: the console listener is not restricted to the overlay — development only")
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
+			}
+		}()
+	}
+
+	select {
+	case <-ctx.Done():
+		log.Info("shutting down")
+	case err := <-errc:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			stop()
+			return fmt.Errorf("listener: %w", err)
+		}
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = ingestSrv.Shutdown(shutdownCtx)
+	_ = overlaySrv.Shutdown(shutdownCtx)
+	return nil
+}
+
+// renewLoop reissues the ingest certificate when it approaches expiry.
+func renewLoop(ctx context.Context, ca *pki.CA, caDir, host string, prov *certProvider, log *slog.Logger) {
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			c, err := ca.LoadOrCreateServerCert(caDir, host)
+			if err != nil {
+				log.Error("ingest certificate renewal", "err", err)
+				continue
+			}
+			prov.cert.Store(&c)
+		}
+	}
+}
+
+// checkOverlayAddress refuses to bind the console to an address that is not on a
+// local interface (a typo would otherwise fail later or bind somewhere unexpected).
+func checkOverlayAddress(cfg Config) error {
+	if cfg.OverlayAllowAny {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(cfg.OverlayListen)
+	if err != nil {
+		return err
+	}
+	want := net.ParseIP(host)
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return err
+	}
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok && ipn.IP.Equal(want) {
+			return nil
+		}
+	}
+	return fmt.Errorf("EXCUBRA_OVERLAY_LISTEN %s is not an address of a local interface (is NetBird up?)", cfg.OverlayListen)
+}

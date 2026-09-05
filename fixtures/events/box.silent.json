@@ -1,0 +1,17 @@
+{
+  "event_id": "evt_01k4c0ffee0000000000000001",
+  "type": "box.silent",
+  "severity": "critical",
+  "occurred_at": "2026-09-04T09:41:30Z",
+  "received_at": "2026-09-04T09:41:30Z",
+  "since": "2026-09-04T09:38:00Z",
+  "tenant_id": "ten_kundea",
+  "site_id": "site_ludwigshafen",
+  "box_id": "box_0042",
+  "source": "server.state",
+  "details": {
+    "last_heartbeat_at": "2026-09-04T09:38:00Z",
+    "missed_heartbeats": 3
+  },
+  "link": "https://ex0.viico.internal/boxes/box_0042"
+}

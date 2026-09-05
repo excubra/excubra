@@ -3,14 +3,24 @@
 package server
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 )
 
-// ErrNotImplemented marks work packages that are scheduled but not built yet.
-var ErrNotImplemented = errors.New("not implemented yet")
+const usage = `usage: excubra server <command> [flags]
+
+  run                       start the server (default)
+  user   add|passwd|disable|enable|list
+  key    new [--count N] [--note text] [--expires-days D]
+  token  new --name X [--tenants a,b] | list | revoke <id>
+  tenant add <slug> <name> | list
+  site   add <tenant_id> <slug> <name> | list
+  backup <dir>
+  prune  --keep <days>
+
+Every command reads /etc/excubra/server.env or --env-file.
+`
 
 // Main dispatches the `excubra server` subcommands.
 func Main(args []string) error {
@@ -25,12 +35,26 @@ func Main(args []string) error {
 		if err := fs.Parse(args); err != nil {
 			return err
 		}
-		_ = envFile
-		return fmt.Errorf("server run: %w", ErrNotImplemented)
-	case "user", "key", "backup", "prune":
-		return fmt.Errorf("server %s: %w", sub, ErrNotImplemented)
+		return run(*envFile)
+	case "user":
+		return userCmd(args)
+	case "key":
+		return keyCmd(args)
+	case "token":
+		return tokenCmd(args)
+	case "tenant":
+		return tenantCmd(args)
+	case "site":
+		return siteCmd(args)
+	case "backup":
+		return backupCmd(args)
+	case "prune":
+		return pruneCmd(args)
+	case "help", "-h", "--help":
+		fmt.Print(usage)
+		return nil
 	default:
-		fmt.Fprintln(os.Stderr, "usage: excubra server [run|user|key|backup|prune] [flags]")
+		fmt.Fprint(os.Stderr, usage)
 		return fmt.Errorf("server: unknown subcommand %q", sub)
 	}
 }

@@ -1,0 +1,3 @@
+# Placeholder. The real release public key (cosign.pub of the release key pair)
+# replaces this file before the first tagged release. Until then every build
+# refuses self-updates with "no release key embedded".

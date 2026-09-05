@@ -87,3 +87,21 @@ func mustRead(b []byte) {
 		panic("id: crypto/rand failed: " + err.Error())
 	}
 }
+
+// TimeOf decodes the millisecond timestamp of an id made by NewSortable.
+func TimeOf(s string) (time.Time, bool) {
+	i := strings.IndexByte(s, '_')
+	if i < 0 || len(s)-i-1 != 26 {
+		return time.Time{}, false
+	}
+	var acc uint64
+	enc := s[i+1 : i+11] // 10 chars = 50 bits; the top 48 are the timestamp
+	for j := 0; j < len(enc); j++ {
+		v := strings.IndexByte(alphabet, enc[j])
+		if v < 0 {
+			return time.Time{}, false
+		}
+		acc = acc<<5 | uint64(v) //nolint:gosec // v is 0..31
+	}
+	return time.UnixMilli(int64(acc >> 2)).UTC(), true //nolint:gosec // 48-bit value fits int64
+}
