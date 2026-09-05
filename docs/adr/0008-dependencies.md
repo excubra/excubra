@@ -1,0 +1,53 @@
+# ADR-0008: Dependency policy and the allowed list
+
+Status: accepted · Date: 2026-09-05
+
+## Context
+
+A security tool that needs monthly patches because of somebody else's CVEs sabotages
+itself. Every dependency is an update path, an audit surface and a supply-chain risk.
+
+## Policy
+
+1. Standard library first. A dependency needs a line in the table below, with the
+   reason, before it is added. A pull request adding a module without that line is
+   rejected.
+2. Prefer modules from the Go project (`golang.org/x/…`) over third parties.
+3. Dependencies are updated in bundles with the release cycle, not ad hoc; Dependabot
+   opens the PRs, CI (`govulncheck`) fails the build on a known vulnerability.
+4. `go.sum` is authoritative; builds use `-mod=readonly`; CI verifies `go mod tidy`
+   produces no diff.
+5. Vendored web assets (JS/CSS) are checked in with their version and SHA-256 in
+   `internal/server/console/static/VENDORED.md`. Nothing is loaded from a CDN — the
+   console runs inside an overlay without internet.
+
+## Allowed list
+
+| Module | Why | Used by |
+| --- | --- | --- |
+| `modernc.org/sqlite` | pure-Go SQLite; the only way to a static binary with SQLite | server store |
+| `golang.org/x/sys` | `AF_PACKET` sockets, capability checks on Linux (Go project) | agent discovery |
+| `golang.org/x/net` | `icmp`, `ipv4`, `ipv6` helpers and `dns/dnsmessage` for mDNS (Go project) | agent discovery, checks |
+
+Explicitly **not** used, and why:
+
+| Instead of | We use |
+| --- | --- |
+| a YAML/TOML library | environment-style `KEY=value` config (ADR-0009); rules in Phase 2 will revisit this |
+| a web framework / router | `net/http` `ServeMux` with method+path patterns |
+| an ORM / query builder | `database/sql` and hand-written SQL in one place per aggregate |
+| a logging library | `log/slog` |
+| a CLI framework | `flag` |
+| `x/crypto` (argon2/bcrypt) | `crypto/pbkdf2` (SHA-256, 600 000 iterations) — OWASP-acceptable, stdlib since Go 1.24 |
+| a TOTP library | RFC 6238 is 40 lines on `crypto/hmac` |
+| cosign / Sigstore clients | `crypto/ecdsa` verification of cosign's blob signature (ADR-0006) |
+| a UUID/ULID library | `internal/id` (crypto/rand + base32) |
+| a JS framework | server-rendered `html/template` + vendored htmx (single file) |
+
+Test-only dependencies: none. Integration tests drive Docker through `os/exec`.
+
+## Consequences
+
+- `go.sum` stays short enough to read in a review.
+- Some things are hand-written that a library would give for free (TOTP, base32 ids,
+  DNS messages). Each is small, tested, and ours.

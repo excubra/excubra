@@ -1,0 +1,57 @@
+# Release pipeline (ADR-0006): the only place where release signatures are made.
+# Secrets: COSIGN_PRIVATE_KEY (cosign key pair, encrypted), COSIGN_PASSWORD.
+# The matching public key is committed as internal/sig/release.pub.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: sigstore/cosign-installer@v3
+
+      - name: build
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch go build -trimpath -mod=readonly \
+              -ldflags "-s -w -X github.com/excubra/excubra/internal/version.Version=$VERSION -X github.com/excubra/excubra/internal/version.Commit=${GITHUB_SHA::7} -X github.com/excubra/excubra/internal/version.Date=$DATE" \
+              -o dist/excubra_linux_$arch ./cmd/excubra
+          done
+          (cd dist && sha256sum excubra_linux_* > SHA256SUMS)
+
+      - name: sign
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          for f in dist/excubra_linux_amd64 dist/excubra_linux_arm64 dist/SHA256SUMS; do
+            cosign sign-blob --yes --key env://COSIGN_PRIVATE_KEY --output-signature "$f.sig" "$f"
+          done
+
+      - name: verify against the committed public key
+        run: |
+          for f in dist/excubra_linux_amd64 dist/excubra_linux_arm64 dist/SHA256SUMS; do
+            cosign verify-blob --key internal/sig/release.pub --signature "$f.sig" "$f"
+          done
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes dist/*
