@@ -1,0 +1,21 @@
+# build output
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# local state and secrets — never commit
+/var/
+/state/
+*.key
+*.pem
+!fixtures/**/*.pem
+.env
+.env.*
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

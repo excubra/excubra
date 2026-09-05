@@ -1,0 +1,85 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: tidy check
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build static binary
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          VERSION=$(git describe --tags --always --dirty)
+          go build -trimpath -mod=readonly \
+            -ldflags "-s -w -X github.com/excubra/excubra/internal/version.Version=$VERSION -X github.com/excubra/excubra/internal/version.Commit=${GITHUB_SHA::7} -X github.com/excubra/excubra/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o dist/excubra_linux_${{ matrix.arch }} ./cmd/excubra
+          file dist/excubra_linux_${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: excubra_linux_${{ matrix.arch }}
+          path: dist/excubra_linux_${{ matrix.arch }}
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: end-to-end (skips until test/integration exists)
+        run: |
+          if [ -d test/integration ]; then
+            go test -tags integration -count=1 -v ./test/integration/...
+          else
+            echo "no integration tests yet"
+          fi

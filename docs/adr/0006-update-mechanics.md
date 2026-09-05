@@ -1,0 +1,75 @@
+# ADR-0006: Signed self-update with rollback
+
+Status: accepted · Date: 2026-09-05
+
+## Context
+
+Kaseya 2021: the server that distributes updates must not be able to sign them. Updates
+must be atomic and self-healing on a box that nobody can reach if it breaks.
+
+## Decision
+
+**Signing (release pipeline only).** GitHub Actions builds the static binaries and signs
+each one with `cosign sign-blob --key` (ECDSA P-256, private key and password are
+repository secrets, never on any server). The signature is the base64 DER ECDSA
+signature over the SHA-256 digest of the binary — exactly what cosign produces for a
+blob. Released artefacts: `excubra_linux_<arch>`, `excubra_linux_<arch>.sig`,
+`SHA256SUMS`.
+
+**Verification (agent and server).** `internal/sig` verifies with the standard library
+only: `ecdsa.VerifyASN1(pub, sha256(blob), sig)` against the public key embedded at
+build time (`internal/sig/release.pub`, committed — it is public). No cosign, no
+Sigstore client, no Rekor lookup on the box. A build without a real release key (the
+placeholder in the repo) refuses every update with `sig: no release key embedded`.
+
+**Metadata (server → agent).** `GET /v1/update?os=linux&arch=arm64` answers
+`{"version", "url", "sha256", "signature", "min_agent_version"}` for the box's channel
+(`stable` or `canary`, set per box in the console), or `204 No Content`. The server
+holds no binaries; `url` points at GitHub Releases (or any HTTPS host the operator
+configures). The signature check makes the download host irrelevant for integrity.
+
+**Procedure (agent):**
+
+1. Download to `<statedir>/update/excubra.new` (10 MiB limit, 5 min timeout), verify
+   SHA-256 and the signature. Any failure: delete, report in the next heartbeat, retry
+   next day.
+2. **Trial run**: execute `excubra.new agent selftest --state-dir …`, which loads the
+   certificate and performs one heartbeat. Non-zero exit → delete, report.
+3. Swap atomically: `rename(current, current.prev)`, `rename(new, current)`, fsync the
+   directory. Write `<statedir>/update/pending` with the previous version.
+4. Exit with code 75 (`EX_TEMPFAIL`); the systemd unit has `Restart=always`, so the new
+   binary starts.
+5. **Health check after restart**: while `pending` exists, the new process must
+   complete a successful heartbeat within 5 minutes. On success it deletes `pending`
+   and keeps `current.prev` (for a manual rollback). On failure — or if the process
+   cannot start and systemd restarts it repeatedly — the next start finds `pending`
+   older than 5 minutes, renames `current.prev` back over `current`, writes
+   `rolled-back` for the heartbeat to report, and exits 75 again.
+
+Step 5 needs a process that runs at all; step 2 covers the binary that cannot start.
+Together they cover both failure classes without a separate supervisor.
+
+**Canary.** The console sets the channel per box. Release order is fixed in the operating
+docs: VIICO's own systems, then five customer boxes, then the rest; the code only knows
+channels.
+
+**Server.** Same package, same procedure; the health check is "the ingest listener
+accepts a request". Disabled inside a container (the image is the update) and enabled
+for the systemd deployment.
+
+## Consequences
+
+- The update path has no dependency beyond `net/http` and `crypto`.
+- A box that installs a bad build recovers on its own within ~10 minutes and says so.
+- Keeping `current.prev` costs one binary of disk (~15 MB) — accepted.
+
+## Rejected
+
+- **Sigstore keyless signing**: verification needs Fulcio roots and a Rekor lookup on
+  the box — network, trust roots and code we cannot audit in a day. A plain key pair is
+  auditable in an afternoon.
+- **TUF** with rollback protection and threshold keys: planned for the end-game, not
+  Phase 1 (salt: non-goals). `min_agent_version` gives basic downgrade protection now.
+- **Package manager / distro packages**: a distribution matrix and a second update
+  mechanism next to the one the agent has anyway.
+- **Server-side signing**: the Kaseya failure mode.
