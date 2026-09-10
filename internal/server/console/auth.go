@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/excubra/excubra/internal/auth"
@@ -17,11 +18,14 @@ import (
 // Session policy (ADR-0011).
 const (
 	cookieName      = "excubra_session"
+	loginCookieName = "excubra_login" // step one passed, step two pending
 	sessionIdle     = 12 * time.Hour
 	sessionAbsolute = 7 * 24 * time.Hour
+	pendingFor      = 5 * time.Minute
 	lockAfter       = 5
 	lockFor         = 15 * time.Minute
 	loginFailedMsg  = "Anmeldung fehlgeschlagen."
+	codeFailedMsg   = "Der Code passt nicht. Die App zeigt alle 30 Sekunden einen neuen."
 )
 
 type ctxKey int
@@ -30,6 +34,13 @@ const (
 	sessionKey ctxKey = iota
 	userKey
 )
+
+// pendingLogin is a login that passed the password and waits for the second factor.
+// It lives in memory only: a restart simply sends the person back to step one.
+type pendingLogin struct {
+	UserID  string
+	Expires time.Time
+}
 
 func sessionFrom(r *http.Request) store.Session {
 	s, _ := r.Context().Value(sessionKey).(store.Session)
@@ -111,60 +122,165 @@ func (s *Server) setCookie(w http.ResponseWriter, value string, maxAge int) {
 
 func (s *Server) clearCookie(w http.ResponseWriter) { s.setCookie(w, "", -1) }
 
-func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
-	s.renderLogin(w, r, "")
+func (s *Server) setLoginCookie(w http.ResponseWriter, value string, maxAge int) {
+	//nolint:gosec // same policy as the session cookie
+	http.SetCookie(w, &http.Cookie{Name: loginCookieName, Value: value, Path: "/login", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
 }
 
-func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, msg string) {
+// ---- pending logins (between password and code) -----------------------------------------
+
+var pendingMu sync.Mutex
+
+func (s *Server) putPending(hash, userID string, now time.Time) {
+	pendingMu.Lock()
+	defer pendingMu.Unlock()
+	if s.pending == nil {
+		s.pending = map[string]pendingLogin{}
+	}
+	for k, p := range s.pending { // keep the map small
+		if now.After(p.Expires) {
+			delete(s.pending, k)
+		}
+	}
+	s.pending[hash] = pendingLogin{UserID: userID, Expires: now.Add(pendingFor)}
+}
+
+func (s *Server) takePending(r *http.Request, now time.Time, consume bool) (pendingLogin, bool) {
+	c, err := r.Cookie(loginCookieName)
+	if err != nil || c.Value == "" {
+		return pendingLogin{}, false
+	}
+	pendingMu.Lock()
+	defer pendingMu.Unlock()
+	p, ok := s.pending[hashToken(c.Value)]
+	if !ok || now.After(p.Expires) {
+		delete(s.pending, hashToken(c.Value))
+		return pendingLogin{}, false
+	}
+	if consume {
+		delete(s.pending, hashToken(c.Value))
+	}
+	return p, true
+}
+
+func (s *Server) dropPending(r *http.Request) {
+	if c, err := r.Cookie(loginCookieName); err == nil && c.Value != "" {
+		pendingMu.Lock()
+		delete(s.pending, hashToken(c.Value))
+		pendingMu.Unlock()
+	}
+}
+
+// ---- pages ----------------------------------------------------------------------------------
+
+type loginData struct {
+	Step  string // credentials | code
+	Error string
+	User  string
+	TLS   bool
+}
+
+func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, d loginData) {
+	d.TLS = s.Secure
 	t := s.pages["login"]
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := t.ExecuteTemplate(w, "layout.html", page{Title: "Anmelden", Path: r.URL.Path, Data: map[string]any{"Error": msg}}); err != nil {
+	if err := t.ExecuteTemplate(w, "layout.html", page{Title: "Anmelden", Path: r.URL.Path, Data: d}); err != nil {
 		s.Log.Error("console: render login", "err", err)
 	}
 }
 
-// loginSubmit checks password and TOTP with one generic error for every failure
-// mode and locks the account after repeated failures.
+// loginPage is step one; opening it starts over.
+func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
+	s.dropPending(r)
+	s.setLoginCookie(w, "", -1)
+	s.renderLogin(w, r, loginData{Step: "credentials"})
+}
+
+// loginSubmit checks the password with one generic error for every failure mode and
+// locks the account after repeated failures; a correct password leads to the code step.
 func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.renderLogin(w, r, loginFailedMsg)
+		s.renderLogin(w, r, loginData{Step: "credentials", Error: loginFailedMsg})
 		return
 	}
 	ctx := r.Context()
 	now := s.Now()
 	name := strings.TrimSpace(r.PostForm.Get("user"))
 	password := r.PostForm.Get("password")
-	code := strings.TrimSpace(r.PostForm.Get("totp"))
 	u, err := s.Store.UserByName(ctx, name)
 	if err != nil || u.Disabled {
 		// still burn the time a real check would take
 		_ = auth.VerifyPassword("pbkdf2-sha256$600000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", password)
-		s.renderLogin(w, r, loginFailedMsg)
+		s.renderLogin(w, r, loginData{Step: "credentials", Error: loginFailedMsg})
 		return
 	}
 	if u.LockedUntil != nil && u.LockedUntil.After(now) {
-		s.renderLogin(w, r, loginFailedMsg)
+		s.renderLogin(w, r, loginData{Step: "credentials", Error: loginFailedMsg})
 		return
 	}
-	pwOK := auth.VerifyPassword(u.PasswordHash, password)
+	if !auth.VerifyPassword(u.PasswordHash, password) {
+		s.noteFailure(ctx, u, now, r)
+		s.renderLogin(w, r, loginData{Step: "credentials", Error: loginFailedMsg})
+		return
+	}
+	raw := id.Secret(32)
+	s.putPending(hashToken(raw), u.ID, now)
+	s.setLoginCookie(w, raw, int(pendingFor/time.Second))
+	http.Redirect(w, r, "/login/code", http.StatusSeeOther)
+}
+
+// loginCodePage is step two: the code from the authenticator app.
+func (s *Server) loginCodePage(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.takePending(r, s.Now(), false)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	u, err := s.Store.User(r.Context(), p.UserID)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	s.renderLogin(w, r, loginData{Step: "code", User: u.Name})
+}
+
+func (s *Server) loginCodeSubmit(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	now := s.Now()
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	p, ok := s.takePending(r, now, false)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	u, err := s.Store.User(ctx, p.UserID)
+	if err != nil || u.Disabled || (u.LockedUntil != nil && u.LockedUntil.After(now)) {
+		s.dropPending(r)
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	code := strings.TrimSpace(strings.ReplaceAll(r.PostForm.Get("totp"), " ", ""))
 	counter, totpOK := auth.VerifyTOTP(u.TOTPSecret, code, now, u.TOTPLastCounter)
-	if !pwOK || !totpOK {
-		failed := u.FailedLogins + 1
-		var locked *time.Time
-		if failed >= lockAfter {
-			t := now.Add(lockFor)
-			locked = &t
-			failed = 0
+	if !totpOK {
+		locked := s.noteFailure(ctx, u, now, r)
+		if locked {
+			s.dropPending(r)
+			s.setLoginCookie(w, "", -1)
+			s.renderLogin(w, r, loginData{Step: "credentials", Error: loginFailedMsg})
+			return
 		}
-		_ = s.Store.UpdateUserLoginState(ctx, u.ID, failed, locked, u.TOTPLastCounter)
-		_ = s.Store.Audit(ctx, now, "console", "login.failed", u.ID, clientIP(r))
-		s.renderLogin(w, r, loginFailedMsg)
+		s.renderLogin(w, r, loginData{Step: "code", User: u.Name, Error: codeFailedMsg})
 		return
 	}
 	if err := s.Store.UpdateUserLoginState(ctx, u.ID, 0, nil, counter); err != nil {
 		s.fail(w, r, err, http.StatusInternalServerError)
 		return
 	}
+	s.takePending(r, now, true)
+	s.setLoginCookie(w, "", -1)
 	raw := id.Secret(32)
 	sess := store.Session{TokenHash: hashToken(raw), UserID: u.ID, CSRF: id.Secret(24), CreatedAt: now, LastSeen: now, IP: clientIP(r)}
 	if err := s.Store.CreateSession(ctx, sess); err != nil {
@@ -176,12 +292,34 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/status", http.StatusSeeOther)
 }
 
+// noteFailure counts a failed password or code and locks after lockAfter of them.
+func (s *Server) noteFailure(ctx context.Context, u store.User, now time.Time, r *http.Request) (locked bool) {
+	failed := u.FailedLogins + 1
+	var until *time.Time
+	if failed >= lockAfter {
+		t := now.Add(lockFor)
+		until = &t
+		failed = 0
+		locked = true
+	}
+	_ = s.Store.UpdateUserLoginState(ctx, u.ID, failed, until, u.TOTPLastCounter)
+	_ = s.Store.Audit(ctx, now, "console", "login.failed", u.ID, clientIP(r))
+	return locked
+}
+
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(cookieName); err == nil {
 		_ = s.Store.DeleteSession(r.Context(), hashToken(c.Value))
 	}
 	s.clearCookie(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+// caCert hands out the internal CA certificate so a browser can trust the overlay TLS.
+func (s *Server) caCert(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+	w.Header().Set("Content-Disposition", `attachment; filename="ex0-ca.crt"`)
+	_, _ = w.Write(s.CA.CertPEM())
 }
 
 func clientIP(r *http.Request) string {

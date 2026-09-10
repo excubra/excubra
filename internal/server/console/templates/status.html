@@ -1,6 +1,6 @@
 {{define "content"}}
-<div class="topbar" style="padding-left:0;padding-right:0;padding-top:0"><div><h1>Status</h1></div><div class="actions"><span class="muted" style="font-size:12px">aktualisiert alle 30 s</span></div></div>
-<div id="status" hx-get="/status/table" hx-trigger="every 30s" hx-swap="innerHTML" style="margin-top:14px">
+<div class="hd"><div class="grow"><h1>Übersicht</h1><div class="sub">Alle Standorte auf einen Blick. Grün heißt: Die Box meldet sich und nichts steht. Aktualisiert sich alle 30 Sekunden.</div></div></div>
+<div id="status" hx-get="/status/table" hx-trigger="every 30s" hx-swap="innerHTML">
 {{template "status_table" .Data}}
 </div>
 {{end}}

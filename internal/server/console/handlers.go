@@ -58,6 +58,12 @@ type statusData struct {
 	Total   int
 	Boxes   int
 	Recent  []recentEvent
+
+	Cards       []siteCard
+	Unassigned  []boxRow
+	Devices     int
+	SitesOnline int
+	SitesTotal  int
 }
 
 // recentEvent is an event with the names the dashboard shows.
@@ -280,6 +286,9 @@ func (s *Server) buildStatus(ctx context.Context) (statusData, error) {
 	sort.Slice(d.Recent, func(i, j int) bool { return d.Recent[i].OccurredAt.After(d.Recent[j].OccurredAt) })
 	if len(d.Recent) > 20 {
 		d.Recent = d.Recent[:20]
+	}
+	if err := s.siteCards(ctx, &d); err != nil {
+		return d, err
 	}
 	return d, nil
 }
@@ -528,11 +537,15 @@ func (s *Server) hostUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hostDelete(w http.ResponseWriter, r *http.Request) {
+	back := "/status"
+	if v, err := s.Engine.HostView(r.Context(), r.PathValue("id")); err == nil && v.SiteID != "" {
+		back = "/sites/" + v.SiteID + "?tab=ueberwachung"
+	}
 	if err := s.Engine.DeleteHost(r.Context(), r.PathValue("id"), actor(r)); err != nil {
 		s.fail(w, r, err, http.StatusNotFound)
 		return
 	}
-	s.flash(w, r, "Host wird nicht mehr überwacht.", "/status")
+	s.flash(w, r, "Host wird nicht mehr überwacht.", back)
 }
 
 func (s *Server) hostMaintenance(w http.ResponseWriter, r *http.Request) {
@@ -842,108 +855,6 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 
 // ---- inventory ----------------------------------------------------------------------------
 
-type deviceRow struct {
-	store.Device
-	Monitored bool
-	HostID    string
-	Initials  string
-	Title     string
-}
-
-// initials makes the two-letter avatar of a device card from vendor or name.
-func initials(s string) string {
-	words := strings.Fields(strings.Map(func(r rune) rune {
-		if r == ',' || r == '.' || r == '(' || r == ')' {
-			return ' '
-		}
-		return r
-	}, s))
-	var out []rune
-	for _, w := range words {
-		if len(out) == 2 {
-			break
-		}
-		if r := []rune(w); len(r) > 0 && (r[0] >= 'A' && r[0] <= 'Z' || r[0] >= 'a' && r[0] <= 'z' || r[0] >= '0' && r[0] <= '9') {
-			out = append(out, r[0])
-		}
-	}
-	if len(out) == 0 {
-		return "?"
-	}
-	return strings.ToUpper(string(out))
-}
-
-type inventoryData struct {
-	Site    store.Site
-	Tenant  store.Tenant
-	Boxes   []store.Box
-	Devices []deviceRow
-	Ignored int
-}
-
-func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	site, err := s.Store.Site(ctx, r.PathValue("id"))
-	if err != nil {
-		s.fail(w, r, err, http.StatusNotFound)
-		return
-	}
-	d := inventoryData{Site: site}
-	d.Tenant, _ = s.Store.Tenant(ctx, site.TenantID)
-	boxes, err := s.Store.Boxes(ctx, site.ID)
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	for _, b := range boxes {
-		if b.RevokedAt == nil {
-			d.Boxes = append(d.Boxes, b)
-		}
-	}
-	devices, err := s.Store.Devices(ctx, site.TenantID, site.ID, time.Time{})
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	hosts, err := s.Store.Hosts(ctx, site.TenantID, "")
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	byDevice, byMAC, byIP := map[string]string{}, map[string]string{}, map[string]string{}
-	for _, h := range hosts {
-		if h.DeviceID != "" {
-			byDevice[h.DeviceID] = h.ID
-		}
-		if h.MAC != "" {
-			byMAC[strings.ToLower(h.MAC)] = h.ID
-		}
-		byIP[h.SiteID+"/"+h.Address] = h.ID
-	}
-	for _, dev := range devices {
-		row := deviceRow{Device: dev, Title: firstNonEmpty(dev.Hostname, dev.IP, dev.MAC)}
-		row.Initials = initials(firstNonEmpty(dev.Vendor, dev.Hostname, "?"))
-		if hid := firstNonEmpty(byDevice[dev.ID], byMAC[dev.MAC], byIP[dev.SiteID+"/"+dev.IP]); hid != "" {
-			row.Monitored, row.HostID = true, hid
-		}
-		if dev.Ignored {
-			d.Ignored++
-		}
-		d.Devices = append(d.Devices, row)
-	}
-	sort.SliceStable(d.Devices, func(i, j int) bool {
-		a, b := d.Devices[i], d.Devices[j]
-		if a.Ignored != b.Ignored {
-			return !a.Ignored
-		}
-		if a.Monitored != b.Monitored {
-			return !a.Monitored
-		}
-		return a.LastSeen.After(b.LastSeen)
-	})
-	s.render(w, r, "inventory", "Inventar "+site.Name, d)
-}
-
 func firstNonEmpty(v ...string) string {
 	for _, s := range v {
 		if s != "" {
@@ -959,7 +870,7 @@ func (s *Server) deviceRedirect(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, http.StatusNotFound)
 		return
 	}
-	http.Redirect(w, r, "/sites/"+dev.SiteID+"/inventory#"+dev.ID, http.StatusFound)
+	http.Redirect(w, r, "/sites/"+dev.SiteID+"?tab=netz", http.StatusFound)
 }
 
 func (s *Server) deviceMonitor(w http.ResponseWriter, r *http.Request) {
@@ -969,7 +880,7 @@ func (s *Server) deviceMonitor(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, http.StatusNotFound)
 		return
 	}
-	back := "/sites/" + dev.SiteID + "/inventory"
+	back := "/sites/" + dev.SiteID + "?tab=netz"
 	checks, err := checksFromForm(r)
 	if err != nil {
 		s.flash(w, r, err.Error(), back)
@@ -1018,7 +929,7 @@ func (s *Server) deviceIgnore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.Audit(ctx, s.Now(), actor(r), "device.ignore", dev.ID, strconv.FormatBool(ignore))
-	http.Redirect(w, r, "/sites/"+dev.SiteID+"/inventory", http.StatusSeeOther)
+	http.Redirect(w, r, "/sites/"+dev.SiteID+"?tab=netz", http.StatusSeeOther)
 }
 
 // ---- maintenance -----------------------------------------------------------------------------

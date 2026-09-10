@@ -107,10 +107,17 @@ var csrfRe = regexp.MustCompile(`name="csrf" value="([^"]+)"`)
 
 func (f *fixture) login(t *testing.T) {
 	t.Helper()
+	status, _, loc := f.post("/login", url.Values{"user": {userName}, "password": {password}}, false)
+	if status != 303 || loc != "/login/code" {
+		t.Fatalf("login step one: %d %s", status, loc)
+	}
+	if status, body := f.get("/login/code"); status != 200 || !strings.Contains(body, "Zweiter Faktor") {
+		t.Fatalf("code page: %d", status)
+	}
 	code, _ := auth.TOTPCode(f.secret, auth.Counter(time.Now()))
-	status, _, loc := f.post("/login", url.Values{"user": {userName}, "password": {password}, "totp": {code}}, false)
+	status, _, loc = f.post("/login/code", url.Values{"totp": {code}}, false)
 	if status != 303 || loc != "/status" {
-		t.Fatalf("login: %d %s", status, loc)
+		t.Fatalf("login step two: %d %s", status, loc)
 	}
 	_, body := f.get("/status")
 	m := csrfRe.FindStringSubmatch(body)
@@ -125,9 +132,13 @@ func TestLoginLogoutAndLockout(t *testing.T) {
 	if status, _ := f.get("/status"); status != 302 {
 		t.Fatalf("anonymous status: %d", status)
 	}
-	status, body, _ := f.post("/login", url.Values{"user": {userName}, "password": {"wrong password!"}, "totp": {"000000"}}, false)
+	status, body, _ := f.post("/login", url.Values{"user": {userName}, "password": {"wrong password!"}}, false)
 	if status != 200 || !strings.Contains(body, "Anmeldung fehlgeschlagen") {
 		t.Fatalf("wrong login: %d", status)
+	}
+	// the code page is not reachable without a passed first step
+	if status, _ := f.get("/login/code"); status != 302 {
+		t.Fatalf("code page without step one: %d", status)
 	}
 	f.login(t)
 	status, body = f.get("/status")
@@ -146,11 +157,10 @@ func TestLoginLogoutAndLockout(t *testing.T) {
 	}
 	// lockout after five failures, even with the right code afterwards
 	for i := 0; i < 5; i++ {
-		f.post("/login", url.Values{"user": {userName}, "password": {"nope nope nope"}, "totp": {"000000"}}, false)
+		f.post("/login", url.Values{"user": {userName}, "password": {"nope nope nope"}}, false)
 	}
-	code, _ := auth.TOTPCode(f.secret, auth.Counter(time.Now()))
-	if status, _, _ := f.post("/login", url.Values{"user": {userName}, "password": {password}, "totp": {code}}, false); status != 200 {
-		t.Fatalf("locked account logged in: %d", status)
+	if status, _, _ := f.post("/login", url.Values{"user": {userName}, "password": {password}}, false); status != 200 {
+		t.Fatalf("locked account passed step one: %d", status)
 	}
 	u, _ := f.st.UserByName(context.Background(), userName)
 	if u.LockedUntil == nil {
@@ -228,9 +238,12 @@ func TestPagesAndWorkflows(t *testing.T) {
 	if _, err := f.eng.Heartbeat(ctx, box, hb); err != nil {
 		t.Fatal(err)
 	}
-	status, body = f.get("/sites/site_lu/inventory")
-	if status != 200 || !strings.Contains(body, "00:11:22:33:44:55") || !strings.Contains(body, "Monitoren") {
-		t.Fatalf("inventory: %d", status)
+	if status, _ := f.get("/sites/site_lu/inventory"); status != 302 {
+		t.Fatalf("old inventory url should redirect: %d", status)
+	}
+	status, body = f.get("/sites/site_lu")
+	if status != 200 || !strings.Contains(body, "00:11:22:33:44:55") || !strings.Contains(body, "beobachten") || !strings.Contains(body, "Acme") {
+		t.Fatalf("site page: %d", status)
 	}
 	devs, _ := f.st.Devices(ctx, "ten_kundea", "site_lu", time.Time{})
 	if len(devs) != 1 {
@@ -257,9 +270,13 @@ func TestPagesAndWorkflows(t *testing.T) {
 	if h, _ := f.st.Host(ctx, "host_nas"); len(h.Checks) != 1 {
 		t.Fatal("host update without checks was saved")
 	}
-	_, body = f.get("/status")
+	_, body = f.get("/sites/site_lu?tab=ueberwachung")
 	if !strings.Contains(body, "NAS") || !strings.Contains(body, "Uplink") {
-		t.Fatal("status page misses the host")
+		t.Fatal("site page misses the host")
+	}
+	_, body = f.get("/status")
+	if !strings.Contains(body, `href="/sites/site_lu"`) || !strings.Contains(body, "Beobachtet") {
+		t.Fatal("overview misses the site card")
 	}
 
 	// maintenance through the host page and the maintenance page
@@ -288,6 +305,32 @@ func TestPagesAndWorkflows(t *testing.T) {
 	// delete host, revoke box, audit shows it all
 	if status, _, _ := f.post("/hosts/host_nas/delete", url.Values{}, true); status != 303 {
 		t.Fatal("delete host")
+	}
+	// one-click watch from the device card, and back
+	status, _, loc = f.post("/devices/"+devs[0].ID+"/watch", url.Values{"uplink": {"1"}}, true)
+	if status != 303 || loc != "/sites/site_lu?tab=netz" {
+		t.Fatalf("watch: %d %s", status, loc)
+	}
+	hosts, _ := f.st.Hosts(ctx, "ten_kundea", "")
+	if len(hosts) != 1 || !hosts[0].IsUplink || hosts[0].Address != "192.168.1.9" || len(hosts[0].Checks) != 1 || hosts[0].Checks[0].Type != wire.CheckICMP {
+		t.Fatalf("watched host: %+v", hosts)
+	}
+	if status, _, _ := f.post("/hosts/"+hosts[0].ID+"/uplink", url.Values{}, true); status != 303 {
+		t.Fatal("uplink toggle")
+	}
+	if h, _ := f.st.Host(ctx, hosts[0].ID); h.IsUplink {
+		t.Fatal("uplink not toggled off")
+	}
+	if status, _, loc := f.post("/hosts/"+hosts[0].ID+"/unwatch", url.Values{}, true); status != 303 || loc != "/sites/site_lu?tab=netz" {
+		t.Fatalf("unwatch: %d %s", status, loc)
+	}
+	if hosts, _ := f.st.Hosts(ctx, "ten_kundea", ""); len(hosts) != 0 {
+		t.Fatal("host still there after unwatch")
+	}
+	for _, path := range []string{"/events", "/events?range=7d&tenant=ten_kundea", "/users", "/sites/site_lu?tab=technik", "/sites/site_lu?tab=ereignisse"} {
+		if status, body := f.get(path); status != 200 || !strings.Contains(body, "Abmelden") {
+			t.Fatalf("%s: %d", path, status)
+		}
 	}
 	if status, _, _ := f.post("/boxes/box_1/revoke", url.Values{}, true); status != 303 {
 		t.Fatal("revoke box")

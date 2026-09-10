@@ -1,55 +1,31 @@
 {{define "status_table"}}
-<div class="kpis">
-  <div class="kpi ok"><span class="k">Erreichbar</span><span class="v">{{.Up}}</span><span class="s">von {{.Total}} Hosts</span></div>
-  <div class="kpi down"><span class="k">Ausgefallen</span><span class="v">{{.Down}}</span><span class="s">{{if .Down}}Tickets im CRM{{else}}alles ruhig{{end}}</span></div>
-  <div class="kpi warn"><span class="k">In Wartung</span><span class="v">{{.Maint}}</span><span class="s">unterdrückt</span></div>
-  <div class="kpi"><span class="k">Unbekannt</span><span class="v">{{.Unknown}}</span><span class="s">noch kein Ergebnis</span></div>
-  <div class="kpi {{if .Silent}}down{{else}}accent{{end}}"><span class="k">Boxen</span><span class="v">{{.Boxes}}</span><span class="s">{{if .Silent}}{{.Silent}} schweigt{{else}}alle online{{end}}</span></div>
+<div class="tiles">
+  <div class="tile{{if .SitesTotal}}{{if eq .SitesOnline .SitesTotal}} ok{{else}} bad{{end}}{{end}}"><div class="k">Standorte online</div><div class="v">{{.SitesOnline}}<small>von {{.SitesTotal}}</small></div><div class="d">{{if .Silent}}{{.Silent}} Box schweigt{{else if .SitesTotal}}alle Boxen melden sich{{else}}noch kein Standort{{end}}</div></div>
+  <div class="tile{{if .Down}} bad{{end}}"><div class="k">Hosts ausgefallen</div><div class="v">{{.Down}}</div><div class="d">{{if .Down}}Ereignisse ans CRM unterwegs{{else}}keine roten Ereignisse{{end}}</div></div>
+  <div class="tile"><div class="k">Beobachtet</div><div class="v">{{.Total}}</div><div class="d">{{.Up}} erreichbar{{if .Maint}} · {{.Maint}} in Wartung{{end}}{{if .Unknown}} · {{.Unknown}} noch ohne Ergebnis{{end}}</div></div>
+  <div class="tile"><div class="k">Geräte im Inventar</div><div class="v">{{.Devices}}</div><div class="d">über alle Standorte</div></div>
 </div>
-<div class="two">
-<div>
-{{if not .Tenants}}
-<div class="card"><div class="empty"><svg class="i"><use href="/static/icons.svg#building"/></svg><b>Noch kein Mandant</b><span>Unter <a href="/tenants">Mandanten</a> anlegen, dann eine Box zuordnen.</span></div></div>
+<div class="sites">
+{{range .Cards}}
+<a class="site {{.Class}}" href="/sites/{{.Site.ID}}">
+  <div class="t"><div><div class="name">{{.Site.Name}}</div><div class="cust">{{.Tenant.Name}}</div></div>{{if .HasBox}}{{if .Online}}<span class="pill ok live">online</span>{{else}}<span class="pill bad">Box schweigt</span>{{end}}{{else}}<span class="pill">keine Box</span>{{end}}</div>
+  <div class="stats">
+    <div><div class="k">Beobachtet</div><div class="v{{if .Down}} bad{{else if .Monitored}} ok{{end}}">{{.Monitored}}</div></div>
+    <div><div class="k">Geräte</div><div class="v">{{.Devices}}</div></div>
+    <div><div class="k">Ausfälle</div><div class="v{{if .Down}} bad{{end}}">{{.Down}}</div></div>
+  </div>
+  <div class="last">{{if .HasBox}}<span class="pill{{if .Online}} ok{{else}} bad{{end}}">Heartbeat {{ago .Box.State.LastHeartbeat}}</span>{{end}}{{if .Last}}<span class="mono">{{tsTime .Last.OccurredAt}}</span><span>{{.Last.Title}}</span>{{else}}<span>Kein Ereignis in 24 h</span>{{end}}</div>
+</a>
 {{end}}
-{{range .Tenants}}
-<h2 style="margin-top:6px">{{.Tenant.Name}} <small>{{.Tenant.ID}}</small></h2>
-{{if not .Sites}}<p class="hint">Keine Standorte.</p>{{end}}
-{{range .Sites}}
-<div class="site-head">
-  <h3>{{.Site.Name}}</h3>
-  {{range .Boxes}}<a class="badge {{if eq .State.Status "silent"}}down{{else}}ok{{end}}" href="/boxes/{{.ID}}" title="Heartbeat {{ago .State.LastHeartbeat}}">Box {{if .Name}}{{.Name}}{{else}}{{short .ID}}{{end}} · {{if eq .State.Status "silent"}}schweigt{{else}}online{{end}}</a>{{end}}
-  {{if not .Boxes}}<span class="badge">keine Box zugeordnet</span>{{end}}
-  <span class="sp"></span>
-  <a class="btn ghost small" href="/sites/{{.Site.ID}}/inventory">Inventar</a>
+<a class="site add" href="/tenants"><div><div class="plus">+</div><div>Standort anlegen</div></div></a>
 </div>
-{{if .Hosts}}
-<div class="card tight">
-<table>
-<thead><tr><th style="width:26px"></th><th>Host</th><th>Adresse</th><th>Zustand</th><th>seit</th><th>letzter Check</th><th>Checks</th></tr></thead>
-<tbody>
-{{range .Hosts}}
-<tr>
-  <td><span class="dot {{.StateClass}}"></span></td>
-  <td><a class="hostlink" href="/hosts/{{.ID}}">{{.Name}}</a> {{if .IsUplink}}<span class="tag">Uplink</span>{{end}}{{if .ParentID}} <span class="tag" title="hängt an {{.ParentID}}">↑</span>{{end}}</td>
-  <td><code>{{.Address}}</code></td>
-  <td><span class="badge {{.StateClass}}">{{.StateLabel}}</span></td>
-  <td class="muted nowrap">{{if .State.Since.IsZero}}–{{else}}{{ago .State.Since}}{{end}}</td>
-  <td class="muted nowrap">{{if .State.LastBoxTime.IsZero}}–{{else}}{{ago .State.LastBoxTime}}{{end}}</td>
-  <td class="checks">{{.Checks}}</td>
-</tr>
+{{range .Unassigned}}
+<div class="notice"><span class="pill{{if eq .State.Status "silent"}} bad{{else if .State.LastHeartbeat.IsZero}}{{else}} ok{{end}}">{{if eq .State.Status "silent"}}still seit {{ago .State.SilentSince}}{{else if .State.LastHeartbeat.IsZero}}noch kein Heartbeat{{else}}online{{end}}</span><span><b class="mono">{{.ID}}</b> ist keinem Standort zugeordnet{{if .AgentVersion}} · Agent {{.AgentVersion}}{{end}}. Zuordnen oder löschen.</span><a class="btn sm" href="/boxes/{{.ID}}">Zur Box</a></div>
 {{end}}
-</tbody>
-</table>
+{{if .Recent}}
+<div class="panel">
+  <div class="ph"><h2>Letzte Ereignisse</h2><div class="r"><a class="btn sm" href="/events">Alle</a></div></div>
+  <div class="feed">{{range $i, $e := .Recent}}{{if lt $i 10}}<div class="it"><span class="t">{{tsTime $e.OccurredAt}}</span><div><div class="w {{$e.Class}}">{{$e.Title}}</div><div class="s">{{$e.TenantName}}{{if $e.SiteName}} · {{$e.SiteName}}{{end}}{{if $e.Info}} · {{$e.Info}}{{end}}</div></div></div>{{end}}{{end}}</div>
 </div>
-{{else}}<div class="card"><div class="empty"><svg class="i"><use href="/static/icons.svg#radar"/></svg><b>Noch kein Host überwacht</b><span>Im <a href="/sites/{{.Site.ID}}/inventory">Inventar</a> Geräte auf „monitoren" setzen.</span></div></div>{{end}}
 {{end}}
-{{end}}
-</div>
-<div class="card">
-  <div class="card-h"><h2>Letzte Ereignisse</h2><span class="muted" style="font-size:12px">24 h</span></div>
-  {{if .Recent}}<div class="evlist">
-  {{range .Recent}}<div class="ev"><span class="dot {{.Class}}"></span><div><div class="t">{{.Title}}</div><div class="m">{{.TenantName}}{{if .SiteName}} · {{.SiteName}}{{end}}{{if .Info}} · {{.Info}}{{end}}</div></div><time>{{ago .OccurredAt}}</time></div>{{end}}
-  </div>{{else}}<div class="empty"><svg class="i"><use href="/static/icons.svg#inbox"/></svg><b>Alles ruhig</b><span>Keine Ereignisse in den letzten 24 Stunden.</span></div>{{end}}
-</div>
-</div>
 {{end}}

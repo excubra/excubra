@@ -1,0 +1,26 @@
+{{define "content"}}
+<div class="hd"><div class="grow"><h1>Benutzer</h1><div class="sub">Konsolen-Zugänge mit Passwort und zweitem Faktor. Anlegen und Passwort setzen geht nur per SSH auf dem Server, damit Geheimnisse nie durch die Konsole laufen.</div></div></div>
+<div class="grid2 wide">
+  <div class="panel">
+    {{if .Data}}
+    <div class="twrap"><table>
+      <thead><tr><th>Name</th><th>Zweiter Faktor</th><th>Zustand</th><th>Angelegt</th></tr></thead>
+      <tbody>
+      {{range .Data}}<tr><td><b>{{.Name}}</b><div class="sub2">{{.ID}}</div></td><td>{{if .TOTPSecret}}<span class="chip ok">TOTP aktiv</span>{{else}}<span class="chip bad">kein TOTP</span>{{end}}</td><td>{{if .Disabled}}<span class="pill bad">deaktiviert</span>{{else if .Locked}}<span class="pill bad">gesperrt bis {{tsp .LockedUntil}}</span>{{else}}<span class="pill ok">aktiv</span>{{end}}{{if .FailedLogins}} <span class="chip">{{.FailedLogins}} Fehlversuche</span>{{end}}</td><td class="mono">{{ts .CreatedAt}}</td></tr>{{end}}
+      </tbody>
+    </table></div>
+    {{else}}<div class="empty"><b>Noch kein Benutzer</b><span>Auf dem Server anlegen, dann hier anmelden.</span></div>{{end}}
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>Auf dem Server</h2></div>
+    <div class="pb">
+      <p class="hint">Neuen Zugang anlegen, Startpasswort und TOTP-Geheimnis werden einmalig ausgegeben:</p>
+      <pre>excubra server user add &lt;name&gt;</pre>
+      <p class="hint">Passwort neu setzen, Zugang sperren oder freigeben:</p>
+      <pre>excubra server user passwd &lt;name&gt;
+excubra server user disable &lt;name&gt;
+excubra server user enable &lt;name&gt;</pre>
+    </div>
+  </div>
+</div>
+{{end}}

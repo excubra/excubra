@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -146,7 +147,12 @@ func run(envFile string) error {
 	}
 	if cfg.OverlayTLS == "internal" {
 		host, _, _ := net.SplitHostPort(cfg.OverlayListen)
-		oc, _, _, err := ca.IssueServer(host, pki.ServerCertValidity)
+		names := []string{host}
+		// the console may also be reached by the name in EXCUBRA_CONSOLE_URL
+		if u, err := url.Parse(cfg.ConsoleURL); err == nil && u.Hostname() != "" && u.Hostname() != host {
+			names = append(names, u.Hostname())
+		}
+		oc, _, _, err := ca.IssueServerNames(names, pki.ServerCertValidity)
 		if err != nil {
 			return err
 		}

@@ -1,32 +1,33 @@
 {{define "content"}}
-<div class="topbar" style="padding:0"><div><h1>Mandanten &amp; Standorte</h1></div></div>
-<div class="grid2" style="margin-top:16px">
+<div class="hd"><div class="grow"><h1>Kunden</h1><div class="sub">Ein Kunde, ein oder mehrere Standorte, je Standort eine Box. Das CRM hält die Zuordnung zu seinen Kunden über die Kennung.</div></div></div>
+<div class="grid2 wide">
 <div>
-{{if not .Data}}<div class="card"><div class="empty"><svg class="i"><use href="/static/icons.svg#building"/></svg><b>Noch kein Mandant</b><span>Rechts den ersten anlegen. Das CRM hält die Zuordnung zu seinen Kunden.</span></div></div>{{end}}
+{{if not .Data}}<div class="panel"><div class="empty"><svg class="i"><use href="/static/icons.svg#building"/></svg><b>Noch kein Kunde</b><span>Rechts den ersten anlegen, dann einen Standort, dann eine Box zuordnen.</span></div></div>{{end}}
 {{range .Data}}
-<div class="card">
-  <div class="card-h"><h2>{{.Name}} <small>{{.ID}}</small></h2><span class="badge plain">{{len .Sites}} Standort{{if ne (len .Sites) 1}}e{{end}}</span></div>
-  {{if .Sites}}<table style="margin-bottom:10px"><thead><tr><th>Standort</th><th>Boxen</th><th>Hosts</th><th></th></tr></thead><tbody>
-  {{range .Sites}}<tr><td>{{.Name}} <small class="mono muted">{{.ID}}</small></td><td class="num">{{.Boxes}}</td><td class="num">{{.Hosts}}</td><td style="text-align:right"><a class="btn ghost small" href="/sites/{{.ID}}/inventory">Inventar</a></td></tr>{{end}}
-  </tbody></table>{{else}}<p class="hint">Noch kein Standort.</p>{{end}}
-  <form method="post" action="/tenants/{{.ID}}/sites" class="row">
+<div class="panel">
+  <div class="ph"><h2>{{.Name}}</h2><span class="chip mono">{{.ID}}</span><div class="r"><span class="chip">{{len .Sites}} Standort{{if ne (len .Sites) 1}}e{{end}}</span></div></div>
+  {{if .Sites}}<div class="twrap"><table>
+    <thead><tr><th>Standort</th><th>Boxen</th><th>Beobachtet</th><th></th></tr></thead>
+    <tbody>{{range .Sites}}<tr><td><b>{{.Name}}</b><div class="sub2">{{.ID}}</div></td><td class="num">{{.Boxes}}</td><td class="num">{{.Hosts}}</td><td class="right"><a class="btn sm" href="/sites/{{.ID}}">Öffnen</a></td></tr>{{end}}</tbody>
+  </table></div>{{else}}<div class="pb hint">Noch kein Standort.</div>{{end}}
+  <form method="post" action="/tenants/{{.ID}}/sites" class="pb row">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label class="field"><span>Kürzel</span><input name="slug" pattern="[a-z0-9-]{1,40}" placeholder="ludwigshafen" required></label>
-    <label class="field" style="flex:1"><span>Name</span><input name="name" placeholder="Ludwigshafen" required></label>
-    <button class="small">Standort anlegen</button>
+    <label class="field"><span>Kürzel</span><input name="slug" pattern="[a-z0-9-]{1,40}" placeholder="geschaeftsstelle" required></label>
+    <label class="field grow"><span>Name</span><input name="name" placeholder="Geschäftsstelle" required></label>
+    <button>Standort anlegen</button>
   </form>
 </div>
 {{end}}
 </div>
-<div class="card">
-  <div class="card-h"><h2>Neuer Mandant</h2></div>
-  <form method="post" action="/tenants">
+<div class="panel">
+  <div class="ph"><h2>Neuer Kunde</h2></div>
+  <form class="pb" method="post" action="/tenants">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <label class="field"><span>Kürzel</span><input name="slug" pattern="[a-z0-9-]{1,40}" placeholder="kundea" required></label>
     <label class="field"><span>Name</span><input name="name" placeholder="Kunde A GmbH" required></label>
-    <div class="actions-row"><button>Mandant anlegen</button></div>
+    <div class="actions-row"><button class="pri">Kunde anlegen</button></div>
+    <p class="hint">Das Kürzel wird Teil der Kennung (<code>ten_kundea</code>) und taucht in Webhooks und der API auf.</p>
   </form>
-  <p class="hint">Das Kürzel wird Teil der ID (<code>ten_kundea</code>) und taucht in Webhooks und der API auf.</p>
 </div>
 </div>
 {{end}}
