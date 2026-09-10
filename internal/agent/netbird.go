@@ -26,7 +26,7 @@ type Netbird struct {
 // NewNetbird returns the production controller.
 func NewNetbird(stateDir string) *Netbird {
 	return &Netbird{Binary: "netbird", StateDir: stateDir, Exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+		return exec.CommandContext(ctx, name, args...).CombinedOutput() //nolint:gosec // name is the pinned client binary, args are ours
 	}}
 }
 

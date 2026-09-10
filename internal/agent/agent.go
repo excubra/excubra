@@ -45,16 +45,16 @@ func Main(args []string) error {
 		if err := fs.Parse(args); err != nil {
 			return err
 		}
-		k := strings.TrimSpace(*key)
-		if k == "" {
-			k = ReadEnrollmentKey(*keyFile)
-		}
-		if k == "" {
-			return errors.New("agent enroll: no key given (--key) and no key file found")
-		}
 		st, err := OpenState(*stateDir)
 		if err != nil {
 			return err
+		}
+		k, from := strings.TrimSpace(*key), ""
+		if k == "" {
+			k, from = ReadEnrollmentKey(EnrollKeyPaths(st.Dir, *keyFile)...)
+		}
+		if k == "" {
+			return errors.New("agent enroll: no key given (--key) and no key file found")
 		}
 		if st.Enrolled() {
 			return fmt.Errorf("agent enroll: already enrolled as %s (delete %s to start over)", st.BoxID, st.Dir)
@@ -64,16 +64,14 @@ func Main(args []string) error {
 		if err := Enroll(ctx, st, k, *server, log); err != nil {
 			return err
 		}
-		if *key == "" {
-			DeleteEnrollmentKeyFile(*keyFile)
-		}
+		DeleteEnrollmentKeyFile(from)
 		fmt.Printf("enrolled as %s at %s\n", st.BoxID, st.Server)
 		return nil
 
 	case "run":
 		fs := flag.NewFlagSet("excubra agent run", flag.ContinueOnError)
 		stateDir := fs.String("state-dir", DefaultStateDir, "state directory")
-		enrollFile := fs.String("enroll-file", "", "enrollment key file the image left behind (default /etc/excubra/enroll)")
+		enrollFile := fs.String("enroll-file", "", "enrollment key file the image left behind (default <state-dir>/enroll, then /etc/excubra/enroll)")
 		if err := fs.Parse(args); err != nil {
 			return err
 		}
