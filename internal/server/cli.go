@@ -327,6 +327,81 @@ func siteCmd(args []string) error {
 	return fmt.Errorf("usage: excubra server site add <tenant_id> <slug> <name> | list")
 }
 
+// boxCmd: excubra server box list | assign <box_id> <site_id> | unassign <box_id>
+//
+// assign writes the box→site binding to the store. The running server rebuilds its
+// in-memory state from the store only at startup (core.Load), so it must be restarted
+// after an assign for the change to take effect — assign prints that reminder.
+func boxCmd(args []string) error {
+	fs := flag.NewFlagSet("excubra server box", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "server env file")
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
+		return err
+	}
+	st, _, err := cliStore(*envFile)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	switch {
+	case len(rest) == 1 && rest[0] == "list":
+		boxes, err := st.Boxes(ctx, "")
+		if err != nil {
+			return err
+		}
+		if len(boxes) == 0 {
+			fmt.Println("(no boxes enrolled)")
+			return nil
+		}
+		for _, b := range boxes {
+			site := b.SiteID
+			if site == "" {
+				site = "-unassigned-"
+			}
+			seen := "never"
+			if !b.LastSeen.IsZero() {
+				seen = b.LastSeen.UTC().Format("2006-01-02T15:04:05Z")
+			}
+			ver := b.AgentVersion
+			if ver == "" {
+				ver = "-"
+			}
+			plat := strings.TrimSuffix(b.OS+"/"+b.Arch, "/")
+			fmt.Printf("%s\tsite=%s\tv=%s\t%s\tseen=%s\tnb=%s\n", b.ID, site, ver, plat, seen, b.NetbirdStatus)
+		}
+		return nil
+	case len(rest) == 3 && rest[0] == "assign":
+		if _, err := st.Box(ctx, rest[1]); err != nil {
+			return fmt.Errorf("box %s: %w", rest[1], err)
+		}
+		site, err := st.Site(ctx, rest[2])
+		if err != nil {
+			return fmt.Errorf("site %s: %w", rest[2], err)
+		}
+		if err := st.AssignBox(ctx, rest[1], site.ID); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "box.assign", rest[1], site.ID)
+		fmt.Printf("%s assigned to %s (%s)\n", rest[1], site.ID, site.Name)
+		fmt.Println("restart the server to apply: systemctl restart excubra-server")
+		return nil
+	case len(rest) == 2 && rest[0] == "unassign":
+		if _, err := st.Box(ctx, rest[1]); err != nil {
+			return fmt.Errorf("box %s: %w", rest[1], err)
+		}
+		if err := st.AssignBox(ctx, rest[1], ""); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "box.assign", rest[1], "")
+		fmt.Printf("%s unassigned\n", rest[1])
+		fmt.Println("restart the server to apply: systemctl restart excubra-server")
+		return nil
+	}
+	return fmt.Errorf("usage: excubra server box list | assign <box_id> <site_id> | unassign <box_id>")
+}
+
 // backupCmd: excubra server backup <dir>
 func backupCmd(args []string) error {
 	fs := flag.NewFlagSet("excubra server backup", flag.ContinueOnError)
