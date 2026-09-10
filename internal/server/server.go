@@ -16,6 +16,7 @@ const usage = `usage: excubra server <command> [flags]
   token  new --name X [--tenants a,b] | list | revoke <id>
   tenant add <slug> <name> | list
   site   add <tenant_id> <slug> <name> | list
+  box    list | assign <box_id> <site_id> | unassign <box_id>
   backup <dir>
   prune  --keep <days>
 
@@ -46,6 +47,8 @@ func Main(args []string) error {
 		return tenantCmd(args)
 	case "site":
 		return siteCmd(args)
+	case "box":
+		return boxCmd(args)
 	case "backup":
 		return backupCmd(args)
 	case "prune":
