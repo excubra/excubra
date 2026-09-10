@@ -1,13 +1,31 @@
 {{define "content"}}
+{{with .Data}}
 <section class="login-card">
-  <div class="brand"><span class="mark">EX<b>0</b></span><span class="sub">Konsole</span></div>
-  {{with .Data}}{{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}{{end}}
-  <form method="post" action="/login" autocomplete="off">
-    <label class="field"><span>Benutzer</span><input name="user" required autofocus autocomplete="username"></label>
+  <div class="brand"><b>EX<i>0</i></b><span>Konsole</span></div>
+  <div class="steps" aria-hidden="true"><span class="{{if eq .Step "credentials"}}on{{else}}done{{end}}"></span><span class="{{if eq .Step "code"}}on{{end}}"></span></div>
+  {{if eq .Step "credentials"}}
+  <h1>Anmelden</h1>
+  <p class="sub">Benutzer und Passwort, danach der Code aus der Authenticator-App.</p>
+  {{if .Error}}<div class="flash err" role="alert">{{.Error}}</div>{{end}}
+  <form method="post" action="/login">
+    <label class="field"><span>Benutzer</span><input name="user" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false"></label>
     <label class="field"><span>Passwort</span><input name="password" type="password" required autocomplete="current-password"></label>
-    <label class="field"><span>TOTP-Code</span><input name="totp" inputmode="numeric" pattern="[0-9]{6}" required autocomplete="one-time-code" placeholder="6 Ziffern"></label>
-    <button>Anmelden</button>
+    <button class="pri">Weiter</button>
   </form>
-  <p class="hint">Konten legt der Betreiber auf dem Server an: <code>excubra server user add &lt;name&gt;</code></p>
+  {{else}}
+  <h1>Zweiter Faktor</h1>
+  <p class="sub">Angemeldet als <b>{{.User}}</b>. Jetzt den sechsstelligen Code aus der App.</p>
+  {{if .Error}}<div class="flash err" role="alert">{{.Error}}</div>{{end}}
+  <form method="post" action="/login/code">
+    <label class="field"><span>Code</span><input class="code" name="totp" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus autocomplete="one-time-code" placeholder="000 000"></label>
+    <button class="pri">Anmelden</button>
+  </form>
+  <p class="hint"><a href="/login">Anderer Benutzer</a></p>
+  {{end}}
+  <div class="login-foot">
+    {{if .TLS}}<span>Grünes Schloss: <a href="/ca.crt">EX0-Zertifikat</a> einmal in den Schlüsselbund und dort vertrauen.</span>{{else}}<span>Nur im Overlay erreichbar.</span>{{end}}
+    <span>Zugänge legt der Betreiber auf dem Server an.</span>
+  </div>
 </section>
+{{end}}
 {{end}}

@@ -189,6 +189,16 @@ func (ca *CA) IssueBox(csrPEM []byte, boxID string, validity time.Duration) ([]b
 // IssueServer signs a server certificate for the ingest host (DNS name or IP) and
 // returns it as a tls.Certificate whose chain includes the CA.
 func (ca *CA) IssueServer(host string, validity time.Duration) (tls.Certificate, []byte, []byte, error) {
+	return ca.IssueServerNames([]string{host}, validity)
+}
+
+// IssueServerNames is IssueServer for a certificate that must cover several names,
+// e.g. the overlay IP and the console hostname. The first name is the subject.
+func (ca *CA) IssueServerNames(hosts []string, validity time.Duration) (tls.Certificate, []byte, []byte, error) {
+	if len(hosts) == 0 {
+		return tls.Certificate{}, nil, nil, errors.New("pki: no host for the server certificate")
+	}
+	host := hosts[0]
 	key, err := GenerateKey()
 	if err != nil {
 		return tls.Certificate{}, nil, nil, err
@@ -207,10 +217,12 @@ func (ca *CA) IssueServer(host string, validity time.Duration) (tls.Certificate,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
-	if ip := net.ParseIP(host); ip != nil {
-		tmpl.IPAddresses = []net.IP{ip}
-	} else {
-		tmpl.DNSNames = []string{host}
+	for _, h := range hosts {
+		if ip := net.ParseIP(h); ip != nil {
+			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
+		} else if h != "" {
+			tmpl.DNSNames = append(tmpl.DNSNames, h)
+		}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.Cert, &key.PublicKey, ca.key)
 	if err != nil {

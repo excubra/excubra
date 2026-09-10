@@ -44,7 +44,8 @@ type Server struct {
 	partials *template.Template
 
 	flashMu sync.Mutex
-	flashes map[string]string // session hash → message
+	flashes map[string]string       // session hash → message
+	pending map[string]pendingLogin // login cookie hash → passed step one
 }
 
 // New wires the console. ingestHost/ingestPort go into enrollment keys.
@@ -105,11 +106,42 @@ func (s *Server) funcs() template.FuncMap {
 		"has":    func(s, sub string) bool { return strings.Contains(s, sub) },
 		"mod":    func(a, b int) int { return a % b },
 		"mulDur": func(secs int64) time.Duration { return time.Duration(secs) * time.Second },
+		"initial": func(s string) string {
+			if s == "" {
+				return "?"
+			}
+			return strings.ToUpper(s[:1])
+		},
+		"unix": func(t time.Time) int64 {
+			if t.IsZero() {
+				return 0
+			}
+			return t.Unix()
+		},
+		"deref": func(t *time.Time) time.Time {
+			if t == nil {
+				return time.Time{}
+			}
+			return *t
+		},
+		"tsShort": func(t time.Time) string {
+			if t.IsZero() {
+				return "–"
+			}
+			return t.In(s.Loc).Format("02.01. 15:04")
+		},
+		"cleanName": cleanHostname,
+		"tsTime": func(t time.Time) string {
+			if t.IsZero() {
+				return "–"
+			}
+			return t.In(s.Loc).Format("15:04:05")
+		},
 	}
 }
 
 func (s *Server) parseTemplates() error {
-	names := []string{"login", "status", "host", "boxes", "box", "tenants", "inventory", "maintenance", "webhooks", "keys", "tokens", "audit", "error"}
+	names := []string{"login", "status", "host", "boxes", "box", "tenants", "site", "events", "users", "maintenance", "webhooks", "keys", "tokens", "audit", "error"}
 	s.pages = map[string]*template.Template{}
 	for _, n := range names {
 		t, err := template.New("layout.html").Funcs(s.funcs()).ParseFS(templatesFS, "templates/layout.html", "templates/_status_table.html", "templates/"+n+".html")
@@ -133,6 +165,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("POST /login", s.loginSubmit)
+	mux.HandleFunc("GET /login/code", s.loginCodePage)
+	mux.HandleFunc("POST /login/code", s.loginCodeSubmit)
+	mux.HandleFunc("GET /ca.crt", s.caCert)
 	mux.Handle("POST /logout", s.auth(s.logout))
 
 	mux.Handle("GET /{$}", s.auth(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/status", http.StatusFound) }))
@@ -152,7 +187,15 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /tenants", s.auth(s.tenantsPage))
 	mux.Handle("POST /tenants", s.auth(s.tenantCreate))
 	mux.Handle("POST /tenants/{id}/sites", s.auth(s.siteCreate))
-	mux.Handle("GET /sites/{id}/inventory", s.auth(s.inventoryPage))
+	mux.Handle("GET /sites/{id}", s.auth(s.sitePage))
+	mux.Handle("GET /sites/{id}/inventory", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/sites/"+r.PathValue("id")+"?tab=netz", http.StatusFound)
+	}))
+	mux.Handle("GET /events", s.auth(s.eventsPage))
+	mux.Handle("GET /users", s.auth(s.usersPage))
+	mux.Handle("POST /devices/{id}/watch", s.auth(s.deviceWatch))
+	mux.Handle("POST /hosts/{id}/unwatch", s.auth(s.hostUnwatch))
+	mux.Handle("POST /hosts/{id}/uplink", s.auth(s.hostUplink))
 	mux.Handle("GET /devices/{id}", s.auth(s.deviceRedirect))
 	mux.Handle("POST /devices/{id}/monitor", s.auth(s.deviceMonitor))
 	mux.Handle("POST /devices/{id}/ignore", s.auth(s.deviceIgnore))
@@ -198,13 +241,22 @@ type page struct {
 	Path    string
 	Data    any
 	Version string
+	Nav     navCounts
+	Crumbs  []crumb
+	Search  bool
+	Clock   string
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, name, title string, data any) {
+	s.renderOpts(w, r, name, title, data, pageOpts{})
+}
+
+func (s *Server) renderOpts(w http.ResponseWriter, r *http.Request, name, title string, data any, o pageOpts) {
 	sess := sessionFrom(r)
-	p := page{Title: title, CSRF: sess.CSRF, Path: r.URL.Path, Data: data, Version: version.Version}
+	p := page{Title: title, CSRF: sess.CSRF, Path: r.URL.Path, Data: data, Version: version.Version, Crumbs: o.Crumbs, Search: o.Search, Clock: s.Now().In(s.Loc).Format("15:04:05")}
 	if u := userFrom(r); u != nil {
 		p.User = u.Name
+		p.Nav = s.navCounts(r.Context())
 	}
 	if sess.TokenHash != "" {
 		p.Flash = s.takeFlash(sess.TokenHash)

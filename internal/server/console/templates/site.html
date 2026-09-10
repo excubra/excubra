@@ -1,0 +1,206 @@
+{{define "content"}}
+{{with .Data}}
+<div class="hd">
+  <div class="grow">
+    <div class="sub">{{.Tenant.Name}}</div>
+    <h1>{{.Site.Name}}
+      {{if .Box}}{{if .Online}}<span class="pill ok big live">online</span>{{else}}<span class="pill bad big">Box schweigt</span>{{end}}{{else}}<span class="pill big">keine Box</span>{{end}}
+    </h1>
+    <div class="meta">
+      {{if .Box}}<span>Box <b class="mono">{{if .Box.Name}}{{.Box.Name}}{{else}}{{.Box.ID}}{{end}}</b></span><span>Heartbeat <b data-ago="{{unix .Box.State.LastHeartbeat}}">{{ago .Box.State.LastHeartbeat}}</b></span>{{end}}
+      <span>Geräte <b>{{len .Devices}}</b></span>
+      <span>Beobachtet <b>{{.Monitored}}</b></span>
+      {{if .Down}}<span>Ausgefallen <b class="err">{{.Down}}</b></span>{{else}}<span>Ausfälle <b>0</b></span>{{end}}
+    </div>
+  </div>
+  <div class="actions"><a class="btn" href="/maintenance"><svg class="i"><use href="/static/icons.svg#wrench"/></svg>Wartung planen</a></div>
+</div>
+
+<div class="tabs" data-tabs="site">
+  <button data-t="netz" {{if eq .Tab "netz"}}class="on"{{end}}>Netz <span class="n">{{len .Devices}}</span></button>
+  <button data-t="ueberwachung" {{if eq .Tab "ueberwachung"}}class="on"{{end}}>Überwachung <span class="n">{{.Monitored}}</span></button>
+  <button data-t="ereignisse" {{if eq .Tab "ereignisse"}}class="on"{{end}}>Ereignisse <span class="n">{{len .Events}}</span></button>
+  <button data-t="technik" {{if eq .Tab "technik"}}class="on"{{end}}>Box &amp; Technik</button>
+</div>
+
+<!-- ===== Netz ===== -->
+<div class="tabpane {{if eq .Tab "netz"}}on{{end}}" data-pane="site:netz">
+<div class="netz">
+<div>
+  {{if not .Box}}<div class="notice bad"><span class="pill bad">keine Box</span><span>Diesem Standort ist keine Box zugeordnet. Ohne Box kein Inventar und keine Prüfungen.</span><a class="btn sm" href="/boxes">Zu den Boxen</a></div>{{end}}
+  <div class="toolbar">
+    <label class="search"><svg class="i"><use href="/static/icons.svg#search"/></svg><input id="dq" placeholder="Name, IP, MAC, Hersteller" aria-label="Geräte filtern"></label>
+    <div id="fchips">
+      <button class="fchip on" data-f="all">Alle <span class="n">{{len .Devices}}</span></button>
+      {{range .Kinds}}<button class="fchip" data-f="{{.Key}}">{{.Label}} <span class="n">{{.N}}</span></button>{{end}}
+      <button class="fchip" data-f="mon">Beobachtet <span class="n">{{.Monitored}}</span></button>
+    </div>
+    <span class="spacer"></span>
+    {{if .Box}}<span class="sub">{{if eq .Box.DiscoveryMode "sweep"}}Sweep alle 15 min{{else}}nur passiv{{end}}{{if .Ignored}} · {{.Ignored}} ignoriert{{end}}</span>{{end}}
+  </div>
+  {{if .Devices}}
+  <div class="devs" id="devs">
+  {{range .Devices}}
+  <div class="dev{{if .Monitored}} mon{{end}}{{if .Ignored}} ignored{{end}}" data-kind="{{.Kind}}" data-mon="{{if .Monitored}}1{{else}}0{{end}}" data-text="{{.Text}}">
+    <div class="ico"><svg class="i"><use href="/static/icons.svg#{{.Kind}}"/></svg></div>
+    <div class="nm">
+      {{if .Monitored}}<a href="/hosts/{{.HostID}}" title="{{.Name}}">{{.Name}}</a>{{else}}<span class="t" title="{{.Name}}">{{.Name}}</span>{{end}}
+      {{if .IsUplink}}<span class="chip ok">Uplink</span>{{end}}
+      {{if .IsBox}}<span class="chip">diese Box</span>{{end}}
+      {{if and .Monitored (eq .StateClass "down")}}<span class="chip bad">ausgefallen</span>{{end}}
+    </div>
+    {{if .IsBox}}<button class="sw" disabled aria-label="Die Box selbst wird nicht beobachtet" title="Die Box selbst wird nicht beobachtet"></button>
+    {{else if .Monitored}}<form method="post" action="/hosts/{{.HostID}}/unwatch"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="sw on" role="switch" aria-checked="true" aria-label="{{.Name}} nicht mehr beobachten" title="Nicht mehr beobachten"></button></form>
+    {{else}}<form method="post" action="/devices/{{.ID}}/watch"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="sw" role="switch" aria-checked="false" aria-label="{{.Name}} beobachten" title="Beobachten: jede Minute per Ping prüfen"{{if not .IP}} disabled{{end}}></button></form>{{end}}
+    <div class="ad"><span>{{if .IP}}{{.IP}}{{else}}<span class="none">keine IPv4</span>{{end}}</span><span class="mac">{{.MAC}}</span></div>
+    <div class="ven"><span class="v">{{if .Vendor}}{{.Vendor}}{{else}}Hersteller unbekannt{{end}}{{if and .Hostname (ne (cleanName .Hostname) .Name)}} · {{.Hostname}}{{end}}</span><span class="seen{{if .GoneAt}} bad{{end}}">{{if .GoneAt}}weg seit {{ago (deref .GoneAt)}}{{else}}seit {{tsShort .FirstSeen}}{{end}}</span></div>
+  </div>
+  {{end}}
+  </div>
+  <div class="empty" id="devs-empty" hidden><b>Nichts gefunden</b><span>Kein Gerät passt zum Filter.</span></div>
+  {{else}}
+  <div class="panel"><div class="empty"><svg class="i"><use href="/static/icons.svg#radar"/></svg><b>Noch keine Geräte gesehen</b><span>Die Box meldet Geräte mit jedem Heartbeat; der erste Sweep läuft eine halbe Minute nach dem Start.</span></div></div>
+  {{end}}
+</div>
+<aside class="aside">
+  <div class="panel">
+    <div class="ph"><h2>Beobachtet</h2><div class="r">{{if .Down}}<span class="chip bad">{{.Down}} ausgefallen</span>{{else if .Monitored}}<span class="chip ok">{{.Up}} erreichbar</span>{{end}}</div></div>
+    <div class="mini">{{range .Hosts}}<a class="it" href="/hosts/{{.ID}}"><span class="dot {{.StateClass}}"></span><span>{{.Name}}</span>{{if .IsUplink}}<span class="chip ok">Uplink</span>{{end}}<span class="ip">{{.Address}}</span></a>{{else}}<div class="it sub">Noch nichts eingeschaltet. Links ein Gerät auf „beobachten" stellen.</div>{{end}}</div>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>Letzte 24 Stunden</h2><div class="r"><button class="btn sm" data-goto-tab="ereignisse">Alle</button></div></div>
+    <div class="feed">{{range $i, $e := .Events}}{{if lt $i 8}}<div class="it"><span class="t">{{tsTime $e.OccurredAt}}</span><div><div class="w {{$e.Class}}">{{$e.Title}}</div>{{if $e.Info}}<div class="s">{{$e.Info}}</div>{{end}}</div></div>{{end}}{{else}}<div class="it"><span class="t">–</span><div class="s">Kein Ereignis in den letzten 24 Stunden.</div></div>{{end}}</div>
+  </div>
+  {{if .Box}}
+  <div class="panel">
+    <div class="ph"><h2>Box</h2><div class="r">{{if .Online}}<span class="pill ok">online</span>{{else}}<span class="pill bad">schweigt</span>{{end}}</div></div>
+    <div class="pb kv">
+      <div class="k">Heartbeat</div><div class="v" data-ago="{{unix .Box.State.LastHeartbeat}}">{{ago .Box.State.LastHeartbeat}}</div>
+      <div class="k">Agent</div><div class="v">{{if .Box.AgentVersion}}{{.Box.AgentVersion}}{{else}}–{{end}} · {{.Box.Channel}}</div>
+      <div class="k">NetBird</div><div class="v mono">{{if .Box.NetbirdIP}}{{.Box.NetbirdIP}}{{else}}–{{end}}</div>
+      <div class="k">Platte frei</div><div class="v">{{if .Box.DiskTotalBytes}}{{gb .Box.DiskFreeBytes}} von {{gb .Box.DiskTotalBytes}} GB{{else}}–{{end}}</div>
+    </div>
+  </div>
+  {{end}}
+</aside>
+</div>
+</div>
+
+<!-- ===== Überwachung ===== -->
+<div class="tabpane {{if eq .Tab "ueberwachung"}}on{{end}}" data-pane="site:ueberwachung">
+<div class="grid2 wide">
+  <div>
+    {{if .Hosts}}
+    <div class="hosts">
+    {{range .Hosts}}
+    <a class="host {{.StateClass}}" href="/hosts/{{.ID}}">
+      <div class="t"><div><div class="nm">{{.Name}}</div><div class="ip">{{.Address}}</div></div>{{if .IsUplink}}<span class="chip ok">Uplink</span>{{end}}<span class="pill{{if eq .StateClass "up"}} ok{{else if eq .StateClass "down"}} bad{{end}}">{{.StateLabel}}</span></div>
+      <div class="row2">
+        <span>{{if .State.Since.IsZero}}noch keine Prüfung{{else}}seit <b>{{ago .State.Since}}</b>{{if eq .StateClass "up"}} ohne Ausfall{{else if eq .StateClass "down"}} nicht erreichbar{{end}}{{end}}</span>
+        <span>Prüfung <b>{{.Checks}}</b></span>
+        <span class="up">{{if .IsUplink}}meldet für alle dahinter{{else if .UplinkName}}hinter {{.UplinkName}}{{end}}</span>
+      </div>
+    </a>
+    {{end}}
+    </div>
+    {{else}}
+    <div class="panel"><div class="empty"><svg class="i"><use href="/static/icons.svg#radar"/></svg><b>Noch nichts beobachtet</b><span>Im Reiter „Netz" ein Gerät einschalten, dann prüft die Box es jede Minute.</span></div></div>
+    {{end}}
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>So entscheidet EX0</h2></div>
+    <div class="pb rules">
+      <div class="rule"><b>3 Prüfungen verpasst</b>Host gilt als ausgefallen, Ereignis <span class="mono">host.down</span>.</div>
+      <div class="rule"><b>2 Erfolge in Folge</b>Host ist wieder da, Ereignis <span class="mono">host.up</span>.</div>
+      <div class="rule"><b>Uplink weg</b>Alles dahinter wird nicht einzeln gemeldet, nur der Uplink.</div>
+      <div class="rule"><b>Box still 3½ Minuten</b>Hosts werden eingefroren, Ereignis <span class="mono">box.silent</span>.</div>
+      <div class="rule"><b>Wartungsfenster</b>Kein Ereignis, solange das Fenster läuft.</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ===== Ereignisse ===== -->
+<div class="tabpane {{if eq .Tab "ereignisse"}}on{{end}}" data-pane="site:ereignisse">
+<div class="panel">
+  <div class="ph"><h2>Letzte 24 Stunden</h2><div class="r">{{if .Red}}<span class="chip bad">{{.Red}} rot</span>{{end}}<button class="fchip" data-evfilter="red">Nur rot</button><a class="btn sm" href="/events">Alle Standorte</a></div></div>
+  {{if .Events}}
+  <div class="twrap"><table>
+    <thead><tr><th>Zeit</th><th>Ereignis</th><th>Was</th><th>Details</th></tr></thead>
+    <tbody>
+    {{range .Events}}<tr data-sev="{{if eq .Class "down"}}bad{{else}}{{.Class}}{{end}}"{{if eq .Class "down"}} class="bad"{{end}}><td class="ev-t"><b>{{tsTime .OccurredAt}}</b></td><td><span class="chip mono{{if eq .Class "down"}} bad{{else if eq .Class "ok"}} ok{{end}}">{{.Type}}</span></td><td>{{.Title}}</td><td class="t2">{{.Info}}</td></tr>{{end}}
+    </tbody>
+  </table></div>
+  {{else}}<div class="empty"><svg class="i"><use href="/static/icons.svg#inbox"/></svg><b>Alles ruhig</b><span>Kein Ereignis in den letzten 24 Stunden.</span></div>{{end}}
+</div>
+</div>
+
+<!-- ===== Box & Technik ===== -->
+<div class="tabpane {{if eq .Tab "technik"}}on{{end}}" data-pane="site:technik">
+{{if .Box}}
+<div class="tiles">
+  <div class="tile {{if .Online}}ok{{else}}bad{{end}}"><div class="k">Heartbeat</div><div class="v md" data-ago="{{unix .Box.State.LastHeartbeat}}">{{ago .Box.State.LastHeartbeat}}</div><div class="d">{{ts .Box.State.LastHeartbeat}}</div></div>
+  <div class="tile"><div class="k">Agent</div><div class="v md">{{if .Box.AgentVersion}}{{.Box.AgentVersion}}{{else}}–{{end}}</div><div class="d">Kanal {{.Box.Channel}} · {{.Box.OS}}/{{.Box.Arch}}</div></div>
+  <div class="tile {{if eq .Box.NetbirdStatus "connected"}}ok{{end}}"><div class="k">NetBird</div><div class="v md">{{if eq .Box.NetbirdStatus "connected"}}verbunden{{else if .Box.NetbirdStatus}}{{.Box.NetbirdStatus}}{{else}}nicht gemeldet{{end}}</div><div class="d mono">{{if .Box.NetbirdIP}}{{.Box.NetbirdIP}}{{else}}kein Overlay{{end}}</div></div>
+  <div class="tile"><div class="k">Platte frei</div><div class="v md">{{if .Box.DiskTotalBytes}}{{gb .Box.DiskFreeBytes}} GB{{else}}–{{end}}</div><div class="d">{{if .Box.DiskTotalBytes}}von {{gb .Box.DiskTotalBytes}} GB · Uptime {{dur (mulDur .Box.UptimeS)}}{{end}}</div></div>
+</div>
+<div class="grid2 wide">
+  <div class="panel">
+    <div class="ph"><h2>Box</h2><div class="r"><span class="chip mono">{{.Box.ID}}</span></div></div>
+    <div class="pb kv">
+      <div class="k">Name</div><div class="v">{{if .Box.Name}}{{.Box.Name}}{{else}}–{{end}}</div>
+      <div class="k">Enrollt</div><div class="v">{{ts .Box.EnrolledAt}}</div>
+      <div class="k">Hardware</div><div class="v mono">{{.Box.HWID}}</div>
+      <div class="k">Zertifikat</div><div class="v"><span class="mono">{{.Box.CertSerial}}</span><br><span class="sub">gültig bis {{ts .Box.CertNotAfter}}, verlängert sich selbst</span></div>
+      <div class="k">CA-Fingerprint</div><div class="v mono">{{.Fingerprint}}</div>
+      <div class="k">Discovery</div><div class="v">{{if eq .Box.DiscoveryMode "sweep"}}passiv + ARP-Sweep alle 15 min im eigenen Netz{{else}}nur passiv{{end}}{{if .Box.DiscoverySubnets}} · ICMP-Sweep: {{join .Box.DiscoverySubnets ", "}}{{end}}</div>
+    </div>
+    <details class="tech"><summary>Zuordnung ändern</summary>
+      <div class="pb">
+        <form method="post" action="/boxes/{{.Box.ID}}/assign" class="row">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <label class="field grow"><span>Standort</span><select name="site_id"><option value="">nicht zugeordnet</option>{{range .Sites}}<option value="{{.ID}}"{{if eq .ID $.Data.Site.ID}} selected{{end}}>{{index $.Data.TenantNames .TenantID}} · {{.Name}}</option>{{end}}</select></label>
+          <button>Zuordnen</button>
+        </form>
+      </div>
+    </details>
+    <details class="tech"><summary>NetBird-Übergabe{{if .Netbird}} · {{if .Netbird.ClaimedAt}}abgeholt{{else}}wartet{{end}}{{end}}</summary>
+      <div class="pb">
+        {{if .Netbird}}<p class="hint">Hinterlegt für <code>{{.Netbird.ManagementURL}}</code>{{if .Netbird.ClaimedAt}}, abgeholt {{tsp .Netbird.ClaimedAt}}{{else}}, wird beim nächsten Config-Pull einmalig abgeholt{{end}}.</p>
+        <form method="post" action="/boxes/{{.Box.ID}}/netbird" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="clear"><button class="sm">Entfernen</button></form>
+        {{else}}<p class="hint">{{if eq .Box.NetbirdStatus "connected"}}Nicht nötig: Die Box ist bereits im Kunden-Stack verbunden.{{else}}Kein Schlüssel hinterlegt. Die Box holt ihn genau einmal ab und setzt sich damit in den Kunden-Stack.{{end}}</p>{{end}}
+        <form method="post" action="/boxes/{{.Box.ID}}/netbird" class="row">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <label class="field grow"><span>Management-URL</span><input name="management_url" placeholder="https://kunde.vpn.viico-cloud.de"></label>
+          <label class="field grow"><span>Setup-Key</span><input name="setup_key" autocomplete="off"></label>
+          <button class="sm">Hinterlegen</button>
+        </form>
+      </div>
+    </details>
+    <details class="tech"><summary>Gefahrenzone</summary>
+      <div class="pb acts">
+        <form method="post" action="/boxes/{{.Box.ID}}/revoke" data-confirm="Zertifikat sperren? Die Box kann sich danach nicht mehr melden."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger sm">Zertifikat widerrufen</button></form>
+        <form method="post" action="/boxes/{{.Box.ID}}/delete" data-confirm="Box samt Hosts löschen?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger sm">Box löschen</button></form>
+      </div>
+    </details>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>Einstellungen</h2></div>
+    <form class="pb" method="post" action="/boxes/{{.Box.ID}}/settings">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <label class="field"><span>Name der Box</span><input name="name" value="{{.Box.Name}}" placeholder="z. B. kft-box"></label>
+      <div class="row">
+        <label class="field"><span>Update-Kanal</span><select name="channel"><option value="stable"{{if eq .Box.Channel "stable"}} selected{{end}}>stable</option><option value="canary"{{if eq .Box.Channel "canary"}} selected{{end}}>canary</option></select></label>
+        <label class="field grow"><span>Discovery</span><select name="discovery_mode"><option value="sweep"{{if eq .Box.DiscoveryMode "sweep"}} selected{{end}}>passiv + Sweep alle 15 min</option><option value="passive"{{if eq .Box.DiscoveryMode "passive"}} selected{{end}}>nur passiv</option></select></label>
+      </div>
+      <label class="field"><span>Weitere Subnetze für den ICMP-Sweep (CIDR je Zeile, max. 8)</span><textarea name="discovery_subnets" rows="3">{{.Subnets}}</textarea></label>
+      <div class="actions-row"><button class="pri">Speichern</button></div>
+    </form>
+  </div>
+</div>
+{{else}}
+<div class="panel"><div class="empty"><svg class="i"><use href="/static/icons.svg#box"/></svg><b>Keine Box an diesem Standort</b><span>Unter <a href="/boxes">Boxen</a> eine enrollte Box diesem Standort zuordnen.</span></div></div>
+{{end}}
+</div>
+{{end}}
+{{end}}
