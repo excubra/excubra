@@ -56,6 +56,72 @@ type statusData struct {
 	Maint   int
 	Silent  int
 	Total   int
+	Boxes   int
+	Recent  []recentEvent
+}
+
+// recentEvent is an event with the names the dashboard shows.
+type recentEvent struct {
+	event.Event
+	TenantName string
+	SiteName   string
+	Class      string // ok | down | warn | muted
+	Title      string
+	Info       string // the one detail worth a line: failed checks, silence duration
+}
+
+func eventInfo(ev event.Event) string {
+	if ev.Details == nil {
+		return ""
+	}
+	switch ev.Type {
+	case event.HostDown:
+		if f, ok := ev.Details["checks_failed"].([]any); ok && len(f) > 0 {
+			parts := make([]string, 0, len(f))
+			for _, x := range f {
+				parts = append(parts, fmt.Sprint(x))
+			}
+			return "fehlgeschlagen: " + strings.Join(parts, ", ")
+		}
+		if f, ok := ev.Details["checks_failed"].([]string); ok && len(f) > 0 {
+			return "fehlgeschlagen: " + strings.Join(f, ", ")
+		}
+	case event.HostUp:
+		if d, ok := ev.Details["down_for_s"]; ok {
+			return fmt.Sprintf("war %s nicht erreichbar", humanDur(time.Duration(toInt64(d))*time.Second))
+		}
+	case event.BoxBack:
+		if d, ok := ev.Details["silent_for_s"]; ok {
+			return fmt.Sprintf("war %s still", humanDur(time.Duration(toInt64(d))*time.Second))
+		}
+	case event.BoxSilent:
+		if d, ok := ev.Details["missed_heartbeats"]; ok {
+			return fmt.Sprintf("%d Heartbeats ausgeblieben", toInt64(d))
+		}
+	}
+	return ""
+}
+
+func toInt64(v any) int64 {
+	switch x := v.(type) {
+	case int:
+		return int64(x)
+	case int64:
+		return x
+	case float64:
+		return int64(x)
+	}
+	return 0
+}
+
+// hourBucket is one hour of a host's check history for the availability bars.
+type hourBucket struct {
+	Label  string
+	Rounds int
+	Failed int
+	Pct    float64 // -1 when there is no data
+	Class  string  // ok | warn | down | empty
+	Height int     // 4..100, bar height in percent of the chart
 }
 
 func classify(v core.HostView) (string, string) {
@@ -172,6 +238,7 @@ func (s *Server) buildStatus(ctx context.Context) (statusData, error) {
 		}
 		boxesBySite[b.SiteID] = append(boxesBySite[b.SiteID], r)
 	}
+	d.Boxes = len(boxesBySite)
 	hostsBySite := map[string][]hostRow{}
 	for _, v := range views {
 		r := s.hostRow(v)
@@ -188,6 +255,7 @@ func (s *Server) buildStatus(ctx context.Context) (statusData, error) {
 		d.Total++
 		hostsBySite[v.SiteID] = append(hostsBySite[v.SiteID], r)
 	}
+	now := s.Now()
 	for _, t := range tenants {
 		tb := tenantBlock{Tenant: t}
 		for _, st := range sites {
@@ -197,8 +265,70 @@ func (s *Server) buildStatus(ctx context.Context) (statusData, error) {
 			tb.Sites = append(tb.Sites, siteBlock{Site: st, Boxes: boxesBySite[st.ID], Hosts: hostsBySite[st.ID]})
 		}
 		d.Tenants = append(d.Tenants, tb)
+		evs, err := s.Store.Events(ctx, t.ID, now.Add(-24*time.Hour), now.Add(time.Minute), "", 50)
+		if err != nil {
+			return d, err
+		}
+		for _, ev := range evs {
+			re := recentEvent{Event: ev, TenantName: t.Name, Class: eventClass(ev.Type), Title: eventTitle(ev), Info: eventInfo(ev)}
+			if site, ok := sm[ev.SiteID]; ok {
+				re.SiteName = site.Name
+			}
+			d.Recent = append(d.Recent, re)
+		}
+	}
+	sort.Slice(d.Recent, func(i, j int) bool { return d.Recent[i].OccurredAt.After(d.Recent[j].OccurredAt) })
+	if len(d.Recent) > 20 {
+		d.Recent = d.Recent[:20]
 	}
 	return d, nil
+}
+
+func eventClass(t event.Type) string {
+	switch t {
+	case event.HostDown, event.BoxSilent:
+		return "down"
+	case event.HostUp, event.BoxBack:
+		return "ok"
+	case event.MaintenanceStarted, event.MaintenanceEnded, event.DeviceNew:
+		return "warn"
+	default:
+		return "muted"
+	}
+}
+
+func eventTitle(ev event.Event) string {
+	name := ev.HostID
+	if ev.Host != nil && ev.Host.Name != "" {
+		name = ev.Host.Name
+	}
+	switch ev.Type {
+	case event.HostDown:
+		return name + " ist ausgefallen"
+	case event.HostUp:
+		return name + " ist wieder erreichbar"
+	case event.BoxSilent:
+		return "Box " + ev.BoxID + " schweigt"
+	case event.BoxBack:
+		return "Box " + ev.BoxID + " meldet sich wieder"
+	case event.DeviceNew:
+		if ev.Device != nil {
+			return "Neues Gerät " + firstNonEmpty(ev.Device.Hostname, ev.Device.IP)
+		}
+		return "Neues Gerät"
+	case event.DeviceGone:
+		if ev.Device != nil {
+			return "Gerät verschwunden: " + firstNonEmpty(ev.Device.Hostname, ev.Device.IP)
+		}
+		return "Gerät verschwunden"
+	case event.MaintenanceStarted:
+		return "Wartung begonnen"
+	case event.MaintenanceEnded:
+		return "Wartung beendet"
+	case event.TestPing:
+		return "Test-Ereignis"
+	}
+	return string(ev.Type)
 }
 
 func (s *Server) statusPage(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +408,9 @@ type hostData struct {
 	Rounds       int
 	Failed       int
 	Availability float64
-	Events       []event.Event
+	Events       []recentEvent
+	Hours        []hourBucket
+	Tab          string
 }
 
 func (s *Server) hostPage(w http.ResponseWriter, r *http.Request) {
@@ -317,17 +449,52 @@ func (s *Server) hostPage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, http.StatusInternalServerError)
 		return
 	}
+	byHour := map[time.Time]store.Rollup{}
 	for _, ru := range rollups {
 		d.Rounds += ru.Rounds
 		d.Failed += ru.Failed
+		cur := byHour[ru.Hour]
+		cur.Rounds += ru.Rounds
+		cur.Failed += ru.Failed
+		byHour[ru.Hour] = cur
 	}
 	d.Availability = 100
 	if d.Rounds > 0 {
 		d.Availability = 100 * float64(d.Rounds-d.Failed) / float64(d.Rounds)
 	}
-	if d.Events, err = s.Store.Events(ctx, v.TenantID, now.Add(-24*time.Hour), now.Add(time.Minute), v.ID, 100); err != nil {
+	start := now.UTC().Truncate(time.Hour).Add(-23 * time.Hour)
+	for i := 0; i < 24; i++ {
+		h := start.Add(time.Duration(i) * time.Hour)
+		b := hourBucket{Label: h.In(s.Loc).Format("15:04"), Pct: -1, Class: "empty", Height: 4}
+		if ru, ok := byHour[h]; ok && ru.Rounds > 0 {
+			b.Rounds, b.Failed = ru.Rounds, ru.Failed
+			b.Pct = 100 * float64(ru.Rounds-ru.Failed) / float64(ru.Rounds)
+			b.Height = int(b.Pct)
+			if b.Height < 6 {
+				b.Height = 6
+			}
+			switch {
+			case b.Pct >= 99.5:
+				b.Class = "ok"
+			case b.Pct >= 90:
+				b.Class = "warn"
+			default:
+				b.Class = "down"
+			}
+		}
+		d.Hours = append(d.Hours, b)
+	}
+	evs, err := s.Store.Events(ctx, v.TenantID, now.Add(-24*time.Hour), now.Add(time.Minute), v.ID, 100)
+	if err != nil {
 		s.fail(w, r, err, http.StatusInternalServerError)
 		return
+	}
+	for i := len(evs) - 1; i >= 0; i-- { // newest first
+		d.Events = append(d.Events, recentEvent{Event: evs[i], TenantName: d.Tenant.Name, SiteName: d.Site.Name, Class: eventClass(evs[i].Type), Title: eventTitle(evs[i]), Info: eventInfo(evs[i])})
+	}
+	d.Tab = r.URL.Query().Get("tab")
+	if d.Tab != "verlauf" && d.Tab != "einstellungen" {
+		d.Tab = "allgemein"
 	}
 	s.render(w, r, "host", v.Name, d)
 }
@@ -679,6 +846,31 @@ type deviceRow struct {
 	store.Device
 	Monitored bool
 	HostID    string
+	Initials  string
+	Title     string
+}
+
+// initials makes the two-letter avatar of a device card from vendor or name.
+func initials(s string) string {
+	words := strings.Fields(strings.Map(func(r rune) rune {
+		if r == ',' || r == '.' || r == '(' || r == ')' {
+			return ' '
+		}
+		return r
+	}, s))
+	var out []rune
+	for _, w := range words {
+		if len(out) == 2 {
+			break
+		}
+		if r := []rune(w); len(r) > 0 && (r[0] >= 'A' && r[0] <= 'Z' || r[0] >= 'a' && r[0] <= 'z' || r[0] >= '0' && r[0] <= '9') {
+			out = append(out, r[0])
+		}
+	}
+	if len(out) == 0 {
+		return "?"
+	}
+	return strings.ToUpper(string(out))
 }
 
 type inventoryData struct {
@@ -729,7 +921,8 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request) {
 		byIP[h.SiteID+"/"+h.Address] = h.ID
 	}
 	for _, dev := range devices {
-		row := deviceRow{Device: dev}
+		row := deviceRow{Device: dev, Title: firstNonEmpty(dev.Hostname, dev.IP, dev.MAC)}
+		row.Initials = initials(firstNonEmpty(dev.Vendor, dev.Hostname, "?"))
 		if hid := firstNonEmpty(byDevice[dev.ID], byMAC[dev.MAC], byIP[dev.SiteID+"/"+dev.IP]); hid != "" {
 			row.Monitored, row.HostID = true, hid
 		}

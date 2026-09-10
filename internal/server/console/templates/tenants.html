@@ -1,27 +1,32 @@
 {{define "content"}}
-<h1>Mandanten &amp; Standorte</h1>
+<div class="topbar" style="padding:0"><div><h1>Mandanten &amp; Standorte</h1></div></div>
+<div class="grid2" style="margin-top:16px">
+<div>
+{{if not .Data}}<div class="card"><div class="empty"><svg class="i"><use href="/static/icons.svg#building"/></svg><b>Noch kein Mandant</b><span>Rechts den ersten anlegen. Das CRM hält die Zuordnung zu seinen Kunden.</span></div></div>{{end}}
 {{range .Data}}
-<section class="card">
-  <h2>{{.Name}} <small>{{.ID}}</small></h2>
-  {{if .Sites}}<table><thead><tr><th>Standort</th><th>Boxen</th><th>Hosts</th><th></th></tr></thead><tbody>
-  {{range .Sites}}<tr><td>{{.Name}} <small>{{.ID}}</small></td><td>{{.Boxes}}</td><td>{{.Hosts}}</td><td><a href="/sites/{{.ID}}/inventory">Inventar</a></td></tr>{{end}}
+<div class="card">
+  <div class="card-h"><h2>{{.Name}} <small>{{.ID}}</small></h2><span class="badge plain">{{len .Sites}} Standort{{if ne (len .Sites) 1}}e{{end}}</span></div>
+  {{if .Sites}}<table style="margin-bottom:10px"><thead><tr><th>Standort</th><th>Boxen</th><th>Hosts</th><th></th></tr></thead><tbody>
+  {{range .Sites}}<tr><td>{{.Name}} <small class="mono muted">{{.ID}}</small></td><td class="num">{{.Boxes}}</td><td class="num">{{.Hosts}}</td><td style="text-align:right"><a class="btn ghost small" href="/sites/{{.ID}}/inventory">Inventar</a></td></tr>{{end}}
   </tbody></table>{{else}}<p class="hint">Noch kein Standort.</p>{{end}}
   <form method="post" action="/tenants/{{.ID}}/sites" class="row">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label>Kürzel <input name="slug" pattern="[a-z0-9-]{1,40}" placeholder="ludwigshafen" required></label>
-    <label>Name <input name="name" placeholder="Ludwigshafen" required></label>
-    <button>Standort anlegen</button>
+    <label class="field"><span>Kürzel</span><input name="slug" pattern="[a-z0-9-]{1,40}" placeholder="ludwigshafen" required></label>
+    <label class="field" style="flex:1"><span>Name</span><input name="name" placeholder="Ludwigshafen" required></label>
+    <button class="small">Standort anlegen</button>
   </form>
-</section>
+</div>
 {{end}}
-<section class="card">
-  <h2>Neuer Mandant</h2>
-  <form method="post" action="/tenants" class="row">
+</div>
+<div class="card">
+  <div class="card-h"><h2>Neuer Mandant</h2></div>
+  <form method="post" action="/tenants">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label>Kürzel <input name="slug" pattern="[a-z0-9-]{1,40}" placeholder="kundea" required></label>
-    <label>Name <input name="name" placeholder="Kunde A GmbH" required></label>
-    <button>Mandant anlegen</button>
+    <label class="field"><span>Kürzel</span><input name="slug" pattern="[a-z0-9-]{1,40}" placeholder="kundea" required></label>
+    <label class="field"><span>Name</span><input name="name" placeholder="Kunde A GmbH" required></label>
+    <div class="actions-row"><button>Mandant anlegen</button></div>
   </form>
-  <p class="hint">Das Kürzel wird Teil der ID (<code>ten_kundea</code>) und taucht in Webhooks und der API auf. Das CRM hält die Zuordnung zu seinen Kunden.</p>
-</section>
+  <p class="hint">Das Kürzel wird Teil der ID (<code>ten_kundea</code>) und taucht in Webhooks und der API auf.</p>
+</div>
+</div>
 {{end}}

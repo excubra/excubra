@@ -1,39 +1,55 @@
 {{define "status_table"}}
-<div class="counts">
-  <span class="pill up">{{.Up}} erreichbar</span>
-  <span class="pill down">{{.Down}} ausgefallen</span>
-  <span class="pill maint">{{.Maint}} Wartung</span>
-  <span class="pill unknown">{{.Unknown}} unbekannt</span>
-  {{if .Silent}}<span class="pill down">{{.Silent}} Box{{if gt .Silent 1}}en{{end}} schweig{{if gt .Silent 1}}en{{else}}t{{end}}</span>{{end}}
+<div class="kpis">
+  <div class="kpi ok"><span class="k">Erreichbar</span><span class="v">{{.Up}}</span><span class="s">von {{.Total}} Hosts</span></div>
+  <div class="kpi down"><span class="k">Ausgefallen</span><span class="v">{{.Down}}</span><span class="s">{{if .Down}}Tickets im CRM{{else}}alles ruhig{{end}}</span></div>
+  <div class="kpi warn"><span class="k">In Wartung</span><span class="v">{{.Maint}}</span><span class="s">unterdrückt</span></div>
+  <div class="kpi"><span class="k">Unbekannt</span><span class="v">{{.Unknown}}</span><span class="s">noch kein Ergebnis</span></div>
+  <div class="kpi {{if .Silent}}down{{else}}accent{{end}}"><span class="k">Boxen</span><span class="v">{{.Boxes}}</span><span class="s">{{if .Silent}}{{.Silent}} schweigt{{else}}alle online{{end}}</span></div>
 </div>
-{{if not .Tenants}}<p class="hint">Noch keine Mandanten. Unter <a href="/tenants">Mandanten</a> anlegen, dann eine Box zuordnen.</p>{{end}}
+<div class="two">
+<div>
+{{if not .Tenants}}
+<div class="card"><div class="empty"><svg class="i"><use href="/static/icons.svg#building"/></svg><b>Noch kein Mandant</b><span>Unter <a href="/tenants">Mandanten</a> anlegen, dann eine Box zuordnen.</span></div></div>
+{{end}}
 {{range .Tenants}}
-<h2>{{.Tenant.Name}} <small>{{.Tenant.ID}}</small></h2>
+<h2 style="margin-top:6px">{{.Tenant.Name}} <small>{{.Tenant.ID}}</small></h2>
 {{if not .Sites}}<p class="hint">Keine Standorte.</p>{{end}}
 {{range .Sites}}
-<h3>{{.Site.Name}} <small>{{.Site.ID}}</small>
-  {{range .Boxes}}<a class="pill {{if eq .State.Status "silent"}}down{{else}}up{{end}}" href="/boxes/{{.ID}}" title="Heartbeat {{ago .State.LastHeartbeat}}">Box {{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}: {{.State.Status}}</a>{{end}}
-  {{if not .Boxes}}<span class="pill unknown">keine Box zugeordnet</span>{{end}}
-  <a class="small" href="/sites/{{.Site.ID}}/inventory">Inventar</a>
-</h3>
+<div class="site-head">
+  <h3>{{.Site.Name}}</h3>
+  {{range .Boxes}}<a class="badge {{if eq .State.Status "silent"}}down{{else}}ok{{end}}" href="/boxes/{{.ID}}" title="Heartbeat {{ago .State.LastHeartbeat}}">Box {{if .Name}}{{.Name}}{{else}}{{short .ID}}{{end}} · {{if eq .State.Status "silent"}}schweigt{{else}}online{{end}}</a>{{end}}
+  {{if not .Boxes}}<span class="badge">keine Box zugeordnet</span>{{end}}
+  <span class="sp"></span>
+  <a class="btn ghost small" href="/sites/{{.Site.ID}}/inventory">Inventar</a>
+</div>
 {{if .Hosts}}
+<div class="card tight">
 <table>
-<thead><tr><th></th><th>Host</th><th>Adresse</th><th>Zustand</th><th>seit</th><th>letzter Check</th><th>Checks</th></tr></thead>
+<thead><tr><th style="width:26px"></th><th>Host</th><th>Adresse</th><th>Zustand</th><th>seit</th><th>letzter Check</th><th>Checks</th></tr></thead>
 <tbody>
 {{range .Hosts}}
 <tr>
   <td><span class="dot {{.StateClass}}"></span></td>
-  <td><a href="/hosts/{{.ID}}">{{.Name}}</a>{{if .IsUplink}} <span class="tag">Uplink</span>{{end}}{{if .ParentID}} <span class="tag">↑ {{.ParentID}}</span>{{end}}</td>
+  <td><a class="hostlink" href="/hosts/{{.ID}}">{{.Name}}</a> {{if .IsUplink}}<span class="tag">Uplink</span>{{end}}{{if .ParentID}} <span class="tag" title="hängt an {{.ParentID}}">↑</span>{{end}}</td>
   <td><code>{{.Address}}</code></td>
-  <td>{{.StateLabel}}</td>
-  <td>{{if .State.Since.IsZero}}–{{else}}{{ago .State.Since}}{{end}}</td>
-  <td>{{if .State.LastBoxTime.IsZero}}–{{else}}{{ago .State.LastBoxTime}}{{end}}</td>
-  <td class="muted">{{.Checks}}</td>
+  <td><span class="badge {{.StateClass}}">{{.StateLabel}}</span></td>
+  <td class="muted nowrap">{{if .State.Since.IsZero}}–{{else}}{{ago .State.Since}}{{end}}</td>
+  <td class="muted nowrap">{{if .State.LastBoxTime.IsZero}}–{{else}}{{ago .State.LastBoxTime}}{{end}}</td>
+  <td class="checks">{{.Checks}}</td>
 </tr>
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="hint">Noch kein Host überwacht — im <a href="/sites/{{.Site.ID}}/inventory">Inventar</a> Geräte auf „monitoren" setzen.</p>{{end}}
+</div>
+{{else}}<div class="card"><div class="empty"><svg class="i"><use href="/static/icons.svg#radar"/></svg><b>Noch kein Host überwacht</b><span>Im <a href="/sites/{{.Site.ID}}/inventory">Inventar</a> Geräte auf „monitoren" setzen.</span></div></div>{{end}}
 {{end}}
 {{end}}
+</div>
+<div class="card">
+  <div class="card-h"><h2>Letzte Ereignisse</h2><span class="muted" style="font-size:12px">24 h</span></div>
+  {{if .Recent}}<div class="evlist">
+  {{range .Recent}}<div class="ev"><span class="dot {{.Class}}"></span><div><div class="t">{{.Title}}</div><div class="m">{{.TenantName}}{{if .SiteName}} · {{.SiteName}}{{end}}{{if .Info}} · {{.Info}}{{end}}</div></div><time>{{ago .OccurredAt}}</time></div>{{end}}
+  </div>{{else}}<div class="empty"><svg class="i"><use href="/static/icons.svg#inbox"/></svg><b>Alles ruhig</b><span>Keine Ereignisse in den letzten 24 Stunden.</span></div>{{end}}
+</div>
+</div>
 {{end}}

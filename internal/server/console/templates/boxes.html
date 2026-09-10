@@ -1,29 +1,40 @@
 {{define "content"}}
 {{with .Data}}
-<h1>Boxen</h1>
-<h2>Nicht zugeordnet <small>{{len .Unassigned}}</small></h2>
+<div class="topbar" style="padding:0"><div><h1>Boxen</h1></div><div class="actions"><a class="btn ghost small" href="/keys">Enrollment-Keys</a></div></div>
+<h2 style="margin:18px 0 10px">Nicht zugeordnet <small>{{len .Unassigned}}</small></h2>
 {{if .Unassigned}}
-<table><thead><tr><th>Box</th><th>Hardware</th><th>Agent</th><th>Enrollt</th><th>Heartbeat</th><th></th></tr></thead><tbody>
-{{range .Unassigned}}<tr>
-  <td><a href="/boxes/{{.ID}}">{{.ID}}</a></td><td><code>{{.HWID}}</code> {{.OS}}/{{.Arch}}</td><td>{{.AgentVersion}}</td><td>{{ts .EnrolledAt}}</td>
-  <td>{{if .State.LastHeartbeat.IsZero}}noch keiner{{else}}{{ago .State.LastHeartbeat}}{{end}}</td>
-  <td><a class="button" href="/boxes/{{.ID}}">Zuordnen</a></td>
-</tr>{{end}}
-</tbody></table>
-{{else}}<p class="hint">Keine. Neue Boxen erscheinen hier nach dem Enrollment mit einem <a href="/keys">Key</a>.</p>{{end}}
+<div class="devgrid">
+{{range .Unassigned}}
+<a class="dev" href="/boxes/{{.ID}}" style="display:block;text-decoration:none;color:inherit">
+  <div style="display:grid;grid-template-columns:44px 1fr;gap:12px;align-items:center;padding:14px 16px">
+    <div class="avatar"><svg class="i" style="color:var(--new)"><use href="/static/icons.svg#box"/></svg></div>
+    <div><div class="t">{{.ID}}</div><div class="m"><span>{{.OS}}/{{.Arch}}</span><span>Agent {{.AgentVersion}}</span><span>{{if .State.LastHeartbeat.IsZero}}noch kein Heartbeat{{else}}Heartbeat {{ago .State.LastHeartbeat}}{{end}}</span></div></div>
+  </div>
+  <div class="body" style="display:flex;justify-content:space-between;align-items:center"><span class="badge new">wartet auf Zuordnung</span><span class="muted" style="font-size:12px">enrollt {{ago .EnrolledAt}}</span></div>
+</a>
+{{end}}
+</div>
+{{else}}<div class="card"><div class="empty"><svg class="i"><use href="/static/icons.svg#box"/></svg><b>Keine neue Box</b><span>Neue Boxen erscheinen hier nach dem Enrollment mit einem <a href="/keys">Key</a>.</span></div></div>{{end}}
 
-<h2>Zugeordnet <small>{{len .Assigned}}</small></h2>
+<h2 style="margin:22px 0 10px">Zugeordnet <small>{{len .Assigned}}</small></h2>
 {{if .Assigned}}
-<table><thead><tr><th></th><th>Box</th><th>Mandant · Standort</th><th>Agent</th><th>NetBird</th><th>Heartbeat</th><th>Platte frei</th></tr></thead><tbody>
-{{range .Assigned}}<tr>
-  <td><span class="dot {{if eq .State.Status "silent"}}down{{else}}up{{end}}"></span></td>
-  <td><a href="/boxes/{{.ID}}">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</a></td>
-  <td>{{.TenantName}} · {{.SiteName}}</td><td>{{.AgentVersion}} <span class="tag">{{.Channel}}</span></td>
-  <td>{{if .NetbirdStatus}}{{.NetbirdStatus}} {{.NetbirdIP}}{{else}}–{{end}}</td>
-  <td>{{ago .State.LastHeartbeat}}</td>
-  <td>{{if .DiskTotalBytes}}{{gb .DiskFreeBytes}} von {{gb .DiskTotalBytes}} GB{{else}}–{{end}}</td>
-</tr>{{end}}
-</tbody></table>
-{{else}}<p class="hint">Keine.</p>{{end}}
+<div class="devgrid">
+{{range .Assigned}}
+<a class="dev" href="/boxes/{{.ID}}" style="display:block;text-decoration:none;color:inherit">
+  <div style="display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;padding:14px 16px">
+    <div class="avatar"><svg class="i" style="color:var(--fg-2)"><use href="/static/icons.svg#box"/></svg></div>
+    <div><div class="t">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</div><div class="m"><span>{{.TenantName}} · {{.SiteName}}</span></div></div>
+    <span class="badge {{if eq .State.Status "silent"}}down{{else}}ok{{end}}">{{if eq .State.Status "silent"}}schweigt{{else}}online{{end}}</span>
+  </div>
+  <div class="body"><dl class="kv" style="font-size:12.5px">
+    <dt>Heartbeat</dt><dd>{{ago .State.LastHeartbeat}}</dd>
+    <dt>Agent</dt><dd>{{.AgentVersion}} <span class="tag">{{.Channel}}</span></dd>
+    <dt>NetBird</dt><dd>{{if .NetbirdStatus}}{{.NetbirdStatus}}{{if .NetbirdIP}} <code>{{.NetbirdIP}}</code>{{end}}{{else}}–{{end}}</dd>
+    <dt>Platte</dt><dd>{{if .DiskTotalBytes}}{{gb .DiskFreeBytes}} von {{gb .DiskTotalBytes}} GB frei{{else}}–{{end}}</dd>
+  </dl></div>
+</a>
+{{end}}
+</div>
+{{else}}<div class="card"><div class="empty"><svg class="i"><use href="/static/icons.svg#box"/></svg><b>Noch keine Box zugeordnet</b><span>Eine Box oben auswählen und einem Standort zuordnen.</span></div></div>{{end}}
 {{end}}
 {{end}}

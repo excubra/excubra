@@ -1,30 +1,33 @@
 {{define "content"}}
 {{with .Data}}
-<h1>Enrollment-Keys</h1>
-{{if .New}}<section class="card secret">
-  <h2>Neue Keys — werden nur einmal angezeigt</h2>
+<div class="topbar" style="padding:0"><div><h1>Enrollment-Keys</h1></div><div class="actions"><span class="muted" style="font-size:12px">Ingest <code>{{.Ingest}}</code></span></div></div>
+{{if .New}}<div class="card secret" style="margin-top:16px">
+  <div class="card-h"><h2>Neue Keys</h2><span class="badge warn plain">werden nur einmal angezeigt</span></div>
   <pre>{{range .New}}{{.}}
 {{end}}</pre>
-  <p class="hint">Auf die Box: als Datei <code>/etc/excubra/enroll</code> ins Image legen oder <code>excubra agent enroll --key …</code>. Jeder Key funktioniert genau einmal und trägt keinen Mandanten — die Zuordnung passiert hier unter Boxen.</p>
-</section>{{end}}
-<section class="card">
-  <h2>Keys erzeugen</h2>
-  <form method="post" action="/keys" class="row">
+  <p class="hint">Auf die Box: <code>image/deploy-box.sh root@&lt;box&gt; --enroll-key '…'</code> oder als Datei <code>/var/lib/excubra-agent/enroll</code>. Jeder Key funktioniert genau einmal und trägt keinen Mandanten; die Zuordnung passiert unter Boxen.</p>
+</div>{{end}}
+<div class="grid2" style="margin-top:16px">
+<div class="card tight">
+  <div class="card-h"><h2>Alle Keys</h2></div>
+  {{if .Keys}}<table><thead><tr><th>Key</th><th>Notiz</th><th>erzeugt</th><th>läuft ab</th><th>Status</th><th></th></tr></thead><tbody>
+  {{range .Keys}}<tr><td><code>{{.ID}}</code></td><td>{{.Note}}</td><td class="muted">{{ts .CreatedAt}}</td><td class="muted">{{ts .ExpiresAt}}</td>
+  <td>{{if .UsedAt}}<span class="badge ok plain">benutzt</span> <a href="/boxes/{{.UsedByBox}}" class="mono">{{.UsedByBox}}</a>{{else if .RevokedAt}}<span class="badge plain">widerrufen</span>{{else}}<span class="badge accent plain">offen</span>{{end}}</td>
+  <td style="text-align:right">{{if and (not .UsedAt) (not .RevokedAt)}}<form method="post" action="/keys/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="ghost small">Widerrufen</button></form>{{end}}</td></tr>{{end}}
+  </tbody></table>{{else}}<div class="empty"><svg class="i"><use href="/static/icons.svg#key"/></svg><b>Noch kein Key</b><span>Rechts erzeugen. Ein Key pro Box, einmal gültig.</span></div>{{end}}
+</div>
+<div class="card">
+  <div class="card-h"><h2>Keys erzeugen</h2></div>
+  <form method="post" action="/keys">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label>Anzahl <input name="count" type="number" min="1" max="100" value="1"></label>
-    <label>Gültig (Tage) <input name="days" type="number" min="1" max="365" value="30"></label>
-    <label>Notiz <input name="note" placeholder="z. B. Charge September"></label>
-    <button>Erzeugen</button>
+    <div class="row">
+      <label class="field"><span>Anzahl</span><input name="count" type="number" min="1" max="100" value="1"></label>
+      <label class="field"><span>Gültig (Tage)</span><input name="days" type="number" min="1" max="365" value="30"></label>
+    </div>
+    <label class="field"><span>Notiz</span><input name="note" placeholder="z. B. Charge September"></label>
+    <div class="actions-row"><button>Erzeugen</button></div>
   </form>
-  <p class="hint">Ingest in den Keys: <code>{{.Ingest}}</code></p>
-</section>
-<section class="card">
-  <h2>Alle Keys</h2>
-  <table><thead><tr><th>Key</th><th>Notiz</th><th>erzeugt</th><th>läuft ab</th><th>Status</th><th></th></tr></thead><tbody>
-  {{range .Keys}}<tr><td><code>{{.ID}}</code></td><td>{{.Note}}</td><td>{{ts .CreatedAt}}</td><td>{{ts .ExpiresAt}}</td>
-  <td>{{if .UsedAt}}benutzt {{tsp .UsedAt}} von <a href="/boxes/{{.UsedByBox}}">{{.UsedByBox}}</a>{{else if .RevokedAt}}widerrufen{{else}}offen{{end}}</td>
-  <td>{{if and (not .UsedAt) (not .RevokedAt)}}<form method="post" action="/keys/{{.ID}}/revoke" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Widerrufen</button></form>{{end}}</td></tr>{{end}}
-  </tbody></table>
-</section>
+</div>
+</div>
 {{end}}
 {{end}}

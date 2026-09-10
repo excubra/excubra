@@ -7,31 +7,37 @@
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/htmx.min.js" defer></script>
 </head>
-<body hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<header class="top">
-  <a class="brand" href="/status">EX0<span>console</span></a>
-  {{if .User}}
-  <nav>
-    <a href="/status" {{if eq .Path "/status"}}class="on"{{end}}>Status</a>
-    <a href="/boxes" {{if eq .Path "/boxes"}}class="on"{{end}}>Boxen</a>
-    <a href="/tenants" {{if eq .Path "/tenants"}}class="on"{{end}}>Mandanten</a>
-    <a href="/maintenance" {{if eq .Path "/maintenance"}}class="on"{{end}}>Wartung</a>
-    <a href="/webhooks" {{if eq .Path "/webhooks"}}class="on"{{end}}>Webhooks</a>
-    <a href="/keys" {{if eq .Path "/keys"}}class="on"{{end}}>Keys</a>
-    <a href="/tokens" {{if eq .Path "/tokens"}}class="on"{{end}}>Tokens</a>
-    <a href="/audit" {{if eq .Path "/audit"}}class="on"{{end}}>Audit</a>
+<body class="{{if .User}}app{{else}}login{{end}}" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+{{if .User}}
+<div class="shell">
+<aside class="side">
+  <a class="brand" href="/status"><span class="mark">EX<b>0</b></span><span class="sub">Konsole</span></a>
+  <nav class="nav">
+    <a href="/status" {{if or (eq .Path "/status") (has .Path "/hosts/")}}class="on"{{end}}><svg class="i"><use href="/static/icons.svg#dashboard"/></svg><span>Status</span></a>
+    <a href="/boxes" {{if has .Path "/boxes"}}class="on"{{end}}><svg class="i"><use href="/static/icons.svg#box"/></svg><span>Boxen</span></a>
+    <a href="/tenants" {{if or (has .Path "/tenants") (has .Path "/sites/")}}class="on"{{end}}><svg class="i"><use href="/static/icons.svg#building"/></svg><span>Mandanten</span></a>
+    <a href="/maintenance" {{if has .Path "/maintenance"}}class="on"{{end}}><svg class="i"><use href="/static/icons.svg#wrench"/></svg><span>Wartung</span></a>
+    <div class="group">Anbindung</div>
+    <a href="/webhooks" {{if has .Path "/webhooks"}}class="on"{{end}}><svg class="i"><use href="/static/icons.svg#webhook"/></svg><span>Webhooks</span></a>
+    <a href="/keys" {{if has .Path "/keys"}}class="on"{{end}}><svg class="i"><use href="/static/icons.svg#key"/></svg><span>Enrollment-Keys</span></a>
+    <a href="/tokens" {{if has .Path "/tokens"}}class="on"{{end}}><svg class="i"><use href="/static/icons.svg#shield"/></svg><span>API-Tokens</span></a>
+    <a href="/audit" {{if has .Path "/audit"}}class="on"{{end}}><svg class="i"><use href="/static/icons.svg#list"/></svg><span>Audit-Log</span></a>
   </nav>
-  <form method="post" action="/logout" class="inline">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <span class="user">{{.User}}</span>
-    <button class="link">Abmelden</button>
-  </form>
-  {{end}}
-</header>
-<main>
-{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
-{{template "content" .}}
+  <div class="foot">
+    <div class="who"><b>{{.User}}</b><span>{{version}}</span></div>
+    <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link" title="Abmelden"><svg class="i"><use href="/static/icons.svg#logout"/></svg> Abmelden</button></form>
+  </div>
+</aside>
+<main class="main">
+  <div class="content">
+  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+  {{template "content" .}}
+  </div>
+  <footer class="foot">EX0 Konsole · nur im Overlay erreichbar · Zeiten in lokaler Zone</footer>
 </main>
-<footer>excubra {{version}} · Konsole nur im Overlay · Zeiten in lokaler Zone</footer>
+</div>
+{{else}}
+{{template "content" .}}
+{{end}}
 </body>
 </html>

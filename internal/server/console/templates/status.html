@@ -1,6 +1,6 @@
 {{define "content"}}
-<h1>Status</h1>
-<div id="status" hx-get="/status/table" hx-trigger="every 30s" hx-swap="innerHTML">
+<div class="topbar" style="padding-left:0;padding-right:0;padding-top:0"><div><h1>Status</h1></div><div class="actions"><span class="muted" style="font-size:12px">aktualisiert alle 30 s</span></div></div>
+<div id="status" hx-get="/status/table" hx-trigger="every 30s" hx-swap="innerHTML" style="margin-top:14px">
 {{template "status_table" .Data}}
 </div>
 {{end}}

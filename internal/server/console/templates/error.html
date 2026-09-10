@@ -1,9 +1,5 @@
 {{define "content"}}
 {{with .Data}}
-<section class="card narrow">
-  <h1>{{.Status}}</h1>
-  <p>{{.Message}}</p>
-  <p><a href="/status">Zurück zum Status</a></p>
-</section>
+<div class="card" style="max-width:520px;margin:40px auto"><div class="empty"><svg class="i"><use href="/static/icons.svg#inbox"/></svg><b>{{.Status}}</b><span>{{.Message}}</span><a class="btn ghost small" href="/status">Zurück zum Status</a></div></div>
 {{end}}
 {{end}}
