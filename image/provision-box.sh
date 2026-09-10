@@ -3,7 +3,8 @@
 # Idempotent; run again for a binary update. Run ON the box as root:
 #
 #   provision-box.sh --binary ./excubra_linux_amd64 --enroll-key 'EX0:1:…' \
-#                    [--hostname ex0-box-buero] [--netbird-version 0.31.1] [--ssh-lan]
+#                    [--hostname ex0-box-buero] [--netbird-version 0.78.1] [--ssh-lan]
+#                    [--netbird-url https://kunde.vpn.viico-cloud.de --netbird-setup-key KEY]
 #
 # What a box is (salt: Konzept, "Die Box"): one unprivileged agent, no listening
 # port, outbound only. SSH is bound to the NetBird interface once that exists;
@@ -14,6 +15,8 @@ BINARY=""
 ENROLL_KEY=""
 HOSTNAME_WANT=""
 NETBIRD_VERSION=""
+NETBIRD_SETUP_KEY=""
+NETBIRD_URL=""
 SSH_LAN=0
 STATE_DIR=/var/lib/excubra-agent
 BIN_DIR=/opt/excubra/bin
@@ -24,6 +27,8 @@ while [ $# -gt 0 ]; do
     --enroll-key) ENROLL_KEY="$2"; shift 2 ;;
     --hostname) HOSTNAME_WANT="$2"; shift 2 ;;
     --netbird-version) NETBIRD_VERSION="$2"; shift 2 ;;
+    --netbird-setup-key) NETBIRD_SETUP_KEY="$2"; shift 2 ;;
+    --netbird-url) NETBIRD_URL="$2"; shift 2 ;;
     --ssh-lan) SSH_LAN=1; shift ;;
     *) echo "provision-box: unknown flag $1" >&2; exit 2 ;;
   esac
@@ -136,6 +141,23 @@ EOF
   systemctl daemon-reload
   systemctl enable --now netbird >/dev/null 2>&1 || true
   systemctl restart netbird || true
+fi
+if command -v netbird >/dev/null && [ ! -f /etc/systemd/system/netbird.service.d/50-excubra.conf ]; then
+  echo "== netbird already installed: opening its daemon socket to the agent group"
+  install -d -m 0755 /etc/systemd/system/netbird.service.d
+  cat > /etc/systemd/system/netbird.service.d/50-excubra.conf <<'EOF'
+[Service]
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 20); do [ -S /var/run/netbird.sock ] && chgrp excubra-agent /var/run/netbird.sock && chmod 0660 /var/run/netbird.sock && exit 0; sleep 0.5; done; exit 0'
+EOF
+  systemctl daemon-reload
+  systemctl restart netbird || true
+fi
+if [ -n "$NETBIRD_SETUP_KEY" ] && command -v netbird >/dev/null; then
+  echo "== netbird up (hand-provisioned box)"
+  umask 077; printf '%s' "$NETBIRD_SETUP_KEY" > /root/.nb-setup-key
+  netbird up --management-url "$NETBIRD_URL" --setup-key-file /root/.nb-setup-key --hostname "${HOSTNAME_WANT:-$(hostname)}" 2>&1 | tail -1 || true
+  rm -f /root/.nb-setup-key
+  netbird status 2>/dev/null | grep -E "Management|NetBird IP" || true
 fi
 
 if [ -n "$ENROLL_KEY" ]; then
