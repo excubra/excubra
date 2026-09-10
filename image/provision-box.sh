@@ -156,7 +156,9 @@ if command -v netbird >/dev/null && [ ! -f /etc/systemd/system/netbird.service.d
 ExecStartPost=/bin/sh -c 'for i in $(seq 1 20); do [ -S /var/run/netbird.sock ] && chgrp excubra-agent /var/run/netbird.sock && chmod 0660 /var/run/netbird.sock && exit 0; sleep 0.5; done; exit 0'
 EOF
   systemctl daemon-reload
-  systemctl restart netbird || true
+  # no restart: on a routing peer that would cut the customer's tunnel (and ours); the drop-in
+  # takes effect at the next restart, until then the running daemon's socket is adjusted live
+  if [ -S /var/run/netbird.sock ]; then chgrp excubra-agent /var/run/netbird.sock && chmod 0660 /var/run/netbird.sock; fi
 fi
 if [ -n "$NETBIRD_SETUP_KEY" ] && command -v netbird >/dev/null; then
   echo "== netbird up (hand-provisioned box)"
