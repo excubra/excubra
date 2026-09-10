@@ -72,6 +72,7 @@ type Heartbeat struct {
 	Netbird       NetbirdInfo     `json:"netbird"`
 	ConfigVersion string          `json:"config_version"`
 	ConfigErrors  []string        `json:"config_errors,omitempty"`
+	Notes         []string        `json:"notes,omitempty"` // what the agent wants an operator to see, e.g. a rollback
 	Hosts         []HostReport    `json:"hosts,omitempty"`
 	Discovery     DiscoveryReport `json:"discovery"`
 	Buffer        BufferInfo      `json:"buffer"`

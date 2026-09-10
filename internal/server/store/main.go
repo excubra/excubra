@@ -387,18 +387,27 @@ func scanDevice(sc interface{ Scan(...any) error }) (Device, error) {
 // whether it is new to the site, and whether it had been marked gone.
 func (s *Store) UpsertSighting(ctx context.Context, tenantID, siteID string, sg wire.Sighting, seenAt time.Time) (Device, bool, bool, error) {
 	mac := strings.ToLower(strings.TrimSpace(sg.MAC))
-	if mac == "" {
-		return Device{}, false, false, errors.New("store: sighting without MAC")
+	ip := strings.TrimSpace(sg.IP)
+	if mac == "" && ip == "" {
+		return Device{}, false, false, errors.New("store: sighting without MAC and without IP")
 	}
 	tx, err := s.main.BeginTx(ctx, nil)
 	if err != nil {
 		return Device{}, false, false, wrap("sighting", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	d, err := scanDevice(tx.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE site_id = ? AND mac = ?`, siteID, mac))
+	// A MAC identifies a device across IP changes; without one (ICMP sweep of another
+	// subnet, ADR-0007) the IP is all there is.
+	var row *sql.Row
+	if mac != "" {
+		row = tx.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE site_id = ? AND mac = ?`, siteID, mac)
+	} else {
+		row = tx.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE site_id = ? AND mac = '' AND ip = ?`, siteID, ip)
+	}
+	d, err := scanDevice(row)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		d = Device{ID: id.New("dev"), TenantID: tenantID, SiteID: siteID, MAC: mac, IP: sg.IP, Vendor: sg.Vendor, Hostname: sg.Hostname, FirstSeen: seenAt, LastSeen: seenAt}
+		d = Device{ID: id.New("dev"), TenantID: tenantID, SiteID: siteID, MAC: mac, IP: ip, Vendor: sg.Vendor, Hostname: sg.Hostname, FirstSeen: seenAt, LastSeen: seenAt}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO devices (`+deviceCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)`,
 			d.ID, d.TenantID, d.SiteID, d.MAC, d.IP, d.Vendor, d.Hostname, ts(d.FirstSeen), ts(d.LastSeen)); err != nil {
 			return Device{}, false, false, wrap("sighting", err)
@@ -408,8 +417,8 @@ func (s *Store) UpsertSighting(ctx context.Context, tenantID, siteID string, sg 
 		return Device{}, false, false, wrap("sighting", err)
 	}
 	wasGone := d.GoneAt != nil
-	if sg.IP != "" {
-		d.IP = sg.IP
+	if ip != "" {
+		d.IP = ip
 	}
 	if sg.Vendor != "" {
 		d.Vendor = sg.Vendor

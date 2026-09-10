@@ -472,7 +472,7 @@ func (e *Engine) sightings(ctx context.Context, site store.Site, boxID string, s
 		seen = seen[:wire.MaxSightings]
 	}
 	for _, sg := range seen {
-		if sg.MAC == "" {
+		if sg.MAC == "" && sg.IP == "" {
 			continue
 		}
 		d, isNew, wasGone, err := e.Store.UpsertSighting(ctx, site.TenantID, site.ID, sg, now)
