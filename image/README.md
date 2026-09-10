@@ -15,6 +15,19 @@ Raspberry Pi OS Lite, a mini PC, or a VM on the customer's hypervisor.
 image/deploy-box.sh root@<box> --enroll-key 'EX0:1:…' --hostname ex0-box-buero --ssh-lan
 ```
 
+
+Ist die Box ein LXC-Container auf einem Proxmox-Host des Kunden (kein SSH in den Container
+nötig), läuft dasselbe über den Host — Dateien per `pct push`, Provisionierung per `pct exec`:
+
+```bash
+image/deploy-box-pct.sh root@<proxmox> <ctid> --enroll-key 'EX0:1:…' --hostname kft-box
+```
+
+In unprivilegierten Containern sind `sysctl`, `ufw`, `hostnamectl` und `timedatectl`
+schreibgeschützt; das Skript überspringt sie mit Hinweis. Der Agent weicht dann für Ping auf
+einen Raw-Socket aus (CAP_NET_RAW hat der Container), und ohne offenen Port braucht die Box
+keine lokale Firewall.
+
 `--ssh-lan` keeps SSH reachable on the LAN. Without it the box has no open port at
 all; add `--netbird-version <pinned>` once the customer's NetBird stack exists, then
 SSH is reachable only over the overlay. Add `--netbird-version` from the start for a
