@@ -3,7 +3,7 @@
 [Unit]
 Description=EX0 server (excubra)
 Documentation=https://github.com/excubra/excubra
-After=network-online.target
+After=network-online.target netbird.service
 Wants=network-online.target
 
 [Service]

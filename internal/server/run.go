@@ -62,7 +62,7 @@ func run(envFile string) error {
 	slog.SetDefault(log)
 	log.Info("excubra server starting", "version", version.Version, "data", cfg.DataDir)
 
-	if err := checkOverlayAddress(cfg); err != nil {
+	if err := waitForOverlayAddress(cfg, log); err != nil {
 		return err
 	}
 	st, err := store.Open(cfg.DataDir)
@@ -217,6 +217,22 @@ func renewLoop(ctx context.Context, ca *pki.CA, caDir, host string, prov *certPr
 			prov.cert.Store(&c)
 		}
 	}
+}
+
+// waitForOverlayAddress gives the overlay interface (NetBird's wt0) up to two
+// minutes to appear after boot before giving up; a typo still fails, just later.
+func waitForOverlayAddress(cfg Config, log *slog.Logger) error {
+	var err error
+	for i := 0; i < 60; i++ {
+		if err = checkOverlayAddress(cfg); err == nil {
+			return nil
+		}
+		if i == 0 {
+			log.Warn("overlay address not up yet, waiting", "addr", cfg.OverlayListen)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return err
 }
 
 // checkOverlayAddress refuses to bind the console to an address that is not on a
