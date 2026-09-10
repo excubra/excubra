@@ -39,7 +39,7 @@ func run(dir string) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	now := time.Now()
 	must := func(err error) {
 		if err != nil {
