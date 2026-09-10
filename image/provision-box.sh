@@ -37,6 +37,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ "$(id -u)" = 0 ] || { echo "provision-box: run as root" >&2; exit 1; }
+# A machine that already runs NetBird (hand-provisioned routing peer, exit node) is somebody
+# else's network device; the agent is a guest there: no firewall, no package upgrades.
+NETBIRD_GUEST=0
+command -v netbird >/dev/null 2>&1 && [ -z "$NETBIRD_VERSION" ] && NETBIRD_GUEST=1
 [ -n "$BINARY" ] && [ -x "$BINARY" ] || { echo "provision-box: --binary <excubra_linux_*> required" >&2; exit 2; }
 
 # shellcheck disable=SC1091
@@ -47,8 +51,9 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "== packages"
 apt-get update -qq
-apt-get -y -qq upgrade
-apt-get -y -qq install ca-certificates curl gnupg unattended-upgrades chrony ufw
+[ "$NETBIRD_GUEST" = 1 ] || apt-get -y -qq upgrade
+apt-get -y -qq install ca-certificates curl gnupg unattended-upgrades chrony
+[ "$NETBIRD_GUEST" = 1 ] || apt-get -y -qq install ufw
 apt-get -y -qq autoremove
 
 echo "== automatic security updates, reboot window 04:45"
@@ -91,7 +96,9 @@ install -d -m 0755 /run/sshd
 sshd -t && systemctl reload ssh || true
 
 echo "== firewall: no inbound port$([ "$SSH_LAN" = 1 ] && echo ' except ssh (pilot)')"
-if ufw --force reset >/dev/null 2>&1; then
+if [ "$NETBIRD_GUEST" = 1 ]; then
+  echo "   (übersprungen: NetBird lief hier schon — die Maschine ist z. B. Routing-Peer, ihre Firewall gehört nicht uns; ufw würde das Forwarding kappen)"
+elif ufw --force reset >/dev/null 2>&1; then
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
   if [ "$SSH_LAN" = 1 ]; then ufw allow 22/tcp comment 'ssh (pilot, LAN)' >/dev/null; fi
