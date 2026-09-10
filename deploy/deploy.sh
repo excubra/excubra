@@ -10,7 +10,7 @@ TARGET="${1:?usage: deploy/deploy.sh <user@host> [provision flags]}"
 shift
 
 ARCH="${EXCUBRA_ARCH:-amd64}"
-VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)"
+VERSION="$(sh "$(git rev-parse --show-toplevel)/scripts/version.sh" 2>/dev/null || echo 0.0.0-dev)"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 MODULE=github.com/excubra/excubra
