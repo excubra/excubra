@@ -95,6 +95,16 @@ func (s *Server) funcs() template.FuncMap {
 		},
 		"add": func(a, b int) int { return a + b },
 		"gb":  func(b uint64) string { return fmt.Sprintf("%.1f", float64(b)/1e9) },
+		"pct": func(f float64) string { return fmt.Sprintf("%.1f", f) },
+		"short": func(s string) string {
+			if i := strings.Index(s, "_"); i >= 0 && len(s) > i+9 {
+				return s[:i+9] + "…"
+			}
+			return s
+		},
+		"has":    func(s, sub string) bool { return strings.Contains(s, sub) },
+		"mod":    func(a, b int) int { return a % b },
+		"mulDur": func(secs int64) time.Duration { return time.Duration(secs) * time.Second },
 	}
 }
 

@@ -1,63 +1,69 @@
 {{define "content"}}
 {{with .Data}}
-<h1><span class="dot {{if eq .Row.State.Status "silent"}}down{{else}}up{{end}}"></span> {{if .Row.Name}}{{.Row.Name}}{{else}}{{.Row.ID}}{{end}} <small>{{.Row.ID}}</small></h1>
-<div class="grid">
-<section class="card">
-  <h2>Box</h2>
-  <dl>
-    <dt>Zustand</dt><dd>{{.Row.State.Status}} — Heartbeat {{if .Row.State.LastHeartbeat.IsZero}}noch keiner{{else}}{{ago .Row.State.LastHeartbeat}} ({{ts .Row.State.LastHeartbeat}}){{end}}</dd>
-    <dt>Zugeordnet</dt><dd>{{if .Row.Assigned}}{{.Row.TenantName}} · {{.Row.SiteName}}{{else}}<strong>nein</strong>{{end}}</dd>
-    <dt>Hardware</dt><dd><code>{{.Row.HWID}}</code> · {{.Row.OS}}/{{.Row.Arch}} · Uptime {{.Row.UptimeS}} s</dd>
-    <dt>Agent</dt><dd>{{.Row.AgentVersion}} · Kanal {{.Row.Channel}}</dd>
-    <dt>NetBird</dt><dd>{{if .Row.NetbirdStatus}}{{.Row.NetbirdStatus}} {{.Row.NetbirdIP}}{{else}}nicht gemeldet{{end}}</dd>
-    <dt>Zertifikat</dt><dd>Serial <code>{{.Row.CertSerial}}</code>, gültig bis {{ts .Row.CertNotAfter}}</dd>
-    <dt>Enrollt</dt><dd>{{ts .Row.EnrolledAt}}</dd>
-    <dt>CA-Fingerprint</dt><dd><code>{{.Fingerprint}}</code></dd>
-  </dl>
+<div class="topbar" style="padding:0">
+  <div><div class="crumbs"><a href="/boxes">Boxen</a>{{if .Row.Assigned}} › {{.Row.TenantName}} › {{.Row.SiteName}}{{end}}</div><h1>{{if .Row.Name}}{{.Row.Name}}{{else}}{{.Row.ID}}{{end}} <small>{{.Row.ID}}</small></h1></div>
+  <div class="actions"><span class="badge {{if eq .Row.State.Status "silent"}}down{{else}}ok{{end}}">{{if eq .Row.State.Status "silent"}}schweigt{{else}}online{{end}}</span>{{if not .Row.Assigned}}<span class="badge new">nicht zugeordnet</span>{{end}}</div>
+</div>
+<div class="kpis" style="margin-top:16px">
+  <div class="kpi {{if eq .Row.State.Status "silent"}}down{{else}}ok{{end}}"><span class="k">Heartbeat</span><span class="v" style="font-size:18px">{{if .Row.State.LastHeartbeat.IsZero}}noch keiner{{else}}{{ago .Row.State.LastHeartbeat}}{{end}}</span><span class="s">{{ts .Row.State.LastHeartbeat}}</span></div>
+  <div class="kpi"><span class="k">Agent</span><span class="v" style="font-size:18px">{{if .Row.AgentVersion}}{{.Row.AgentVersion}}{{else}}–{{end}}</span><span class="s">Kanal {{.Row.Channel}} · {{.Row.OS}}/{{.Row.Arch}}</span></div>
+  <div class="kpi {{if eq .Row.NetbirdStatus "connected"}}ok{{else}}warn{{end}}"><span class="k">NetBird</span><span class="v" style="font-size:18px">{{if .Row.NetbirdStatus}}{{.Row.NetbirdStatus}}{{else}}nicht gemeldet{{end}}</span><span class="s">{{if .Row.NetbirdIP}}{{.Row.NetbirdIP}}{{else}}kein Overlay{{end}}</span></div>
+  <div class="kpi"><span class="k">Platte frei</span><span class="v" style="font-size:18px">{{if .Row.DiskTotalBytes}}{{gb .Row.DiskFreeBytes}} GB{{else}}–{{end}}</span><span class="s">{{if .Row.DiskTotalBytes}}von {{gb .Row.DiskTotalBytes}} GB · Uptime {{dur (mulDur .Row.UptimeS)}}{{end}}</span></div>
+</div>
+<div class="grid2">
+<div class="card">
+  <div class="card-h"><h2>Zuordnung</h2></div>
   <form method="post" action="/boxes/{{.Row.ID}}/assign" class="row">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label>Standort
-      <select name="site_id"><option value="">— nicht zugeordnet —</option>
+    <label class="field" style="flex:1"><span>Standort</span>
+      <select name="site_id"><option value="">nicht zugeordnet</option>
       {{range .Sites}}<option value="{{.ID}}" {{if eq .ID $.Data.Row.SiteID}}selected{{end}}>{{index $.Data.TenantNames .TenantID}} · {{.Name}}</option>{{end}}
       </select>
     </label>
     <button>Zuordnen</button>
   </form>
   {{if not .Sites}}<p class="hint">Erst unter <a href="/tenants">Mandanten</a> einen Standort anlegen.</p>{{end}}
-</section>
-
-<section class="card">
-  <h2>Einstellungen</h2>
+  <dl class="kv" style="margin-top:14px">
+    <dt>Hardware</dt><dd><code>{{.Row.HWID}}</code></dd>
+    <dt>Zertifikat</dt><dd>Serial <code>{{.Row.CertSerial}}</code>, gültig bis {{ts .Row.CertNotAfter}}</dd>
+    <dt>Enrollt</dt><dd>{{ts .Row.EnrolledAt}}</dd>
+    <dt>CA-Fingerprint</dt><dd><code>{{.Fingerprint}}</code></dd>
+  </dl>
+</div>
+<div class="card">
+  <div class="card-h"><h2>Einstellungen</h2></div>
   <form method="post" action="/boxes/{{.Row.ID}}/settings">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label>Name <input name="name" value="{{.Row.Name}}" placeholder="z. B. Büro Ludwigshafen"></label>
-    <label>Update-Kanal <select name="channel"><option value="stable" {{if eq .Row.Channel "stable"}}selected{{end}}>stable</option><option value="canary" {{if eq .Row.Channel "canary"}}selected{{end}}>canary</option></select></label>
-    <label>Discovery <select name="discovery_mode"><option value="sweep" {{if eq .Row.DiscoveryMode "sweep"}}selected{{end}}>passiv + Sweep alle 15 min</option><option value="passive" {{if eq .Row.DiscoveryMode "passive"}}selected{{end}}>nur passiv</option></select></label>
-    <label>Weitere Subnetze (ICMP-Sweep, CIDR je Zeile, max. 8)<textarea name="discovery_subnets" rows="3">{{.Subnets}}</textarea></label>
-    <button>Speichern</button>
+    <label class="field"><span>Name</span><input name="name" value="{{.Row.Name}}" placeholder="z. B. Büro Ludwigshafen"></label>
+    <div class="row">
+      <label class="field"><span>Update-Kanal</span><select name="channel"><option value="stable" {{if eq .Row.Channel "stable"}}selected{{end}}>stable</option><option value="canary" {{if eq .Row.Channel "canary"}}selected{{end}}>canary</option></select></label>
+      <label class="field" style="flex:1"><span>Discovery</span><select name="discovery_mode"><option value="sweep" {{if eq .Row.DiscoveryMode "sweep"}}selected{{end}}>passiv + Sweep alle 15 min</option><option value="passive" {{if eq .Row.DiscoveryMode "passive"}}selected{{end}}>nur passiv</option></select></label>
+    </div>
+    <label class="field"><span>Weitere Subnetze für den ICMP-Sweep (CIDR je Zeile, max. 8)</span><textarea name="discovery_subnets" rows="3">{{.Subnets}}</textarea></label>
+    <div class="actions-row"><button>Speichern</button></div>
   </form>
-</section>
-
-<section class="card">
-  <h2>NetBird-Übergabe</h2>
-  {{if .Netbird}}<p>Hinterlegt für <code>{{.Netbird.ManagementURL}}</code>, {{if .Netbird.ClaimedAt}}abgeholt {{tsp .Netbird.ClaimedAt}}{{else}}<strong>noch nicht abgeholt</strong>{{end}}.</p>
-  <form method="post" action="/boxes/{{.Row.ID}}/netbird" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="clear"><button class="secondary">Entfernen</button></form>
+</div>
+<div class="card">
+  <div class="card-h"><h2>NetBird-Übergabe</h2>{{if .Netbird}}<span class="badge {{if .Netbird.ClaimedAt}}ok{{else}}warn{{end}}">{{if .Netbird.ClaimedAt}}abgeholt{{else}}wartet{{end}}</span>{{end}}</div>
+  {{if .Netbird}}<p class="hint">Hinterlegt für <code>{{.Netbird.ManagementURL}}</code>{{if .Netbird.ClaimedAt}}, abgeholt {{tsp .Netbird.ClaimedAt}}{{else}}, wird beim nächsten Config-Pull einmalig abgeholt{{end}}.</p>
+  <form method="post" action="/boxes/{{.Row.ID}}/netbird" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="clear"><button class="ghost small">Entfernen</button></form>
   {{else}}<p class="hint">Kein Schlüssel hinterlegt. Die Box holt ihn genau einmal ab und setzt sich damit in den Kunden-Stack.</p>{{end}}
-  <form method="post" action="/boxes/{{.Row.ID}}/netbird">
+  <form method="post" action="/boxes/{{.Row.ID}}/netbird" style="margin-top:.6rem">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label>Management-URL <input name="management_url" placeholder="https://kunde.vpn.viico-cloud.de"></label>
-    <label>Setup-Key <input name="setup_key" autocomplete="off"></label>
-    <button>Hinterlegen</button>
+    <label class="field"><span>Management-URL</span><input name="management_url" placeholder="https://kunde.vpn.viico-cloud.de"></label>
+    <label class="field"><span>Setup-Key</span><input name="setup_key" autocomplete="off"></label>
+    <div class="actions-row"><button class="small">Hinterlegen</button></div>
   </form>
-</section>
-
-<section class="card">
-  <h2>Hosts dieser Box <small>{{len .Hosts}}</small></h2>
-  {{if .Hosts}}<ul>{{range .Hosts}}<li><a href="/hosts/{{.ID}}">{{.Name}}</a> <code>{{.Address}}</code></li>{{end}}</ul>{{else}}<p class="hint">Keine.</p>{{end}}
-  <h2>Gefahrenzone</h2>
-  <form method="post" action="/boxes/{{.Row.ID}}/revoke" class="inline" onsubmit="return confirm('Zertifikat sperren? Die Box kann sich danach nicht mehr melden.')"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Widerrufen</button></form>
-  <form method="post" action="/boxes/{{.Row.ID}}/delete" class="inline" onsubmit="return confirm('Box samt Hosts löschen?')"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Löschen</button></form>
-</section>
+</div>
+<div class="card">
+  <div class="card-h"><h2>Hosts dieser Box <small>{{len .Hosts}}</small></h2></div>
+  {{if .Hosts}}<div class="evlist">{{range .Hosts}}<div class="ev"><span class="dot"></span><div><div class="t"><a href="/hosts/{{.ID}}">{{.Name}}</a></div><div class="m"><code>{{.Address}}</code></div></div></div>{{end}}</div>{{else}}<p class="hint">Keine. Geräte im Inventar des Standorts auf „monitoren" setzen.</p>{{end}}
+  <div class="card-h" style="margin-top:18px"><h2>Gefahrenzone</h2></div>
+  <div class="actions-row">
+    <form method="post" action="/boxes/{{.Row.ID}}/revoke" onsubmit="return confirm('Zertifikat sperren? Die Box kann sich danach nicht mehr melden.')"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger small">Widerrufen</button></form>
+    <form method="post" action="/boxes/{{.Row.ID}}/delete" onsubmit="return confirm('Box samt Hosts löschen?')"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger small">Löschen</button></form>
+  </div>
+</div>
 </div>
 {{end}}
 {{end}}

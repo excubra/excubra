@@ -1,27 +1,29 @@
 {{define "content"}}
 {{with .Data}}
-<h1>API-Tokens</h1>
-{{if .NewToken}}<section class="card secret">
-  <h2>Token „{{.NewName}}" — wird nur einmal angezeigt</h2>
+<div class="topbar" style="padding:0"><div><h1>API-Tokens</h1></div><div class="actions"><span class="badge plain">{{len .Tokens}} Tokens</span></div></div>
+{{if .NewToken}}<div class="card secret" style="margin-top:16px">
+  <div class="card-h"><h2>Token „{{.NewName}}"</h2><span class="badge warn plain">wird nur einmal angezeigt</span></div>
   <pre>{{.NewToken}}</pre>
   <p class="hint">Verwendung: <code>Authorization: Bearer …</code> gegen die Status-API unter <code>/v1/</code> auf diesem Listener.</p>
-</section>{{end}}
-<section class="card">
-  <h2>Token erzeugen</h2>
-  <form method="post" action="/tokens" class="row">
+</div>{{end}}
+<div class="grid2" style="margin-top:16px">
+<div class="card tight">
+  <div class="card-h"><h2>Alle Tokens</h2></div>
+  {{if .Tokens}}<table><thead><tr><th>Token</th><th>Name</th><th>Mandanten</th><th>erzeugt</th><th>zuletzt benutzt</th><th>Status</th><th></th></tr></thead><tbody>
+  {{range .Tokens}}<tr><td><code>{{.ID}}</code></td><td>{{.Name}}</td><td>{{join .Tenants ", "}}</td><td class="muted">{{ts .CreatedAt}}</td><td class="muted">{{agop .LastUsedAt}}</td>
+  <td>{{if .RevokedAt}}<span class="badge plain">widerrufen</span>{{else}}<span class="badge ok plain">aktiv</span>{{end}}</td>
+  <td style="text-align:right">{{if not .RevokedAt}}<form method="post" action="/tokens/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="ghost small">Widerrufen</button></form>{{end}}</td></tr>{{end}}
+  </tbody></table>{{else}}<div class="empty"><svg class="i"><use href="/static/icons.svg#shield"/></svg><b>Noch kein Token</b><span>Das CRM braucht eines für die Status-API.</span></div>{{end}}
+</div>
+<div class="card">
+  <div class="card-h"><h2>Token erzeugen</h2></div>
+  <form method="post" action="/tokens">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label>Name <input name="name" placeholder="crm" required></label>
-    <label>Mandanten <select name="tenants" multiple size="4"><option value="*" selected>alle</option>{{range .Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
-    <button>Erzeugen</button>
+    <label class="field"><span>Name</span><input name="name" placeholder="crm" required></label>
+    <label class="field"><span>Mandanten</span><select name="tenants" multiple size="4"><option value="*" selected>alle</option>{{range .Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+    <div class="actions-row"><button>Erzeugen</button></div>
   </form>
-</section>
-<section class="card">
-  <h2>Alle Tokens</h2>
-  <table><thead><tr><th>Token</th><th>Name</th><th>Mandanten</th><th>erzeugt</th><th>zuletzt benutzt</th><th>Status</th><th></th></tr></thead><tbody>
-  {{range .Tokens}}<tr><td><code>{{.ID}}</code></td><td>{{.Name}}</td><td>{{join .Tenants ", "}}</td><td>{{ts .CreatedAt}}</td><td>{{agop .LastUsedAt}}</td>
-  <td>{{if .RevokedAt}}widerrufen{{else}}aktiv{{end}}</td>
-  <td>{{if not .RevokedAt}}<form method="post" action="/tokens/{{.ID}}/revoke" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Widerrufen</button></form>{{end}}</td></tr>{{end}}
-  </tbody></table>
-</section>
+</div>
+</div>
 {{end}}
 {{end}}

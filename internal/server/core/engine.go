@@ -102,7 +102,7 @@ func Load(ctx context.Context, st *store.Store, pub Publisher, log *slog.Logger)
 			mh.Observed, mh.Reported = hs.Observed, hs.Reported
 			mh.Failures, mh.Successes = hs.Failures, hs.Successes
 			mh.Since, mh.RunStart, mh.DownSince = hs.Since, hs.RunStart, hs.DownSince
-			mh.LastFailedChecks, mh.LastBoxTime = hs.LastFailedChecks, hs.LastBoxTime
+			mh.LastFailedChecks, mh.LastChecks, mh.LastBoxTime = hs.LastFailedChecks, hs.LastChecks, hs.LastBoxTime
 		}
 		e.m.PutHost(mh)
 	}
