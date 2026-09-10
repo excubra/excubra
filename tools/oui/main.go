@@ -5,6 +5,7 @@ package main
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -23,7 +24,9 @@ func main() {
 		out = os.Args[1]
 	}
 	client := &http.Client{Timeout: 2 * time.Minute}
-	req, err := http.NewRequest(http.MethodGet, source, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
 		fail(err)
 	}
@@ -33,7 +36,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		fail(fmt.Errorf("%s: HTTP %d", source, resp.StatusCode))
 	}
@@ -69,13 +72,13 @@ func main() {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	f, err := os.Create(out)
+	f, err := os.Create(out) //nolint:gosec // output path from the operator's command line
 	if err != nil {
 		fail(err)
 	}
 	gz, _ := gzip.NewWriterLevel(f, gzip.BestCompression)
 	for _, k := range keys {
-		fmt.Fprintf(gz, "%s\t%s\n", k, vendors[k])
+		_, _ = fmt.Fprintf(gz, "%s\t%s\n", k, vendors[k])
 	}
 	if err := gz.Close(); err != nil {
 		fail(err)
@@ -83,7 +86,7 @@ func main() {
 	if err := f.Close(); err != nil {
 		fail(err)
 	}
-	st, _ := os.Stat(out)
+	st, _ := os.Stat(out) //nolint:gosec // same operator path
 	fmt.Printf("%d vendors → %s (%d bytes)\n", len(keys), out, st.Size())
 }
 

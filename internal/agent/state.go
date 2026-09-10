@@ -28,7 +28,8 @@ const (
 	fileConfig   = "config.json"
 	dirBuffer    = "buffer"
 	dirUpdate    = "update"
-	enrollKeyDef = "/etc/excubra/enroll" // written by the image, deleted after use
+	fileEnroll   = "enroll"              // key left by the image inside the state dir, deleted after use
+	enrollKeyEtc = "/etc/excubra/enroll" // read-only alternative for hand-made installs
 )
 
 // ErrNotEnrolled means the state directory holds no identity yet.
@@ -195,26 +196,37 @@ func (s *State) SaveConfig(c wire.Config) error {
 	return s.writeFile(fileConfig, b, 0o600)
 }
 
-// ReadEnrollmentKey returns a key from the given path (or the image default),
-// trimmed. An empty string means there is none.
-func ReadEnrollmentKey(path string) string {
-	if path == "" {
-		path = enrollKeyDef
+// EnrollKeyPaths lists where a key file may lie: the explicit path, else the state
+// directory, else /etc/excubra/enroll.
+func EnrollKeyPaths(stateDir, explicit string) []string {
+	if explicit != "" {
+		return []string{explicit}
 	}
-	b, err := os.ReadFile(path) //nolint:gosec // operator-provided path or the image default
-	if err != nil {
-		return ""
+	return []string{filepath.Join(stateDir, fileEnroll), enrollKeyEtc}
+}
+
+// ReadEnrollmentKey returns the first key found in the given paths, trimmed, and
+// where it came from. Empty means there is none.
+func ReadEnrollmentKey(paths ...string) (string, string) {
+	for _, p := range paths {
+		b, err := os.ReadFile(p) //nolint:gosec // operator-provided or well-known paths
+		if err != nil {
+			continue
+		}
+		if k := strings.TrimSpace(string(b)); k != "" {
+			return k, p
+		}
 	}
-	return strings.TrimSpace(string(b))
+	return "", ""
 }
 
 // DeleteEnrollmentKeyFile removes a used key file; a key is single-use, so leaving
-// it on disk only invites confusion.
+// it on disk only invites confusion. /etc may be read-only for the service; then
+// the file stays and the key is burned server-side anyway.
 func DeleteEnrollmentKeyFile(path string) {
-	if path == "" {
-		path = enrollKeyDef
+	if path != "" {
+		_ = os.Remove(path)
 	}
-	_ = os.Remove(path)
 }
 
 func (s *State) path(name string) string { return filepath.Join(s.Dir, name) }

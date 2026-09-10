@@ -17,6 +17,8 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/sys/unix"
+
+	"github.com/excubra/excubra/internal/agent/checks"
 )
 
 // lanInterface picks the interface of the default IPv4 route from /proc/net/route,
@@ -158,9 +160,9 @@ func platformARPSweep(ctx context.Context, maxPPS int, see func(mac, ip, ip6 str
 // platformICMPSweep pings every address of the configured subnets, paced by
 // maxPPS, and reports the ones that answer (IP only: no MAC across a router).
 func platformICMPSweep(ctx context.Context, prefixes []netip.Prefix, maxPPS int, see func(mac, ip, ip6 string)) error {
-	conn, err := icmp.ListenPacket("udp4", "0.0.0.0")
+	conn, raw, err := checks.ListenICMP4()
 	if err != nil {
-		return fmt.Errorf("icmp socket (needs CAP_NET_RAW or net.ipv4.ping_group_range): %w", err)
+		return err
 	}
 	defer func() { _ = conn.Close() }()
 	id := os.Getpid() & 0xffff
@@ -194,8 +196,11 @@ func platformICMPSweep(ctx context.Context, prefixes []netip.Prefix, maxPPS int,
 				continue
 			}
 			if echo, ok := msg.Body.(*icmp.Echo); ok && echo.ID == id {
-				if ua, ok := peer.(*net.UDPAddr); ok {
-					see("", ua.IP.String(), "")
+				switch pa := peer.(type) {
+				case *net.UDPAddr:
+					see("", pa.IP.String(), "")
+				case *net.IPAddr:
+					see("", pa.IP.String(), "")
 				}
 			}
 		}
@@ -211,7 +216,11 @@ func platformICMPSweep(ctx context.Context, prefixes []netip.Prefix, maxPPS int,
 			wm := icmp.Message{Type: ipv4.ICMPTypeEcho, Code: 0, Body: &icmp.Echo{ID: id, Seq: seq & 0xffff, Data: []byte("excubra")}}
 			wb, _ := wm.Marshal(nil)
 			ip := a.As4()
-			if _, err := conn.WriteTo(wb, &net.UDPAddr{IP: net.IP(ip[:])}); err != nil {
+			var dst net.Addr = &net.UDPAddr{IP: net.IP(ip[:])}
+			if raw {
+				dst = &net.IPAddr{IP: net.IP(ip[:])}
+			}
+			if _, err := conn.WriteTo(wb, dst); err != nil {
 				continue
 			}
 		}

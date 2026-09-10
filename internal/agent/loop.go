@@ -98,17 +98,17 @@ func Run(ctx context.Context, stateDir, enrollFile string, log *slog.Logger) err
 // quietly for it to appear. Restart loops with error spam help nobody.
 func waitForEnrollment(ctx context.Context, st *State, enrollFile string, log *slog.Logger) error {
 	for !st.Enrolled() {
-		if key := ReadEnrollmentKey(enrollFile); key != "" {
+		if key, from := ReadEnrollmentKey(EnrollKeyPaths(st.Dir, enrollFile)...); key != "" {
 			if err := Enroll(ctx, st, key, "", log); err != nil {
 				var se *ServerError
 				if errors.As(err, &se) && !se.Retryable() {
 					log.Error("enrollment refused, the key is not usable", "err", err)
-					DeleteEnrollmentKeyFile(enrollFile)
+					DeleteEnrollmentKeyFile(from)
 				} else {
 					log.Warn("enrollment failed, retrying", "err", err)
 				}
 			} else {
-				DeleteEnrollmentKeyFile(enrollFile)
+				DeleteEnrollmentKeyFile(from)
 				continue
 			}
 		} else {

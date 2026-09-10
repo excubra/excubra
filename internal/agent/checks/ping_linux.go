@@ -31,15 +31,24 @@ func (p *ICMPPinger) Ping(ctx context.Context, address string) (time.Duration, e
 	if err != nil {
 		return 0, err
 	}
-	network, proto, listen := "udp4", 1, "0.0.0.0"
+	proto := 1
 	msgType := icmp.Type(ipv4.ICMPTypeEcho)
+	var conn *icmp.PacketConn
+	raw := false
 	if ip.To4() == nil {
-		network, proto, listen = "udp6", 58, "::"
-		msgType = ipv6.ICMPTypeEchoRequest
-	}
-	conn, err := icmp.ListenPacket(network, listen)
-	if err != nil {
-		return 0, fmt.Errorf("icmp socket (needs CAP_NET_RAW or net.ipv4.ping_group_range): %w", err)
+		proto, msgType = 58, ipv6.ICMPTypeEchoRequest
+		conn, err = icmp.ListenPacket("udp6", "::")
+		if err != nil {
+			if conn, err = icmp.ListenPacket("ip6:ipv6-icmp", "::"); err != nil {
+				return 0, fmt.Errorf("icmpv6 socket (needs CAP_NET_RAW or net.ipv4.ping_group_range): %w", err)
+			}
+			raw = true
+		}
+	} else {
+		conn, raw, err = ListenICMP4()
+		if err != nil {
+			return 0, err
+		}
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -57,8 +66,12 @@ func (p *ICMPPinger) Ping(ctx context.Context, address string) (time.Duration, e
 	if err != nil {
 		return 0, err
 	}
+	var dst net.Addr = &net.UDPAddr{IP: ip}
+	if raw {
+		dst = &net.IPAddr{IP: ip}
+	}
 	start := time.Now()
-	if _, err := conn.WriteTo(wb, &net.UDPAddr{IP: ip}); err != nil {
+	if _, err := conn.WriteTo(wb, dst); err != nil {
 		return 0, err
 	}
 	rb := make([]byte, 1500)

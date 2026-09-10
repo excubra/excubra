@@ -93,7 +93,7 @@ func New(stateDir string, log *slog.Logger) (*Updater, error) {
 func (u *Updater) defaultTrial(ctx context.Context, candidate string) error {
 	ctx, cancel := context.WithTimeout(ctx, TrialTime)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, candidate, "agent", "selftest", "--state-dir", u.StateDir)
+	cmd := exec.CommandContext(ctx, candidate, "agent", "selftest", "--state-dir", u.StateDir) //nolint:gosec // the candidate passed sha256 and signature checks
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("selftest failed: %w: %s", err, strings.TrimSpace(string(out)))
@@ -272,7 +272,7 @@ func newer(a, b version.Semver) bool {
 
 func writeExecutable(path string, blob []byte) error {
 	tmp := path + ".part"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755) //nolint:gosec // it is the next agent binary, it must be executable
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
 	}

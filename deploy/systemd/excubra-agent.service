@@ -12,7 +12,7 @@ StartLimitIntervalSec=0
 Type=simple
 User=excubra-agent
 Group=excubra-agent
-ExecStart=/usr/local/bin/excubra agent run
+ExecStart=/opt/excubra/bin/excubra agent run
 Restart=always
 RestartSec=5
 SuccessExitStatus=75
@@ -29,10 +29,10 @@ CPUQuota=20%
 MemoryMax=256M
 TasksMax=64
 
-# The agent reads the system and writes only its state directory (and the
-# binary path during a self-update, hence /usr/local/bin)
+# The agent reads the system and writes only its state directory and its own
+# binary directory (the signed self-update swaps the binary there, ADR-0006).
 ProtectSystem=strict
-ReadWritePaths=/var/lib/excubra-agent /usr/local/bin
+ReadWritePaths=/var/lib/excubra-agent /opt/excubra/bin
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
