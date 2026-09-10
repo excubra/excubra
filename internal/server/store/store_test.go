@@ -184,7 +184,25 @@ func TestDevices(t *testing.T) {
 	}
 	must(t, s.SetDeviceIgnored(ctx, d.ID, true))
 	if _, _, _, err := s.UpsertSighting(ctx, "ten_a", "site_a", wire.Sighting{}, t0); err == nil {
-		t.Fatal("sighting without MAC accepted")
+		t.Fatal("sighting without MAC and IP accepted")
+	}
+	// ICMP-swept devices in other subnets have no MAC and are keyed by IP
+	d1, isNew, _, err := s.UpsertSighting(ctx, "ten_a", "site_a", wire.Sighting{IP: "192.168.10.5"}, t0)
+	must(t, err)
+	d2, isNew2, _, err := s.UpsertSighting(ctx, "ten_a", "site_a", wire.Sighting{IP: "192.168.10.5", Hostname: "plc"}, t0.Add(time.Minute))
+	must(t, err)
+	d3, isNew3, _, err := s.UpsertSighting(ctx, "ten_a", "site_a", wire.Sighting{IP: "192.168.10.6"}, t0)
+	must(t, err)
+	if !isNew || isNew2 || !isNew3 || d1.ID != d2.ID || d1.ID == d3.ID || d2.Hostname != "plc" || d2.MAC != "" {
+		t.Fatalf("ip-keyed devices: %+v %+v %+v", d1, d2, d3)
+	}
+	// a device with a MAC keeps its row when its IP changes
+	m1, _, _, err := s.UpsertSighting(ctx, "ten_a", "site_a", wire.Sighting{MAC: "aa:aa:aa:aa:aa:01", IP: "192.168.1.50"}, t0)
+	must(t, err)
+	m2, isNewM, _, err := s.UpsertSighting(ctx, "ten_a", "site_a", wire.Sighting{MAC: "aa:aa:aa:aa:aa:01", IP: "192.168.1.51"}, t0.Add(time.Hour))
+	must(t, err)
+	if isNewM || m1.ID != m2.ID || m2.IP != "192.168.1.51" {
+		t.Fatalf("mac-keyed device across ip change: %+v %+v", m1, m2)
 	}
 }
 

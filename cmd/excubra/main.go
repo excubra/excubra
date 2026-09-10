@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -37,6 +38,10 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "excubra: unknown command %q\n\n%s", os.Args[1], usage)
 		os.Exit(2)
+	}
+	if errors.Is(err, agent.ErrRestart) {
+		// a self-update replaced the binary; 75 tells systemd (SuccessExitStatus=75) to start the new one
+		os.Exit(75)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "excubra:", err)

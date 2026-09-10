@@ -38,6 +38,8 @@ type Server struct {
 	CA     *pki.CA
 	Log    *slog.Logger
 	Now    func() time.Time
+	// Version is what agents are compared against (ADR-0002); defaults to this build.
+	Version version.Semver
 
 	enrollLimit *limiter
 	boxLimit    *limiter
@@ -48,7 +50,7 @@ func New(eng *core.Engine, st *store.Store, ca *pki.CA, log *slog.Logger) *Serve
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Server{Engine: eng, Store: st, CA: ca, Log: log, Now: time.Now}
+	s := &Server{Engine: eng, Store: st, CA: ca, Log: log, Now: time.Now, Version: version.Current()}
 	s.enrollLimit = newLimiter(5, 5, func() time.Time { return s.Now() })
 	s.boxLimit = newLimiter(10, 30, func() time.Time { return s.Now() })
 	return s
@@ -115,7 +117,7 @@ func (s *Server) box(next http.HandlerFunc) http.Handler {
 				writeErr(w, http.StatusBadRequest, wire.ErrBadRequest, "bad agent version header")
 				return
 			}
-			if !version.Compatible(av, version.Current()) {
+			if !version.Compatible(av, s.Version) {
 				info, _ := s.updateInfo(r.Context(), b, b.OS, b.Arch, v)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUpgradeRequired)

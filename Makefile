@@ -49,3 +49,7 @@ tidy-check:
 
 clean:
 	rm -rf bin dist
+
+## oui: regenerate the embedded vendor table from the IEEE registry
+oui:
+	go run ./tools/oui
