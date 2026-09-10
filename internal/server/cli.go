@@ -17,6 +17,30 @@ import (
 	"github.com/excubra/excubra/internal/server/store"
 )
 
+// cliArgs separates positional words from flags, so both
+// `tenant list --env-file X` and `tenant --env-file X list` work. Every flag in this
+// CLI takes a value, so a bare "-x" consumes the next argument; "-x=y" does not.
+func cliArgs(args []string) (positional, flags []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			return append(positional, args[i+1:]...), flags
+		case strings.HasPrefix(a, "-") && strings.Contains(a, "="):
+			flags = append(flags, a)
+		case strings.HasPrefix(a, "-"):
+			flags = append(flags, a)
+			if i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
+		default:
+			positional = append(positional, a)
+		}
+	}
+	return positional, flags
+}
+
 // cliStore opens the store from the configuration for one-shot commands. The
 // running server may keep the files open; SQLite in WAL mode allows both.
 func cliStore(envFile string) (*store.Store, Config, error) {
@@ -32,10 +56,10 @@ func cliStore(envFile string) (*store.Store, Config, error) {
 func userCmd(args []string) error {
 	fs := flag.NewFlagSet("excubra server user", flag.ContinueOnError)
 	envFile := fs.String("env-file", "", "server env file")
-	if err := fs.Parse(args); err != nil {
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	rest := fs.Args()
 	if len(rest) == 0 {
 		return fmt.Errorf("usage: excubra server user add <name> | passwd <name> | disable <name> | enable <name> | list")
 	}
@@ -124,10 +148,10 @@ func keyCmd(args []string) error {
 	count := fs.Int("count", 1, "how many keys to create")
 	note := fs.String("note", "", "note stored with the keys (e.g. batch name)")
 	days := fs.Int("expires-days", 30, "validity in days")
-	if err := fs.Parse(args); err != nil {
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	rest := fs.Args()
 	if len(rest) != 1 || rest[0] != "new" {
 		return fmt.Errorf("usage: excubra server key new [--count N] [--note text] [--expires-days D]")
 	}
@@ -168,10 +192,10 @@ func tokenCmd(args []string) error {
 	envFile := fs.String("env-file", "", "server env file")
 	name := fs.String("name", "", "token name (e.g. crm)")
 	tenants := fs.String("tenants", "*", "comma-separated tenant ids or * for all")
-	if err := fs.Parse(args); err != nil {
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	rest := fs.Args()
 	if len(rest) == 0 {
 		return fmt.Errorf("usage: excubra server token new --name X [--tenants a,b] | list | revoke <id>")
 	}
@@ -227,10 +251,10 @@ func tokenCmd(args []string) error {
 func tenantCmd(args []string) error {
 	fs := flag.NewFlagSet("excubra server tenant", flag.ContinueOnError)
 	envFile := fs.String("env-file", "", "server env file")
-	if err := fs.Parse(args); err != nil {
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	rest := fs.Args()
 	st, _, err := cliStore(*envFile)
 	if err != nil {
 		return err
@@ -265,10 +289,10 @@ func tenantCmd(args []string) error {
 func siteCmd(args []string) error {
 	fs := flag.NewFlagSet("excubra server site", flag.ContinueOnError)
 	envFile := fs.String("env-file", "", "server env file")
-	if err := fs.Parse(args); err != nil {
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	rest := fs.Args()
 	st, _, err := cliStore(*envFile)
 	if err != nil {
 		return err
@@ -307,10 +331,11 @@ func siteCmd(args []string) error {
 func backupCmd(args []string) error {
 	fs := flag.NewFlagSet("excubra server backup", flag.ContinueOnError)
 	envFile := fs.String("env-file", "", "server env file")
-	if err := fs.Parse(args); err != nil {
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
+	if len(rest) != 1 {
 		return fmt.Errorf("usage: excubra server backup <dir>")
 	}
 	st, _, err := cliStore(*envFile)
@@ -318,10 +343,10 @@ func backupCmd(args []string) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	if err := st.Backup(context.Background(), fs.Arg(0), time.Now()); err != nil {
+	if err := st.Backup(context.Background(), rest[0], time.Now()); err != nil {
 		return err
 	}
-	fmt.Println("backup written to", fs.Arg(0))
+	fmt.Println("backup written to", rest[0])
 	return nil
 }
 
@@ -330,7 +355,8 @@ func pruneCmd(args []string) error {
 	fs := flag.NewFlagSet("excubra server prune", flag.ContinueOnError)
 	envFile := fs.String("env-file", "", "server env file")
 	keep := fs.Int("keep", 90, "days of day files to keep")
-	if err := fs.Parse(args); err != nil {
+	_, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
 	if *keep < 1 {

@@ -158,7 +158,8 @@ install -m 0644 "$UNIT_SRC"/systemd/excubra-restore-test.timer /etc/systemd/syst
 install -m 0755 "$UNIT_SRC"/restore-test.sh /usr/local/bin/excubra-restore-test
 sed -i "s|--keep 90|--keep $KEEP_DAYS|" /etc/systemd/system/excubra-prune.service
 systemctl daemon-reload
-systemctl enable excubra-server excubra-prune.timer excubra-backup.timer excubra-restore-test.timer >/dev/null
+systemctl enable --now excubra-prune.timer excubra-backup.timer excubra-restore-test.timer >/dev/null
+systemctl enable excubra-server >/dev/null
 systemctl restart excubra-server
 
 echo "== smoke test"
