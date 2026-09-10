@@ -77,3 +77,13 @@ keys, tokens or certificates. Log level is the only knob.
   second source of truth beside the database.
 - One listener with path-based separation and an allow-list: a single mistake in the
   allow-list exposes the console; two sockets cannot be confused.
+
+## Addendum 2026-09-10: provisioning
+
+The server is not configured by hand. `deploy/provision-server.sh` takes a fresh
+Debian to a running server and is idempotent; `deploy/deploy.sh` builds the binary
+from the current commit and runs it over SSH. The first real installation found two
+faults no test would have: timers that were `enable`d but never started (a backup
+that silently never runs), and a CLI that rejected flags after the positional word
+although its help promised them. Both are fixed in the repository, which is the
+point of having the sequence in a file rather than in a chat log.
