@@ -11,6 +11,9 @@
 # --ssh-lan keeps it reachable on the LAN for the pilot in the office.
 set -euo pipefail
 
+# best-effort steps: in an LXC container some of these are read-only or absent
+try() { "$@" 2>/dev/null || echo "   (übersprungen: $* — in Containern normal)"; }
+
 BINARY=""
 ENROLL_KEY=""
 HOSTNAME_WANT=""
@@ -66,12 +69,12 @@ EOF
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 
 echo "== time"
-timedatectl set-timezone Europe/Berlin
+try timedatectl set-timezone Europe/Berlin
 systemctl enable --now chrony >/dev/null 2>&1 || true
 
 if [ -n "$HOSTNAME_WANT" ]; then
   echo "== hostname $HOSTNAME_WANT"
-  hostnamectl set-hostname "$HOSTNAME_WANT"
+  try hostnamectl set-hostname "$HOSTNAME_WANT"
   grep -q "127.0.1.1[[:space:]]\+$HOSTNAME_WANT" /etc/hosts || printf '127.0.1.1\t%s\n' "$HOSTNAME_WANT" >> /etc/hosts
 fi
 
@@ -88,11 +91,14 @@ install -d -m 0755 /run/sshd
 sshd -t && systemctl reload ssh || true
 
 echo "== firewall: no inbound port$([ "$SSH_LAN" = 1 ] && echo ' except ssh (pilot)')"
-ufw --force reset >/dev/null
-ufw default deny incoming >/dev/null
-ufw default allow outgoing >/dev/null
-if [ "$SSH_LAN" = 1 ]; then ufw allow 22/tcp comment 'ssh (pilot, LAN)' >/dev/null; fi
-ufw --force enable >/dev/null
+if ufw --force reset >/dev/null 2>&1; then
+  ufw default deny incoming >/dev/null
+  ufw default allow outgoing >/dev/null
+  if [ "$SSH_LAN" = 1 ]; then ufw allow 22/tcp comment 'ssh (pilot, LAN)' >/dev/null; fi
+  ufw --force enable >/dev/null || echo "   (ufw konnte nicht aktiviert werden — Container ohne Netfilter-Rechte; die Box hat ohnehin keinen offenen Port)"
+else
+  echo "   (ufw nicht verfügbar — Container; die Box hat ohnehin keinen offenen Port)"
+fi
 
 echo "== journald: persistent, capped (SSD-friendly)"
 install -d -m 0755 /etc/systemd/journald.conf.d
@@ -109,7 +115,7 @@ cat > /etc/sysctl.d/50-excubra.conf <<'EOF'
 # lets the agent open ICMP echo sockets without raw-socket rights (ADR-0007)
 net.ipv4.ping_group_range = 0 2147483647
 EOF
-sysctl -q -p /etc/sysctl.d/50-excubra.conf
+try sysctl -q -p /etc/sysctl.d/50-excubra.conf   # read-only in unprivileged containers; the agent falls back to a raw socket
 
 echo "== user and directories"
 id excubra-agent >/dev/null 2>&1 || useradd --system --home "$STATE_DIR" --shell /usr/sbin/nologin excubra-agent
