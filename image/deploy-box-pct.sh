@@ -29,5 +29,6 @@ scp -q image/provision-box.sh deploy/systemd/excubra-agent.service "$PVE:$R/"
 ssh -o BatchMode=yes "$PVE" "pct exec $CTID -- mkdir -p $R && for f in excubra provision-box.sh excubra-agent.service; do pct push $CTID $R/\$f $R/\$f; done"
 echo "== provisioning"
 # shellcheck disable=SC2145  # the flags are re-quoted for the remote shell on purpose
-ssh -o BatchMode=yes "$PVE" "pct exec $CTID -- bash -c 'chmod +x $R/provision-box.sh && $R/provision-box.sh --binary $R/excubra $(printf "%q " "$@")'"
+# pct push does not carry the executable bit
+ssh -o BatchMode=yes "$PVE" "pct exec $CTID -- bash -c 'chmod +x $R/provision-box.sh $R/excubra && $R/provision-box.sh --binary $R/excubra $(printf "%q " "$@")'"
 ssh -o BatchMode=yes "$PVE" "pct exec $CTID -- rm -rf $R; rm -rf $R"
