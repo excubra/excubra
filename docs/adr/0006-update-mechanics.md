@@ -73,3 +73,27 @@ for the systemd deployment.
 - **Package manager / distro packages**: a distribution matrix and a second update
   mechanism next to the one the agent has anyway.
 - **Server-side signing**: the Kaseya failure mode.
+
+## Amendment 2026-09-11: signing without cosign, a release catalog, and what an operator needs
+
+**Signing.** The release workflow signs with a plain ECDSA P-256 key held as the
+repository secret `RELEASE_KEY_PEM` (`openssl dgst -sha256 -sign`); the output is the
+same DER signature over SHA-256 that cosign produces for a blob, so `internal/sig`
+is unchanged. cosign is no longer required anywhere. The public half is committed as
+`internal/sig/release.pub`; `tools/sigcheck` verifies a freshly signed binary with
+the embedded key before the release is published, so a key mismatch fails the
+pipeline, not a box.
+
+**Catalog.** Every release ships `manifest.json` (`tools/manifest`): version, minimum
+agent version, and per binary URL, SHA-256 and signature. The server reads the
+project's release list (`EXCUBRA_RELEASE_CATALOG`, default the GitHub API of
+`excubra/excubra`, `off` to disable) hourly and stores new releases; the console
+shows them, and pointing a channel at one stays a click by an operator. The server
+still holds no binaries and cannot sign.
+
+**What this means for someone who runs EX0.** Nothing beyond installing it: the
+binaries trust the project's key, the catalog fills itself, boxes download from
+GitHub over HTTPS and verify. No organisation, no key, no password manager. Only a
+fork that builds its own binaries needs its own key pair (replace `release.pub`,
+sign with the matching private key, point `EXCUBRA_RELEASE_CATALOG` at its own
+releases). A LAN that blocks GitHub will get a mirror through the ingest later.

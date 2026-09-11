@@ -20,6 +20,7 @@ import (
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/api"
+	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/console"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/ingest"
@@ -173,6 +174,12 @@ func run(envFile string) error {
 		}
 	}()
 	go eng.RunTicker(ctx, 10*time.Second)
+	if cfg.ReleaseCatalog != "" && cfg.ReleaseCatalog != "off" {
+		// release metadata from the project's published releases, hourly (ADR-0006)
+		cat := catalog.New(cfg.ReleaseCatalog, st, log)
+		con.Catalog = cat
+		go cat.Run(ctx, time.Hour)
+	}
 	go deliverer.Run(ctx, 5*time.Second)
 	go renewLoop(ctx, ca, caDir, ingestHost, prov, log)
 	if cfg.OverlayAllowAny {

@@ -1,6 +1,7 @@
 # Release pipeline (ADR-0006): the only place where release signatures are made.
-# Secrets: COSIGN_PRIVATE_KEY (cosign key pair, encrypted), COSIGN_PASSWORD.
-# The matching public key is committed as internal/sig/release.pub.
+# Secret: RELEASE_KEY_PEM — the ECDSA P-256 private key (PEM). Its public half is
+# committed as internal/sig/release.pub and compiled into every binary; a box only
+# installs what verifies against it. The key never touches a server.
 name: release
 
 on:
@@ -19,7 +20,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: sigstore/cosign-installer@v3
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -43,18 +43,31 @@ jobs:
 
       - name: sign
         env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          RELEASE_KEY_PEM: ${{ secrets.RELEASE_KEY_PEM }}
         run: |
+          test -n "$RELEASE_KEY_PEM" || { echo "secret RELEASE_KEY_PEM is missing"; exit 1; }
+          umask 077
+          printf '%s\n' "$RELEASE_KEY_PEM" > "$RUNNER_TEMP/release-key.pem"
           for f in dist/excubra_linux_amd64 dist/excubra_linux_arm64 dist/SHA256SUMS; do
-            cosign sign-blob --yes --key env://COSIGN_PRIVATE_KEY --output-signature "$f.sig" "$f"
+            openssl dgst -sha256 -sign "$RUNNER_TEMP/release-key.pem" -out "$f.der" "$f"
+            base64 -w0 "$f.der" > "$f.sig"
+            rm "$f.der"
           done
+          rm "$RUNNER_TEMP/release-key.pem"
 
       - name: verify against the committed public key
         run: |
           for f in dist/excubra_linux_amd64 dist/excubra_linux_arm64 dist/SHA256SUMS; do
-            cosign verify-blob --key internal/sig/release.pub --signature "$f.sig" "$f"
+            base64 -d "$f.sig" > "$RUNNER_TEMP/sig.der"
+            openssl dgst -sha256 -verify internal/sig/release.pub -signature "$RUNNER_TEMP/sig.der" "$f"
           done
+          go run ./tools/sigcheck dist/excubra_linux_amd64 dist/excubra_linux_amd64.sig
+
+      - name: manifest
+        run: |
+          go run ./tools/manifest -dir dist -version "${GITHUB_REF_NAME#v}" \
+            -base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" > dist/manifest.json
+          cat dist/manifest.json
 
       - name: publish
         env:

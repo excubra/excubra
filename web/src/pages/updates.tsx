@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Link } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
-import { Download } from "lucide-react"
+import { Download, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
 import { StatCard, StatGrid } from "@/components/stat-card"
@@ -11,11 +11,11 @@ import { Ago } from "@/components/clock"
 import { LiveDot } from "@/components/status"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { get, post, type Release, type UpdateRow, type UpdatesData } from "@/lib/api"
-import { fmtDateTime, fmtShort } from "@/lib/format"
+import { fmtDateTime, fmtShort, isZero } from "@/lib/format"
 
 const NONE = "__none"
 
@@ -71,8 +71,18 @@ export default function UpdatesPage() {
       {d && <DataTable columns={cols} data={d.Boxes ?? []} search={(r) => `${r.Name} ${r.ID} ${r.TenantName} ${r.SiteName} ${r.AgentVersion}`} searchPlaceholder="Box, Kunde oder Version" rowClass={(r) => r.Behind ? "border-l-2 border-l-destructive" : ""} emptyTitle="Noch keine Box" emptyText="Sobald eine Box eingeschrieben ist, steht sie hier mit ihrer Version." />}
       {d && (
         <Card>
-          <CardHeader><CardTitle>Hinterlegte Releases</CardTitle><CardDescription>Metadaten aus der Release-Pipeline: Version, Prüfsumme, Signatur und wo das Binary liegt. Hinterlegen auf dem Server: <code className="font-mono text-xs">excubra server release add …</code></CardDescription></CardHeader>
-          <CardContent><DataTable columns={relCols} data={d.Releases ?? []} pageSize={10} emptyTitle="Noch kein Release hinterlegt" emptyText="Ohne Release bietet der Server keiner Box ein Update an. Die Boxen laufen trotzdem weiter." /></CardContent>
+          <CardHeader>
+            <CardTitle>Releases</CardTitle>
+            <CardDescription>
+              {d.Catalog ? (
+                <>Der Server liest den Katalog des Projekts jede Stunde{d.Catalog.lastCheck && !isZero(d.Catalog.lastCheck) ? <>, zuletzt <Ago t={d.Catalog.lastCheck} /></> : ", noch nicht geprüft"}.
+                  {d.Catalog.lastError ? <span className="text-destructive"> Zuletzt fehlgeschlagen: {d.Catalog.lastError}</span> : d.Catalog.lastAdded?.length ? ` Zuletzt neu: ${d.Catalog.lastAdded.join(", ")}.` : ""}
+                  {" "}Jede Box prüft die Signatur selbst; der Server hält keine Binaries.</>
+              ) : <>Der Katalog ist abgeschaltet; Releases werden auf dem Server mit <code className="font-mono text-xs">excubra server release import …</code> hinterlegt.</>}
+            </CardDescription>
+            {d.Catalog && <CardAction><Button size="sm" variant="outline" onClick={() => act.mutate({ path: "/api/updates/catalog" })} disabled={act.isPending}><RefreshCw />Katalog jetzt prüfen</Button></CardAction>}
+          </CardHeader>
+          <CardContent><DataTable columns={relCols} data={d.Releases ?? []} pageSize={10} emptyTitle="Noch kein Release im Katalog" emptyText="Sobald die Pipeline eine Version veröffentlicht, erscheint sie hier von selbst. Ohne Release bietet der Server keiner Box ein Update an; die Boxen laufen trotzdem weiter." /></CardContent>
         </Card>
       )}
     </>
