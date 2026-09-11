@@ -340,3 +340,63 @@ func (s *Store) Rollups(ctx context.Context, tenantID, hostID string, from, to t
 	}
 	return out, nil
 }
+
+// AddConnectorSamples stores the numbers of one reading in the day database.
+func (s *Store) AddConnectorSamples(ctx context.Context, tenantID, connectorID string, at time.Time, metrics map[string]float64) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+	db, err := s.day(tenantID, DayOf(at))
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return wrap("connector samples", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for k, v := range metrics {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO connector_samples (connector_id, at, key, value) VALUES (?, ?, ?, ?)`, connectorID, ts(at), k, v); err != nil {
+			return wrap("connector samples", err)
+		}
+	}
+	return wrap("connector samples", tx.Commit())
+}
+
+// ConnectorSamples returns the samples of one key between from and to, oldest first.
+func (s *Store) ConnectorSamples(ctx context.Context, tenantID, connectorID, key string, from, to time.Time) ([]Sample, error) {
+	days, err := s.Days(tenantID)
+	if err != nil {
+		return nil, err
+	}
+	dFrom, dTo := DayOf(from), DayOf(to)
+	var out []Sample
+	for _, d := range days {
+		if d < dFrom || d > dTo {
+			continue
+		}
+		db, err := s.dayIfExists(tenantID, d)
+		if err != nil {
+			return nil, err
+		}
+		if db == nil {
+			continue
+		}
+		rows, err := db.QueryContext(ctx, `SELECT at, value FROM connector_samples WHERE connector_id = ? AND key = ? AND at >= ? AND at <= ? ORDER BY at`, connectorID, key, ts(from), ts(to))
+		if err != nil {
+			return nil, wrap("connector samples", err)
+		}
+		for rows.Next() {
+			var at string
+			var smp Sample
+			if err := rows.Scan(&at, &smp.Value); err != nil {
+				_ = rows.Close()
+				return nil, wrap("connector samples", err)
+			}
+			smp.At, smp.Key = parseTS(at), key
+			out = append(out, smp)
+		}
+		_ = rows.Close()
+	}
+	return out, nil
+}

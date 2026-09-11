@@ -440,6 +440,12 @@ func (e *Engine) Heartbeat(ctx context.Context, box store.Box, hb wire.Heartbeat
 		return wire.HeartbeatResponse{}, err
 	}
 	e.absorbNotesAndResults(ctx, box.ID, hb, now)
+	if hb.Agent.SealKey != "" {
+		if err := e.Store.SetBoxSealKey(ctx, box.ID, hb.Agent.SealKey); err != nil {
+			e.Log.Error("seal key", "box", box.ID, "err", err)
+		}
+	}
+	e.absorbConnectors(ctx, box, hb.Connectors, now)
 
 	site, assigned := e.sites[box.SiteID]
 	if assigned {
@@ -564,6 +570,19 @@ func (e *Engine) config(ctx context.Context, box store.Box) (wire.Config, error)
 		}
 		for _, t := range pending {
 			cfg.Tasks = append(cfg.Tasks, wire.Task{ID: t.ID, Kind: t.Kind, IssuedAt: t.IssuedAt})
+		}
+		if cfg.Assigned {
+			cons, err := e.Store.ConnectorsForBox(ctx, box.ID)
+			if err != nil {
+				return wire.Config{}, err
+			}
+			for _, c := range cons {
+				if c.Disabled || len(cfg.Connectors) >= wire.MaxConnectors {
+					continue
+				}
+				cfg.Connectors = append(cfg.Connectors, wire.ConnectorConfig{ID: c.ID, DeviceID: c.DeviceID, Kind: c.Kind, URL: c.URL, Sealed: c.Sealed,
+					IntervalS: c.IntervalS, TLSFingerprint: c.TLSFingerprint, Version: c.Version()})
+			}
 		}
 	}
 	cfg.Version = configVersion(cfg)
@@ -775,6 +794,32 @@ func (e *Engine) absorbNotesAndResults(ctx context.Context, boxID string, hb wir
 				outcome = "failed"
 			}
 			_ = e.audit(ctx, "box:"+boxID, "box.task.done", r.ID, fmt.Sprintf("%s %s: %s", r.Kind, outcome, detail))
+		}
+	}
+}
+
+// absorbConnectors stores connector readings and their numbers (ADR-0015).
+func (e *Engine) absorbConnectors(ctx context.Context, box store.Box, reports []wire.ConnectorReport, now time.Time) {
+	if len(reports) > wire.MaxConnectors {
+		reports = reports[:wire.MaxConnectors]
+	}
+	site, assigned := e.sites[box.SiteID]
+	for _, r := range reports {
+		if len(r.Facts) > wire.MaxConnectorFactsSize {
+			r.Facts = nil
+		}
+		err := e.Store.UpdateConnectorReading(ctx, box.ID, r, now)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			continue // not this box's connector, or deleted meanwhile
+		case err != nil:
+			e.Log.Error("connector reading", "box", box.ID, "connector", r.ID, "err", err)
+			continue
+		}
+		if r.OK && assigned && len(r.Metrics) > 0 {
+			if err := e.Store.AddConnectorSamples(ctx, site.TenantID, r.ID, now, r.Metrics); err != nil {
+				e.Log.Error("connector samples", "connector", r.ID, "err", err)
+			}
 		}
 	}
 }

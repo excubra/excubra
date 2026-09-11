@@ -138,6 +138,20 @@ Vorgänge Phase 1 (Meilenstein „EX0 dünn (Phase 1)"):
 | Phase 2: Erkennung | `490a8f0a742c6c4a3cc239d6eef00ead` |
 | Erste Kundenbox beim KfT (Container kft-box auf dem Proxmox) | `7a730e2d28eb1101f9b2ccc3d7fb2dac` |
 | Konsole: Neuaufbau 2026 (Vollbild, Standort-Seite, HTTPS, 2-Schritt-Login) | `394362a764f565df0ac8bf6f380295e5` |
+| Konsole: Aktionen — Aufgaben an Boxen, Update-Verwaltung, Quittieren, Box-Meldungen | `fe2be95e18e19c52a1d7710a46694fe7` |
+
+Vollausbau (Meilenstein „EX0 Vollausbau“, Konzept `2205aceb016e9cd8fa466b9178cf5358`, Entscheidung E15 auf der Entscheidungen-Seite; E16 wartet auf Jeremia):
+
+| Vorgang | Id |
+| --- | --- |
+| V1 Konnektoren lesen: FortiGate und Starface über die Box | `2257581b987938d1d7278e23d17cd204` |
+| V2 Operator-Signatur und typisierte Aufträge mit Freigabe | `8d452d2a9a78824a22ce241a8c275c05` |
+| V3 Konfigurationsverwaltung: Vorlagen, Soll/Ist, Drift, Rollout | `46c7d18d89e2dda12609015f68e95adb` |
+| V4 Geräte-Updates: Firmware im Wartungsfenster | `cd9d0aa1c99942a7c63c6f46df915a36` |
+| V5 Logs je Gerät: Syslog auf der Box | `ec112b04db852350e880c00d4d7eaad5` |
+| V6 Prävention: Regeln, Findings, KI-Triage | `9e2fd416e808b9cb70941e54ff8f6e9e` |
+| V7 Client-Agent für Windows/macOS/Linux | `8acfaa93416f7658c992857b3e5173b9` |
+| V8 Weitere Konnektoren: Proxmox, TrueNAS, UniFi, SNMP | `0daaa5c4a5d3fbfa62bebe0e88609845` |
 
 ### Die Regeln des Workspace (Wortlaut, Stand 2026-09-05)
 

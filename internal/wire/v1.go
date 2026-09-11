@@ -4,6 +4,7 @@
 package wire
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -66,17 +67,18 @@ type RenewResponse struct {
 
 // Heartbeat is POST /v1/heartbeat, once per minute per box.
 type Heartbeat struct {
-	SentAt        time.Time       `json:"sent_at"`
-	Agent         AgentInfo       `json:"agent"`
-	Box           BoxInfo         `json:"box"`
-	Netbird       NetbirdInfo     `json:"netbird"`
-	ConfigVersion string          `json:"config_version"`
-	ConfigErrors  []string        `json:"config_errors,omitempty"`
-	Notes         []string        `json:"notes,omitempty"` // what the agent wants an operator to see, e.g. a rollback
-	Hosts         []HostReport    `json:"hosts,omitempty"`
-	Discovery     DiscoveryReport `json:"discovery"`
-	Buffer        BufferInfo      `json:"buffer"`
-	TaskResults   []TaskResult    `json:"task_results,omitempty"` // finished tasks since the last successful heartbeat
+	SentAt        time.Time         `json:"sent_at"`
+	Agent         AgentInfo         `json:"agent"`
+	Box           BoxInfo           `json:"box"`
+	Netbird       NetbirdInfo       `json:"netbird"`
+	ConfigVersion string            `json:"config_version"`
+	ConfigErrors  []string          `json:"config_errors,omitempty"`
+	Notes         []string          `json:"notes,omitempty"` // what the agent wants an operator to see, e.g. a rollback
+	Hosts         []HostReport      `json:"hosts,omitempty"`
+	Discovery     DiscoveryReport   `json:"discovery"`
+	Buffer        BufferInfo        `json:"buffer"`
+	TaskResults   []TaskResult      `json:"task_results,omitempty"` // finished tasks since the last successful heartbeat
+	Connectors    []ConnectorReport `json:"connectors,omitempty"`   // latest reading of every connector (ADR-0015)
 }
 
 // AgentInfo describes the running agent.
@@ -86,6 +88,7 @@ type AgentInfo struct {
 	BootID  string `json:"boot_id,omitempty"`
 	OS      string `json:"os"`
 	Arch    string `json:"arch"`
+	SealKey string `json:"seal_key,omitempty"` // base64 X25519 public key credentials are sealed to (ADR-0015)
 }
 
 // BoxInfo is the box's self-monitoring snapshot.
@@ -177,14 +180,15 @@ type HeartbeatResponse struct {
 
 // Config is GET /v1/config. Version doubles as ETag.
 type Config struct {
-	Version        string          `json:"version"`
-	Assigned       bool            `json:"assigned"`
-	Intervals      Intervals       `json:"intervals"`
-	Hosts          []HostConfig    `json:"hosts"`
-	Discovery      DiscoveryConfig `json:"discovery"`
-	NetbirdPending bool            `json:"netbird_pending"`
-	Update         UpdateConfig    `json:"update"`
-	Tasks          []Task          `json:"tasks,omitempty"` // pending one-shot tasks (ADR-0014)
+	Version        string            `json:"version"`
+	Assigned       bool              `json:"assigned"`
+	Intervals      Intervals         `json:"intervals"`
+	Hosts          []HostConfig      `json:"hosts"`
+	Discovery      DiscoveryConfig   `json:"discovery"`
+	NetbirdPending bool              `json:"netbird_pending"`
+	Update         UpdateConfig      `json:"update"`
+	Tasks          []Task            `json:"tasks,omitempty"`      // pending one-shot tasks (ADR-0014)
+	Connectors     []ConnectorConfig `json:"connectors,omitempty"` // devices to read through their API (ADR-0015)
 }
 
 // Intervals in seconds.
@@ -295,6 +299,60 @@ type TaskResult struct {
 	OK         bool      `json:"ok"`
 	Detail     string    `json:"detail,omitempty"`
 	FinishedAt time.Time `json:"finished_at"` // box time
+}
+
+// ---- connectors (ADR-0015) ----------------------------------------------------------
+
+// ConnectorConfig tells the box to read one device through its API. The credential
+// is sealed in the browser to this box's seal key; the server relays ciphertext.
+type ConnectorConfig struct {
+	ID             string `json:"id"`
+	DeviceID       string `json:"device_id"`
+	Kind           string `json:"kind"`
+	URL            string `json:"url"` // scheme and host, no path: https://192.168.1.1
+	Sealed         string `json:"sealed"`
+	IntervalS      int    `json:"interval_s"`
+	TLSFingerprint string `json:"tls_fingerprint,omitempty"` // sha256 of the device certificate to pin; empty = accept and report
+	Version        string `json:"version"`                   // changes with url, credential or pin; the box restarts the reader
+}
+
+// Connector kinds — the complete list. Each is a reader in internal/agent/connect.
+const (
+	ConnectorFortiGate = "fortigate"
+	ConnectorStarface  = "starface"
+)
+
+// ConnectorKinds lists the kinds in display order.
+var ConnectorKinds = []string{ConnectorFortiGate, ConnectorStarface}
+
+// ValidConnectorKind reports whether k is one of the closed list.
+func ValidConnectorKind(k string) bool {
+	for _, x := range ConnectorKinds {
+		if x == k {
+			return true
+		}
+	}
+	return false
+}
+
+// Bounds on connectors per box and facts per report.
+const (
+	MaxConnectors         = 64
+	MaxConnectorFactsSize = 32 * 1024
+)
+
+// ConnectorReport is the latest reading of one connector. Facts travel only when
+// they changed since the server last acknowledged them; Metrics travel every time.
+type ConnectorReport struct {
+	ID             string             `json:"id"`
+	DeviceID       string             `json:"device_id"`
+	Kind           string             `json:"kind"`
+	OK             bool               `json:"ok"`
+	Error          string             `json:"error,omitempty"`
+	CollectedAt    time.Time          `json:"collected_at"` // box time
+	Facts          json.RawMessage    `json:"facts,omitempty"`
+	Metrics        map[string]float64 `json:"metrics,omitempty"`
+	TLSFingerprint string             `json:"tls_fingerprint,omitempty"` // what the device presented
 }
 
 // ---- update and netbird -------------------------------------------------------

@@ -11,10 +11,12 @@ package console_test
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,6 +183,39 @@ func seedActions(t *testing.T, f *fixture) {
 	}
 	if err := f.st.SetChannelVersion(ctx, "canary", "0.2.0"); err != nil {
 		t.Fatal(err)
+	}
+	// a FortiGate connector with a reading, so the device page has something to show
+	if err := f.st.SetBoxSealKey(ctx, box, "TzzOyQfgRGO42lA8akZ+KD6gNw7wrOUoWromV7sS/Sw="); err != nil {
+		t.Fatal(err)
+	}
+	devs, err := f.st.Devices(ctx, "ten_kft", "site_geschaeftsstelle", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range devs {
+		if d.IP != "192.168.100.254" {
+			continue
+		}
+		c := store.Connector{ID: "con_fgt01", TenantID: "ten_kft", SiteID: "site_geschaeftsstelle", BoxID: box, DeviceID: d.ID, Kind: wire.ConnectorFortiGate, URL: "https://192.168.100.254",
+			Sealed: strings.Repeat("A", 120), SealedBy: "console:jeremia", SealedAt: now.Add(-2 * time.Hour), IntervalS: 300, CreatedAt: now.Add(-2 * time.Hour)}
+		if err := f.st.CreateConnector(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+		facts := `{"serial":"FGT60FTK21012345","version":"v7.2.8","build":1639,"hostname":"KFT-FW01","model":"FortiGate 60F","log_disk":"available","ha_mode":"standalone",
+			"admin_https_port":8443,"admin_ssh_port":22,"admin_timeout_min":5,"timezone":"Europe/Berlin",
+			"interfaces":[{"name":"wan1","alias":"Telekom","link":true,"ip":"217.0.0.12","speed":1000},{"name":"internal","alias":"LAN","link":true,"ip":"192.168.100.254","speed":1000},{"name":"dmz","alias":"","link":false,"ip":"","speed":0}],
+			"ipsec":[{"name":"to-viico","gateway":"144.76.67.109","up":true,"phase2":[{"name":"to-viico-p2","status":"up","in_bytes":1284211,"out_bytes":934102}]},{"name":"to-hq","gateway":"198.51.100.1","up":false,"phase2":[{"name":"hq-p2","status":"down"}]}],
+			"licenses":{"forticare":{"status":"registered"},"antivirus":{"status":"licensed","expires":1790000000},"ips":{"status":"licensed","expires":1790000000},"web_filter":{"status":"expired","expires":1750000000}}}`
+		rep := wire.ConnectorReport{ID: c.ID, DeviceID: d.ID, Kind: wire.ConnectorFortiGate, OK: true, CollectedAt: now.Add(-3 * time.Minute), Facts: json.RawMessage(facts),
+			Metrics:        map[string]float64{"cpu_pct": 6, "mem_pct": 38, "sessions": 1240, "disk_pct": 3, "interfaces_up": 2, "interfaces_down": 1, "ipsec_up": 1, "ipsec_down": 1, "licenses_expired": 1},
+			TLSFingerprint: "3c9a0f4d7b1e2a5c6d8f9e0b1a2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4"}
+		if err := f.st.UpdateConnectorReading(ctx, box, rep, now.Add(-3*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 24; i++ {
+			at := now.Add(-time.Duration(i) * time.Hour)
+			_ = f.st.AddConnectorSamples(ctx, "ten_kft", c.ID, at, map[string]float64{"cpu_pct": float64(4 + i%7), "sessions": float64(900 + (i*137)%600)})
+		}
 	}
 	views, err := f.eng.HostViews(ctx, "ten_kft")
 	if err != nil {

@@ -28,3 +28,4 @@ Rules:
 | [0012](0012-webhook-delivery.md) | Webhook delivery: HMAC, retry, idempotency |
 | [0013](0013-console-spa.md) | The console is a single-page app, built at build time and embedded |
 | [0014](0014-box-tasks.md) | Box tasks: a closed list, pulled with the config, run once |
+| [0015](0015-connectors-and-sealed-credentials.md) | Connectors read devices from the box; credentials are sealed to the box |
