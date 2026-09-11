@@ -18,6 +18,7 @@ import (
 
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/id"
+	"github.com/excubra/excubra/internal/server/rules"
 	"github.com/excubra/excubra/internal/server/state"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/wire"
@@ -616,6 +617,9 @@ func (e *Engine) Tick(ctx context.Context) error {
 	if err := e.Store.PruneBoxTasks(ctx, now.Add(-taskHistory)); err != nil {
 		return err
 	}
+	if err := e.Store.PruneFindings(ctx, now.Add(-taskHistory)); err != nil {
+		return err
+	}
 	// windows the machine expired are deleted from the store
 	live := map[string]bool{}
 	for _, w := range e.m.Maintenances() {
@@ -821,6 +825,9 @@ func (e *Engine) absorbConnectors(ctx context.Context, box store.Box, reports []
 				e.Log.Error("connector samples", "connector", r.ID, "err", err)
 			}
 		}
+		if r.OK {
+			e.evaluateRules(ctx, r.ID, r.Metrics, now)
+		}
 		if r.TokenSealed != "" && len(r.TokenSealed) <= 16*1024 {
 			if err := e.Store.ReplaceConnectorSealed(ctx, box.ID, r.ID, r.TokenSealed, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 				e.Log.Error("connector bootstrap credential", "connector", r.ID, "err", err)
@@ -828,5 +835,32 @@ func (e *Engine) absorbConnectors(ctx context.Context, box store.Box, reports []
 				_ = e.audit(ctx, "box:"+box.ID, "connector.bootstrap", r.ID, "device credential replaced by the box's own API token")
 			}
 		}
+	}
+}
+
+// evaluateRules runs the prevention rules over the connector's stored facts and the
+// metrics of this reading, and syncs the findings (open, still open, resolved).
+func (e *Engine) evaluateRules(ctx context.Context, connectorID string, metrics map[string]float64, now time.Time) {
+	c, err := e.Store.Connector(ctx, connectorID)
+	if err != nil {
+		return
+	}
+	facts := map[string]any{}
+	if len(c.Facts) > 0 {
+		_ = json.Unmarshal(c.Facts, &facts)
+	}
+	found := rules.Evaluate(rules.Input{Kind: c.Kind, Facts: facts, Metrics: metrics, Pinned: c.TLSFingerprint != "", Now: now})
+	current := make([]store.Finding, 0, len(found))
+	for _, f := range found {
+		ev, _ := json.Marshal(f.Evidence)
+		current = append(current, store.Finding{ID: id.New("fnd"), TenantID: c.TenantID, SiteID: c.SiteID, DeviceID: c.DeviceID, ConnectorID: c.ID,
+			Rule: f.Rule, Key: f.Key, Severity: f.Severity, Title: f.Title, Detail: f.Detail, Evidence: ev})
+	}
+	resolved, err := e.Store.SyncFindings(ctx, c.ID, current, now)
+	if err != nil {
+		e.Log.Error("findings", "connector", c.ID, "err", err)
+	}
+	for _, fid := range resolved { // a resolved finding takes its acknowledgement with it
+		_ = e.Store.DeleteAck(ctx, "finding", fid)
 	}
 }

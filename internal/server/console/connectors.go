@@ -283,6 +283,9 @@ func (s *Server) connectorToggle(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, statusFor(err))
 		return
 	}
+	if !c.Disabled {
+		s.closeFindings(ctx, c.ID)
+	}
 	_ = s.Store.Audit(ctx, s.Now(), actor(r), "connector.toggle", c.ID, strconv.FormatBool(!c.Disabled))
 	if c.Disabled {
 		s.flash(w, r, "Konnektor wieder aktiv.", back)
@@ -303,6 +306,7 @@ func (s *Server) connectorDelete(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, statusFor(err))
 		return
 	}
+	s.closeFindings(ctx, c.ID)
 	_ = s.Store.Audit(ctx, s.Now(), actor(r), "connector.delete", c.ID, ConnectorLabel(c.Kind)+" "+c.URL)
 	s.flash(w, r, "Konnektor entfernt; die versiegelten Zugangsdaten sind gelöscht.", back)
 }
@@ -373,3 +377,15 @@ var errBadKey = errBadRequest("key fehlt")
 type errBadRequest string
 
 func (e errBadRequest) Error() string { return string(e) }
+
+// closeFindings resolves a connector's findings and drops their acknowledgements.
+func (s *Server) closeFindings(ctx context.Context, connectorID string) {
+	ids, err := s.Store.ResolveConnectorFindings(ctx, connectorID, s.Now())
+	if err != nil {
+		s.Log.Error("resolve findings", "connector", connectorID, "err", err)
+		return
+	}
+	for _, id := range ids {
+		_ = s.Store.DeleteAck(ctx, "finding", id)
+	}
+}

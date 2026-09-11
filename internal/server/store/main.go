@@ -1369,3 +1369,145 @@ func (s *Store) UpdateConnectorReading(ctx context.Context, boxID string, r wire
 func (s *Store) ReplaceConnectorSealed(ctx context.Context, boxID, id, sealed string, at time.Time) error {
 	return s.exec1(ctx, "replace connector sealed", `UPDATE connectors SET sealed = ?, sealed_by = ?, sealed_at = ? WHERE id = ? AND box_id = ?`, sealed, "box:"+boxID, ts(at), id, boxID)
 }
+
+// ---- findings ------------------------------------------------------------------------------
+
+const findingCols = `id, tenant_id, site_id, device_id, connector_id, rule, key, severity, title, detail, evidence, first_seen, last_seen, resolved_at`
+
+func scanFinding(sc interface{ Scan(...any) error }) (Finding, error) {
+	var f Finding
+	var ev, first, last string
+	var resolved sql.NullString
+	err := sc.Scan(&f.ID, &f.TenantID, &f.SiteID, &f.DeviceID, &f.ConnectorID, &f.Rule, &f.Key, &f.Severity, &f.Title, &f.Detail, &ev, &first, &last, &resolved)
+	f.Evidence = json.RawMessage(ev)
+	f.FirstSeen, f.LastSeen = parseTS(first), parseTS(last)
+	f.ResolvedAt = parseTSP(resolved)
+	return f, err
+}
+
+func (s *Store) findings(ctx context.Context, q string, args ...any) ([]Finding, error) {
+	rows, err := s.main.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, wrap("findings", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Finding
+	for rows.Next() {
+		f, err := scanFinding(rows)
+		if err != nil {
+			return nil, wrap("findings", err)
+		}
+		out = append(out, f)
+	}
+	return out, wrap("findings", rows.Err())
+}
+
+// SyncFindings makes the open findings of one connector equal to current: known ones
+// get a new last_seen (and title/detail/severity), new or previously resolved ones open
+// with first_seen = now, and open ones that are not in current are resolved. It
+// returns the ids of the findings it resolved, so their acknowledgements can go too.
+func (s *Store) SyncFindings(ctx context.Context, connectorID string, current []Finding, now time.Time) ([]string, error) {
+	tx, err := s.main.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, wrap("sync findings", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	keys := make([]any, 0, len(current))
+	for _, f := range current {
+		if len(f.Evidence) == 0 {
+			f.Evidence = json.RawMessage("{}")
+		}
+		keys = append(keys, f.Rule+"/"+f.Key)
+		_, err := tx.ExecContext(ctx, `INSERT INTO findings (`+findingCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+			ON CONFLICT (device_id, rule, key) DO UPDATE SET
+				connector_id = excluded.connector_id, severity = excluded.severity, title = excluded.title, detail = excluded.detail, evidence = excluded.evidence,
+				last_seen = excluded.last_seen,
+				first_seen = CASE WHEN findings.resolved_at IS NULL THEN findings.first_seen ELSE excluded.first_seen END,
+				resolved_at = NULL`,
+			f.ID, f.TenantID, f.SiteID, f.DeviceID, connectorID, f.Rule, f.Key, f.Severity, f.Title, f.Detail, string(f.Evidence), ts(now), ts(now))
+		if err != nil {
+			return nil, wrap("sync findings", err)
+		}
+	}
+	where := ` WHERE connector_id = ? AND resolved_at IS NULL`
+	args := []any{connectorID}
+	if len(keys) > 0 {
+		where += ` AND (rule || '/' || key) NOT IN (?` + strings.Repeat(", ?", len(keys)-1) + `)` //nolint:gosec // placeholders only; the values are bound
+		args = append(args, keys...)
+	}
+	resolved, err := idsOf(tx.QueryContext(ctx, `SELECT id FROM findings`+where, args...))
+	if err != nil {
+		return nil, wrap("sync findings", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE findings SET resolved_at = ?`+where, append([]any{ts(now)}, args...)...); err != nil {
+		return nil, wrap("sync findings", err)
+	}
+	return resolved, wrap("sync findings", tx.Commit())
+}
+
+// ResolveConnectorFindings closes every open finding of a connector (it was deleted or
+// paused) and returns their ids.
+func (s *Store) ResolveConnectorFindings(ctx context.Context, connectorID string, now time.Time) ([]string, error) {
+	ids, err := idsOf(s.main.QueryContext(ctx, `SELECT id FROM findings WHERE connector_id = ? AND resolved_at IS NULL`, connectorID))
+	if err != nil {
+		return nil, wrap("resolve connector findings", err)
+	}
+	_, err = s.main.ExecContext(ctx, `UPDATE findings SET resolved_at = ? WHERE connector_id = ? AND resolved_at IS NULL`, ts(now), connectorID)
+	return ids, wrap("resolve connector findings", err)
+}
+
+func idsOf(rows *sql.Rows, err error) ([]string, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// OpenFindings returns every open finding, worst first, oldest first within a severity.
+func (s *Store) OpenFindings(ctx context.Context, tenantID string) ([]Finding, error) {
+	order := ` ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, first_seen, id`
+	if tenantID == "" {
+		return s.findings(ctx, `SELECT `+findingCols+` FROM findings WHERE resolved_at IS NULL`+order)
+	}
+	return s.findings(ctx, `SELECT `+findingCols+` FROM findings WHERE resolved_at IS NULL AND tenant_id = ?`+order, tenantID)
+}
+
+// FindingsForDevice returns the open findings of a device plus those resolved since.
+func (s *Store) FindingsForDevice(ctx context.Context, deviceID string, resolvedSince time.Time) ([]Finding, error) {
+	return s.findings(ctx, `SELECT `+findingCols+` FROM findings WHERE device_id = ? AND (resolved_at IS NULL OR resolved_at >= ?)
+		ORDER BY resolved_at IS NOT NULL, CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, first_seen`, deviceID, ts(resolvedSince))
+}
+
+// FindingCounts counts open findings per severity.
+func (s *Store) FindingCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.main.QueryContext(ctx, `SELECT severity, COUNT(*) FROM findings WHERE resolved_at IS NULL GROUP BY severity`)
+	if err != nil {
+		return nil, wrap("finding counts", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int{}
+	for rows.Next() {
+		var sev string
+		var n int
+		if err := rows.Scan(&sev, &n); err != nil {
+			return nil, wrap("finding counts", err)
+		}
+		out[sev] = n
+	}
+	return out, wrap("finding counts", rows.Err())
+}
+
+// PruneFindings deletes findings resolved before the cutoff.
+func (s *Store) PruneFindings(ctx context.Context, before time.Time) error {
+	_, err := s.main.ExecContext(ctx, `DELETE FROM findings WHERE resolved_at IS NOT NULL AND resolved_at < ?`, ts(before))
+	return wrap("prune findings", err)
+}

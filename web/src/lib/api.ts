@@ -43,7 +43,7 @@ export async function post<T = { ok: boolean; message: string }>(path: string, f
 
 // ---- types mirrored from the Go side (field names as Go marshals them) ----
 
-export interface Me { user: string; csrf: string; version: string; now: string; secure: boolean; Nav: { Tenants: number; Boxes: number; Unassigned: number; Attention: number } }
+export interface Me { user: string; csrf: string; version: string; now: string; secure: boolean; Nav: { Tenants: number; Boxes: number; Unassigned: number; Attention: number; Findings: number } }
 
 export interface BoxState { ID: string; Status: string; LastHeartbeat: string; SilentSince: string; AgentVersion: string }
 export interface BoxRow {
@@ -126,3 +126,10 @@ export interface ConnectorView {
 export interface KindMode { id: string; label: string; hint: string; fields: string[] }
 export interface KindOption { kind: string; label: string; fields: string[]; modes?: KindMode[] }
 export interface DeviceConnectors { box: BoxRow | null; sealKey: string; fingerprint: string; online: boolean; kinds: KindOption[]; connectors: ConnectorView[] }
+export interface FindingView {
+  id: string; tenantId: string; tenant: string; siteId: string; site: string; deviceId: string; device: string; connectorId: string
+  rule: string; key: string; severity: "high" | "medium" | "low"; title: string; detail: string; evidence: Record<string, unknown>
+  firstSeen: string; lastSeen: string; resolvedAt: string | null; ack?: AckView
+}
+export interface FindingsData { open: FindingView[]; resolved?: FindingView[]; counts: Record<string, number> }
+export interface SamplePoint { at: string; value: number }

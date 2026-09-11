@@ -39,7 +39,7 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
           )
         })}
         <CommandGroup heading="Seiten">
-          {[["/", "Übersicht"], ["/tenants", "Kunden"], ["/events", "Ereignisse"], ["/boxes", "Boxen"], ["/updates", "Updates"], ["/maintenance", "Wartung"], ["/keys", "Enrollment-Keys"], ["/webhooks", "Webhooks"], ["/tokens", "API-Tokens"], ["/users", "Benutzer"], ["/audit", "Audit-Log"]].map(([to, label]) => (
+          {[["/", "Übersicht"], ["/tenants", "Kunden"], ["/events", "Ereignisse"], ["/findings", "Prävention"], ["/boxes", "Boxen"], ["/updates", "Updates"], ["/maintenance", "Wartung"], ["/keys", "Enrollment-Keys"], ["/webhooks", "Webhooks"], ["/tokens", "API-Tokens"], ["/users", "Benutzer"], ["/audit", "Audit-Log"]].map(([to, label]) => (
             <CommandItem key={to} value={"page " + label} onSelect={() => go(to)}>{label}</CommandItem>
           ))}
         </CommandGroup>

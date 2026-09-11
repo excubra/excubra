@@ -14,6 +14,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { Skeleton } from "@/components/ui/skeleton"
 import { Ago } from "@/components/clock"
 import { SealFingerprint } from "@/components/seal-fingerprint"
+import { MetricChart } from "@/components/metric-chart"
 import { get, post, type ConnectorView, type DeviceConnectors, type KindOption } from "@/lib/api"
 import { sealFor } from "@/lib/seal"
 import { fmtDateTime } from "@/lib/format"
@@ -90,6 +91,7 @@ function ConnectorCard({ c, d, deviceId, pending, onAct, onDone }: { c: Connecto
       <CardContent className="flex flex-col gap-4">
         {c.class === "failed" && <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm"><span className="font-medium text-destructive">Lesung fehlgeschlagen:</span> {c.lastError}</div>}
         {metrics.length > 0 && <div className="flex flex-wrap gap-2">{metrics.map(([k, v]) => <Badge key={k} variant="secondary" className="font-mono text-xs">{METRIC_LABEL[k](v)}</Badge>)}</div>}
+        {metrics.length > 0 && <MetricChart connectorId={c.id} metrics={c.metrics} />}
         <FactsView facts={c.facts} />
       </CardContent>
     </Card>

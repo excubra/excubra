@@ -29,6 +29,7 @@ type navCounts struct {
 	Boxes      int
 	Unassigned int
 	Attention  int // hosts down + assigned boxes silent: what needs a person now
+	Findings   int // open findings of the rules
 }
 
 func (s *Server) navCounts(ctx context.Context) navCounts {
@@ -61,6 +62,11 @@ func (s *Server) navCounts(ctx context.Context) navCounts {
 			if c, _ := classify(v); c == "down" && ackFor(acks, "host_down", v.ID, v.State.Since) == nil {
 				n.Attention++
 			}
+		}
+	}
+	if counts, err := s.Store.FindingCounts(ctx); err == nil {
+		for _, c := range counts {
+			n.Findings += c
 		}
 	}
 	return n

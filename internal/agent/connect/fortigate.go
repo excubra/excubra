@@ -110,6 +110,26 @@ func (fortigate) Read(ctx context.Context, t Target) (Reading, error) {
 		optional("resource usage", err)
 	}
 
+	// interface configuration: role and which management protocols each one allows
+	type ifCfg struct {
+		Name        string `json:"name"`
+		Role        string `json:"role"`
+		AllowAccess string `json:"allowaccess"`
+		Status      string `json:"status"`
+		Type        string `json:"type"`
+	}
+	var ifc struct {
+		Results []ifCfg `json:"results"`
+	}
+	cfgByName := map[string]ifCfg{}
+	if err := get("/api/v2/cmdb/system/interface", &ifc); err == nil {
+		for _, c := range ifc.Results {
+			cfgByName[c.Name] = c
+		}
+	} else {
+		optional("interface config", err)
+	}
+
 	// interfaces
 	var ifs struct {
 		Results map[string]struct {
@@ -134,7 +154,16 @@ func (fortigate) Read(ctx context.Context, t Target) (Reading, error) {
 			} else {
 				down++
 			}
-			list = append(list, map[string]any{"name": i.Name, "alias": i.Alias, "link": i.Link, "ip": i.IP, "speed": i.Speed, "rx_bytes": i.RxBytes, "tx_bytes": i.TxBytes})
+			entry := map[string]any{"name": i.Name, "alias": i.Alias, "link": i.Link, "ip": i.IP, "speed": i.Speed, "rx_bytes": i.RxBytes, "tx_bytes": i.TxBytes}
+			if c, ok := cfgByName[i.Name]; ok {
+				entry["role"] = c.Role
+				entry["admin"] = c.AllowAccess
+				entry["type"] = c.Type
+				if c.Status != "" {
+					entry["enabled"] = c.Status == "up"
+				}
+			}
+			list = append(list, entry)
 		}
 		sort.Slice(list, func(a, b int) bool { return list[a]["name"].(string) < list[b]["name"].(string) })
 		facts["interfaces"] = list

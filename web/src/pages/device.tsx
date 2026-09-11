@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
-import { Bot, FileText, Plug, Radar, ScrollText } from "lucide-react"
+import { FileText, Plug, Radar, ScrollText, ShieldAlert } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
 import { StatCard, StatGrid } from "@/components/stat-card"
@@ -18,6 +18,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { Skeleton } from "@/components/ui/skeleton"
 import { get, post, type DeviceDetail, type EventRow } from "@/lib/api"
 import { ConnectorPanel } from "@/components/connector-panel"
+import { DeviceFindings } from "@/components/device-findings"
 import { fmtDateTime, fmtTime, pct } from "@/lib/format"
 
 function Row({ k, children, mono }: { k: string; children: React.ReactNode; mono?: boolean }) {
@@ -68,7 +69,7 @@ export default function DevicePage() {
           <TabsTrigger value="ereignisse">Ereignisse <Badge variant="secondary" className="ml-1">{d.events?.length ?? 0}</Badge></TabsTrigger>
           <TabsTrigger value="logs"><ScrollText className="size-3.5" />Logs</TabsTrigger>
           <TabsTrigger value="konnektor"><Plug className="size-3.5" />Konnektor</TabsTrigger>
-          <TabsTrigger value="ki"><Bot className="size-3.5" />KI</TabsTrigger>
+          <TabsTrigger value="praevention"><ShieldAlert className="size-3.5" />Prävention</TabsTrigger>
         </TabsList>
 
         <TabsContent value="uebersicht" className="mt-4 grid gap-4 @4xl/main:grid-cols-2">
@@ -127,8 +128,8 @@ export default function DevicePage() {
         <TabsContent value="konnektor" className="mt-4">
           <ConnectorPanel deviceId={id} />
         </TabsContent>
-        <TabsContent value="ki" className="mt-4">
-          <Empty className="border"><EmptyHeader><EmptyMedia variant="icon"><Bot /></EmptyMedia><EmptyTitle>KI-Hinweise kommen nach den Regeln</EmptyTitle><EmptyDescription>Erst deterministische Regeln über Logs und Ereignisse, dann die LLM-Triage obendrauf, die Rauschen filtert und Alarme mit Kontext anreichert. Hier erscheint dann, was die KI zu diesem Gerät sagt.</EmptyDescription></EmptyHeader></Empty>
+        <TabsContent value="praevention" className="mt-4">
+          <DeviceFindings deviceId={id} />
         </TabsContent>
       </Tabs>
       <span className="hidden" onClick={() => navigate("/")} />
