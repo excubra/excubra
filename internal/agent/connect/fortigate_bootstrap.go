@@ -126,7 +126,7 @@ func fortigateBootstrap(ctx context.Context, t Target, adminUser, adminPass stri
 	}
 
 	// 3. the API user, trusted only from the box's own address
-	boxIP := localIPFor(u.Host)
+	boxIP := localIPFor(ctx, u.Host)
 	if !exists("/api/v2/cmdb/system/api-user/" + fgtAPIUser) {
 		user := map[string]any{"name": fgtAPIUser, "accprofile": fgtProfile, "comments": "EX0 box, read-only", "vdom": []map[string]string{{"name": "root"}}}
 		if boxIP != "" {
@@ -158,16 +158,17 @@ func fortigateBootstrap(ctx context.Context, t Target, adminUser, adminPass stri
 }
 
 // localIPFor is the address the box uses towards host:port (no packet is sent).
-func localIPFor(hostport string) string {
+func localIPFor(ctx context.Context, hostport string) string {
 	host, port, err := net.SplitHostPort(hostport)
 	if err != nil {
 		host, port = hostport, "443"
 	}
-	conn, err := net.Dial("udp", net.JoinHostPort(host, port))
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "udp", net.JoinHostPort(host, port))
 	if err != nil {
 		return ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if a, ok := conn.LocalAddr().(*net.UDPAddr); ok && a.IP.To4() != nil {
 		return a.IP.String()
 	}
