@@ -41,6 +41,23 @@ make web          # only the console: web/ → internal/server/console/webdist
 `go build ./cmd/excubra` on its own still works without Node; the binary then serves a
 placeholder page under `/app/` instead of the console (ADR-0013).
 
+## Updates
+
+Releases are built and signed by the project's GitHub Actions workflow; the public
+key is compiled into every binary. Every server imports the release list hourly
+(`EXCUBRA_RELEASE_CATALOG`, `off` to disable) and shows it under *Updates* in the
+console. From there an operator points a channel (`stable`, `canary`) at a version;
+boxes and the server itself follow their channel, verify the signature, trial-run
+the new binary, swap it, restart and roll back on their own if the new build does
+not confirm within five minutes. Nothing is pushed to a customer network.
+
+```
+excubra server release sync                 # import new releases now
+excubra server release channel stable 0.2.3 # what boxes on stable should run
+excubra server box task <box_id> update     # ask one box to check now
+excubra server update now                   # let this server check now
+```
+
 ## Licence
 
 Apache License 2.0 — see [LICENSE](LICENSE).
