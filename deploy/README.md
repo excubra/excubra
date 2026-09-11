@@ -29,7 +29,19 @@ binary update, it keeps `/etc/excubra/server.env` and the data directory. What i
 - a smoke test: `/healthz` answers, and the ingest answers 401 without a client
   certificate. It fails loudly instead of leaving a half-provisioned host.
 
-After that, on the host:
+## Updating the binary
+
+For a new build on a host that is already provisioned:
+
+```
+deploy/update-server.sh root@<host>
+```
+
+Builds the console and the binary from the current commit, swaps the binary
+atomically, restarts the service and fails loudly if `/healthz` does not answer with
+the new version. Configuration, units and data are untouched.
+
+After provisioning, on the host:
 
 ```
 excubra server user add jeremia        # prints the initial password and the TOTP secret once
