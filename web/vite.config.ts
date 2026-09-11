@@ -9,6 +9,6 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   base: "/app/",
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
-  build: { outDir: "../internal/server/console/webdist", emptyOutDir: true, sourcemap: false },
+  build: { outDir: "../internal/server/console/webdist", emptyOutDir: false, sourcemap: false },
   server: { port: 5173, proxy: { "/api": "http://127.0.0.1:18080", "/login": "http://127.0.0.1:18080", "/logout": "http://127.0.0.1:18080" } },
 })
