@@ -59,6 +59,25 @@ export default function UpdatesPage() {
           <StatCard label="Releases" value={(d.Releases ?? []).length} line1={`${(d.Versions ?? []).length} Versionen hinterlegt`} line2="Nur signierte Releases, der Server hält keine Binaries" />
         </StatGrid>
       ) : <Skeleton className="h-32" />}
+      {d?.Server && (
+        <Card className={d.Server.rolledBack ? "border-destructive/40" : ""}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">Dieser Server<Badge variant="outline" className="font-mono">{d.Server.running}</Badge>{d.Server.available && <Badge variant="outline" className="border-primary/40 text-primary">{d.Server.available} verfügbar</Badge>}</CardTitle>
+            <CardDescription>
+              {!d.Server.enabled ? "Self-Update ist abgeschaltet; im Container ist das Image das Update." : d.Server.channel === "off" ? "Der Server aktualisiert sich nicht von selbst." : <>Folgt Kanal {d.Server.channel}, prüft täglich und auf Klick, installiert nur signierte Releases und geht bei Problemen nach fünf Minuten von selbst zurück.{d.Server.lastCheck && !isZero(d.Server.lastCheck) ? <> Zuletzt geprüft <Ago t={d.Server.lastCheck} />.</> : ""}</>}
+              {d.Server.lastError && <span className="text-destructive"> Zuletzt fehlgeschlagen: {d.Server.lastError}</span>}
+              {d.Server.rolledBack && <span className="text-destructive"> Letzter Versuch zurückgerollt: {d.Server.rolledBack}.</span>}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-2">
+            <Select value={d.Server.channel} onValueChange={(c) => act.mutate({ path: "/api/updates/server-channel", form: { channel: c } })} disabled={!d.Server.enabled}>
+              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="stable">stable</SelectItem><SelectItem value="canary">canary</SelectItem><SelectItem value="off">nicht automatisch</SelectItem></SelectContent>
+            </Select>
+            <Button size="sm" onClick={() => act.mutate({ path: "/api/updates/server" })} disabled={act.isPending || !d.Server.enabled || d.Server.channel === "off"} variant={d.Server.available ? "default" : "outline"}><Download />{d.Server.available ? `Jetzt auf ${d.Server.available} aktualisieren` : "Jetzt prüfen"}</Button>
+          </CardContent>
+        </Card>
+      )}
       {d && (
         <div className="grid gap-4 @4xl/main:grid-cols-2">
           {(["stable", "canary"] as const).map((ch) => (

@@ -51,6 +51,10 @@ func Main(args []string) error {
 		return boxCmd(args)
 	case "release":
 		return releaseCmd(args)
+	case "selftest":
+		return selftestCmd(args)
+	case "update":
+		return updateCmd(args)
 	case "backup":
 		return backupCmd(args)
 	case "prune":

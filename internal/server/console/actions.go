@@ -15,6 +15,7 @@ import (
 
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/core"
+	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/wire"
 )
@@ -108,7 +109,8 @@ type updatesData struct {
 	Behind   int
 	Current  int
 	NoTarget int
-	Catalog  *catalog.Status // nil when the catalog is off
+	Catalog  *catalog.Status    // nil when the catalog is off
+	Server   *selfupdate.Status // this server's own update state
 }
 
 func (s *Server) buildUpdates(ctx context.Context) (updatesData, error) {
@@ -128,6 +130,10 @@ func (s *Server) buildUpdates(ctx context.Context) (updatesData, error) {
 	if s.Catalog != nil {
 		st := s.Catalog.Status()
 		d.Catalog = &st
+	}
+	if s.SelfUpdate != nil {
+		st := s.SelfUpdate.Status(ctx)
+		d.Server = &st
 	}
 	seen := map[string]bool{}
 	for _, rel := range rels {
@@ -252,6 +258,46 @@ func (s *Server) updatesCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.flash(w, r, "Neu im Katalog: "+strings.Join(added, ", ")+". Unten je Kanal die Version wählen.", "/updates")
+}
+
+// updatesServer asks this server to check its channel now and install what it finds.
+func (s *Server) updatesServer(w http.ResponseWriter, r *http.Request) {
+	if s.SelfUpdate == nil {
+		s.flashErr(w, r, "Self-Update ist auf diesem Server nicht aktiv.", "/updates")
+		return
+	}
+	st := s.SelfUpdate.Status(r.Context())
+	if !st.Enabled {
+		s.flashErr(w, r, "Self-Update ist abgeschaltet (EXCUBRA_SELF_UPDATE=off); im Container ist das Image das Update.", "/updates")
+		return
+	}
+	if st.Available == "" {
+		s.SelfUpdate.TriggerNow()
+		s.flash(w, r, "Server prüft jetzt; auf Kanal "+st.Channel+" gibt es nichts Neueres als "+st.Running+".", "/updates")
+		return
+	}
+	s.SelfUpdate.TriggerNow()
+	_ = s.Store.Audit(r.Context(), s.Now(), actor(r), "server.update.request", st.Available, "")
+	s.flash(w, r, "Server installiert "+st.Available+" und startet neu. Die Konsole ist dafür einige Sekunden nicht erreichbar; bleibt die neue Version aus, geht sie nach fünf Minuten von selbst zurück.", "/updates")
+}
+
+// updatesServerChannel sets the channel this server follows.
+func (s *Server) updatesServerChannel(w http.ResponseWriter, r *http.Request) {
+	if s.SelfUpdate == nil {
+		s.flashErr(w, r, "Self-Update ist auf diesem Server nicht aktiv.", "/updates")
+		return
+	}
+	ch := r.PostForm.Get("channel")
+	if err := s.SelfUpdate.SetChannel(r.Context(), ch); err != nil {
+		s.flashErr(w, r, "Kanal muss stable, canary oder off sein.", "/updates")
+		return
+	}
+	_ = s.Store.Audit(r.Context(), s.Now(), actor(r), "server.channel", ch, "")
+	if ch == "off" {
+		s.flash(w, r, "Der Server aktualisiert sich nicht mehr von selbst.", "/updates")
+		return
+	}
+	s.flash(w, r, "Der Server folgt jetzt Kanal "+ch+".", "/updates")
 }
 
 // updatesRollout queues an update task for every box on a channel.

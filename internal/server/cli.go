@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +16,10 @@ import (
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/seal"
 	"github.com/excubra/excubra/internal/server/api"
+	"github.com/excubra/excubra/internal/server/catalog"
+	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
+	"github.com/excubra/excubra/internal/version"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -515,7 +519,7 @@ func releaseCmd(args []string) error {
 	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-	st, _, err := cliStore(*envFile)
+	st, cfg, err := cliStore(*envFile)
 	if err != nil {
 		return err
 	}
@@ -541,6 +545,20 @@ func releaseCmd(args []string) error {
 		}
 		for _, r := range rels {
 			fmt.Printf("%s\t%s/%s\tmin=%s\t%s\n", r.Version, r.OS, r.Arch, orDash(r.MinAgentVersion), r.URL)
+		}
+		return nil
+	case len(rest) == 1 && rest[0] == "sync":
+		if cfg.ReleaseCatalog == "" || cfg.ReleaseCatalog == "off" {
+			return fmt.Errorf("the release catalog is off (EXCUBRA_RELEASE_CATALOG)")
+		}
+		added, err := catalog.New(cfg.ReleaseCatalog, st, nil).Sync(ctx)
+		if err != nil {
+			return err
+		}
+		if len(added) == 0 {
+			fmt.Println("catalog checked, nothing new")
+		} else {
+			fmt.Printf("catalog: added %s\n", strings.Join(added, ", "))
 		}
 		return nil
 	case len(rest) == 1 && rest[0] == "add":
@@ -620,7 +638,7 @@ func releaseCmd(args []string) error {
 		fmt.Printf("channel %s → %s\n", ch, orDash(want))
 		return nil
 	}
-	return fmt.Errorf("usage: excubra server release list | add … | import … | channel <stable|canary> <version|->")
+	return fmt.Errorf("usage: excubra server release list | sync | add … | import … | channel <stable|canary> <version|->")
 }
 
 func orDash(s string) string {
@@ -628,4 +646,69 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// selftestCmd is what the updater runs on a candidate binary before swapping it in
+// (ADR-0006): the new build must start, read the configuration and see the data
+// directory. It touches nothing.
+func selftestCmd(args []string) error {
+	fs := flag.NewFlagSet("excubra server selftest", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "server env file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := LoadConfig(*envFile, os.Getenv)
+	if err != nil {
+		return fmt.Errorf("selftest: %w", err)
+	}
+	if _, err := os.Stat(cfg.DataDir); err != nil {
+		return fmt.Errorf("selftest: data dir: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.DataDir, "main.db")); err != nil {
+		return fmt.Errorf("selftest: %w", err)
+	}
+	fmt.Println("selftest ok:", version.String())
+	return nil
+}
+
+// updateCmd: excubra server update now | status
+func updateCmd(args []string) error {
+	fs := flag.NewFlagSet("excubra server update", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "server env file")
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
+		return err
+	}
+	st, cfg, err := cliStore(*envFile)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	c := selfupdate.New(st, nil, cfg.DataDir, runtime.GOOS, runtime.GOARCH, cfg.SelfUpdate == "on", nil)
+	switch {
+	case len(rest) == 1 && rest[0] == "status":
+		s := c.Status(ctx)
+		fmt.Printf("running=%s channel=%s target=%s available=%s enabled=%v\n", s.Running, s.Channel, orDash(s.Target), orDash(s.Available), s.Enabled)
+		return nil
+	case len(rest) == 1 && rest[0] == "now":
+		if err := selfupdate.RequestNow(cfg.DataDir); err != nil {
+			return err
+		}
+		s := c.Status(ctx)
+		if s.Available == "" {
+			fmt.Printf("check requested; nothing newer than %s on channel %s right now\n", s.Running, s.Channel)
+		} else {
+			fmt.Printf("check requested; the running server will install %s within a minute and restart\n", s.Available)
+		}
+		return nil
+	case len(rest) == 2 && rest[0] == "channel":
+		if err := c.SetChannel(ctx, rest[1]); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "server.channel", rest[1], "")
+		fmt.Printf("server follows channel %s\n", rest[1])
+		return nil
+	}
+	return fmt.Errorf("usage: excubra server update status | now | channel <stable|canary|off>")
 }

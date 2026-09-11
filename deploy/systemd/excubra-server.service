@@ -11,7 +11,7 @@ Type=simple
 User=excubra
 Group=excubra
 EnvironmentFile=/etc/excubra/server.env
-ExecStart=/usr/local/bin/excubra server run
+ExecStart=/opt/excubra/bin/excubra server run
 Restart=always
 RestartSec=5
 # exit code 75 is the self-update handshake (ADR-0006); every other exit restarts too
@@ -25,9 +25,10 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
 
-# Hardening: the server writes only to its data directory
+# Hardening: the server writes only to its data directory and to its own binary
+# (self-update, ADR-0006: /opt/excubra/bin belongs to the service user)
 ProtectSystem=strict
-ReadWritePaths=/var/lib/excubra
+ReadWritePaths=/var/lib/excubra /opt/excubra/bin
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes

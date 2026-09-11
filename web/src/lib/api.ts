@@ -106,7 +106,8 @@ export interface BoxData { Row: BoxRow; Sites: Site[] | null; TenantNames: Recor
 export interface Release { Version: string; OS: string; Arch: string; URL: string; SHA256: string; Signature: string; MinAgentVersion: string; CreatedAt: string }
 export interface UpdateRow extends BoxRow { Target: string; Behind: boolean; LastNote: BoxNote | null; Pending: BoxTask[] | null }
 export interface CatalogStatus { url: string; lastCheck: string; lastError: string; lastAdded: string[] }
-export interface UpdatesData { Boxes: UpdateRow[] | null; Releases: Release[] | null; Channels: Record<string, string>; Versions: string[] | null; Behind: number; Current: number; NoTarget: number; Catalog: CatalogStatus | null }
+export interface ServerUpdateStatus { enabled: boolean; running: string; arch: string; channel: string; target: string; available: string; lastCheck: string; lastError: string; rolledBack: string }
+export interface UpdatesData { Boxes: UpdateRow[] | null; Releases: Release[] | null; Channels: Record<string, string>; Versions: string[] | null; Behind: number; Current: number; NoTarget: number; Catalog: CatalogStatus | null; Server: ServerUpdateStatus | null }
 export interface HostData {
   View: HostRow; Row: HostRow; Box: BoxRow; Site: Site; Tenant: Tenant; Siblings: HostRow[] | null
   Windows: MaintenanceWindow[] | null; Form: { ICMP: boolean; TCPPort: number; HTTPURL: string }; Rounds: number; Failed: number; Availability: number
