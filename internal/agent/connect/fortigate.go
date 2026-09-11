@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -18,10 +19,24 @@ type fortigate struct{}
 
 func (fortigate) Read(ctx context.Context, t Target) (Reading, error) {
 	var cred struct {
-		Token string `json:"token"`
+		Token         string `json:"token"`
+		AdminUser     string `json:"admin_user"`
+		AdminPassword string `json:"admin_password"`
 	}
-	if err := json.Unmarshal(t.Secret, &cred); err != nil || strings.TrimSpace(cred.Token) == "" {
-		return Reading{}, errors.New("credential has no token")
+	if err := json.Unmarshal(t.Secret, &cred); err != nil {
+		return Reading{}, errors.New("credential is not readable")
+	}
+	var reading Reading
+	if strings.TrimSpace(cred.Token) == "" {
+		if cred.AdminUser == "" || cred.AdminPassword == "" {
+			return Reading{}, errors.New("credential needs a token, or an admin login for the bootstrap")
+		}
+		token, err := fortigateBootstrap(ctx, t, cred.AdminUser, cred.AdminPassword)
+		if err != nil {
+			return Reading{}, fmt.Errorf("bootstrap: %w", err)
+		}
+		cred.Token = token
+		reading.NewToken, _ = json.Marshal(map[string]string{"token": token})
 	}
 	base := strings.TrimRight(t.URL, "/")
 	hdr := map[string]string{"Authorization": "Bearer " + strings.TrimSpace(cred.Token)}
@@ -250,5 +265,6 @@ func (fortigate) Read(ctx context.Context, t Target) (Reading, error) {
 	if len(problems) > 0 {
 		facts["problems"] = problems
 	}
-	return Reading{Facts: facts, Metrics: metrics}, nil
+	reading.Facts, reading.Metrics = facts, metrics
+	return reading, nil
 }

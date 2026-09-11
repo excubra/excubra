@@ -821,5 +821,12 @@ func (e *Engine) absorbConnectors(ctx context.Context, box store.Box, reports []
 				e.Log.Error("connector samples", "connector", r.ID, "err", err)
 			}
 		}
+		if r.TokenSealed != "" && len(r.TokenSealed) <= 16*1024 {
+			if err := e.Store.ReplaceConnectorSealed(ctx, box.ID, r.ID, r.TokenSealed, now); err != nil && !errors.Is(err, store.ErrNotFound) {
+				e.Log.Error("connector bootstrap credential", "connector", r.ID, "err", err)
+			} else if err == nil {
+				_ = e.audit(ctx, "box:"+box.ID, "connector.bootstrap", r.ID, "device credential replaced by the box's own API token")
+			}
+		}
 	}
 }

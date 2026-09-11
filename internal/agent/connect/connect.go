@@ -45,6 +45,10 @@ type Target struct {
 type Reading struct {
 	Facts   map[string]any     // what the device says about itself
 	Metrics map[string]float64 // numbers worth charting
+	// NewToken is set when the reader turned a one-time admin login into a credential
+	// of its own (the credential document to use from now on). The runner seals it to
+	// the box key and reports it; the server stores it and drops the admin login.
+	NewToken []byte
 }
 
 // Reader reads one kind of device.
@@ -62,6 +66,7 @@ var readers = map[string]Reader{
 type Runner struct {
 	Log  *slog.Logger
 	Open func(sealed string) ([]byte, error) // opens a sealed credential with the box key
+	Seal func(plain []byte) (string, error)  // seals to the box's own key (bootstrap results)
 	Now  func() time.Time
 
 	mu        sync.Mutex
@@ -70,6 +75,9 @@ type Runner struct {
 	latest    map[string]wire.ConnectorReport
 	sentFacts map[string]string // connector id → hash of the facts the server acknowledged
 	pending   map[string]string // connector id → hash handed out in the last Reports()
+	override  map[string][]byte // connector id → credential from a bootstrap, until the server has it
+	overVer   map[string]string // connector id → config version the override belongs to
+	tokenSent map[string]bool   // connector id → the sealed token went out and was acknowledged
 }
 
 type loop struct {
@@ -82,7 +90,8 @@ func New(log *slog.Logger, open func(string) ([]byte, error)) *Runner {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Runner{Log: log, Open: open, Now: time.Now, loops: map[string]*loop{}, latest: map[string]wire.ConnectorReport{}, sentFacts: map[string]string{}, pending: map[string]string{}}
+	return &Runner{Log: log, Open: open, Now: time.Now, loops: map[string]*loop{}, latest: map[string]wire.ConnectorReport{}, sentFacts: map[string]string{}, pending: map[string]string{},
+		override: map[string][]byte{}, overVer: map[string]string{}, tokenSent: map[string]bool{}}
 }
 
 // Run starts the loops of every applied connector and blocks until ctx ends.
@@ -110,6 +119,12 @@ func (r *Runner) Apply(cfgs []wire.ConnectorConfig) {
 			continue
 		}
 		keep[cfg.ID] = true
+		if v, ok := r.overVer[cfg.ID]; ok && v != cfg.Version {
+			// the server's new document wins: forget what the bootstrap produced
+			delete(r.override, cfg.ID)
+			delete(r.overVer, cfg.ID)
+			delete(r.tokenSent, cfg.ID)
+		}
 		if l, ok := r.loops[cfg.ID]; ok {
 			if l.cfg.Version == cfg.Version {
 				continue
@@ -133,6 +148,9 @@ func (r *Runner) Apply(cfgs []wire.ConnectorConfig) {
 			delete(r.latest, id)
 			delete(r.sentFacts, id)
 			delete(r.pending, id)
+			delete(r.override, id)
+			delete(r.overVer, id)
+			delete(r.tokenSent, id)
 		}
 	}
 }
@@ -177,6 +195,18 @@ func (r *Runner) ReadOnce(ctx context.Context, cfg wire.ConnectorConfig) {
 	} else {
 		rep.OK = true
 		rep.Metrics = reading.Metrics
+		if len(reading.NewToken) > 0 && r.Seal != nil {
+			// use the new credential from now on and hand it to the server, sealed
+			r.mu.Lock()
+			r.override[cfg.ID] = reading.NewToken
+			r.overVer[cfg.ID] = cfg.Version
+			r.mu.Unlock()
+			if sealed, err := r.Seal(reading.NewToken); err == nil {
+				rep.TokenSealed = sealed
+			} else {
+				r.Log.Error("sealing the new credential", "err", err)
+			}
+		}
 		if b, err := json.Marshal(reading.Facts); err == nil {
 			if len(b) > wire.MaxConnectorFactsSize {
 				b, _ = json.Marshal(map[string]any{"_truncated": true, "_size": len(b)})
@@ -197,9 +227,14 @@ func (r *Runner) read(ctx context.Context, cfg wire.ConnectorConfig) (Reading, s
 	if r.Open == nil {
 		return Reading{}, "", errors.New("no seal key on this box")
 	}
-	secret, err := r.Open(cfg.Sealed)
-	if err != nil {
-		return Reading{}, "", fmt.Errorf("credential cannot be opened on this box: %w", err)
+	r.mu.Lock()
+	secret, overridden := r.override[cfg.ID]
+	r.mu.Unlock()
+	if !overridden {
+		var err error
+		if secret, err = r.Open(cfg.Sealed); err != nil {
+			return Reading{}, "", fmt.Errorf("credential cannot be opened on this box: %w", err)
+		}
 	}
 	var seen fingerprint
 	client := &http.Client{Timeout: readTimeout, Transport: transport(cfg.TLSFingerprint, &seen)}
@@ -217,6 +252,9 @@ func (r *Runner) Reports() []wire.ConnectorReport {
 	defer r.mu.Unlock()
 	var out []wire.ConnectorReport
 	for id, rep := range r.latest {
+		if rep.TokenSealed != "" && r.tokenSent[id] {
+			rep.TokenSealed = ""
+		}
 		if rep.Facts != nil {
 			h := hashOf(rep.Facts)
 			if h == r.sentFacts[id] {
@@ -238,6 +276,11 @@ func (r *Runner) Ack() {
 		r.sentFacts[id] = h
 	}
 	r.pending = map[string]string{}
+	for id, rep := range r.latest {
+		if rep.TokenSealed != "" {
+			r.tokenSent[id] = true
+		}
+	}
 	r.mu.Unlock()
 }
 

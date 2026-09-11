@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/seal"
+	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -121,6 +122,17 @@ func TestConnectorLifecycle(t *testing.T) {
 		t.Fatalf("overview lacks the failed connector: %s", body)
 	}
 
+	// the box bootstrapped its own token: the admin credential is replaced, audited
+	hb.Connectors = []wire.ConnectorReport{{ID: conID, DeviceID: dev.ID, Kind: "fortigate", OK: true, CollectedAt: now, TokenSealed: strings.Repeat("T", 100)}}
+	_, err = f.eng.Heartbeat(ctx, box, hb)
+	must(t, err)
+	if c, _ := f.st.Connector(ctx, conID); c.Sealed != strings.Repeat("T", 100) || c.SealedBy != "box:box_x" {
+		t.Fatalf("bootstrap credential not stored: %+v", c)
+	}
+	if entries, _ := f.st.AuditEntries(ctx, 50, 0); !strings.Contains(fmtAudit(entries), "connector.bootstrap") {
+		t.Fatal("bootstrap not audited")
+	}
+
 	// a report for a connector the box does not own changes nothing
 	hb.Connectors = []wire.ConnectorReport{{ID: "con_other", DeviceID: dev.ID, Kind: "fortigate", OK: true, CollectedAt: now}}
 	_, err = f.eng.Heartbeat(ctx, box, hb)
@@ -141,4 +153,12 @@ func TestConnectorLifecycle(t *testing.T) {
 	if len(dc.Connectors) != 0 {
 		t.Fatal("deleted connector still listed")
 	}
+}
+
+func fmtAudit(entries []store.AuditEntry) string {
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString(e.Action + " ")
+	}
+	return b.String()
 }

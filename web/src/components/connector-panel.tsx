@@ -185,18 +185,22 @@ function ConnectDialog({ d, deviceId, onDone, existing }: { d: DeviceConnectors;
   const [interval, setInterval] = useState(String(existing?.intervalS ?? 300))
   const [pin, setPin] = useState(existing?.tlsFingerprint ?? "")
   const [busy, setBusy] = useState(false)
+  const [mode, setMode] = useState("")
   const opt: KindOption | undefined = d.kinds.find((k) => k.kind === kind)
+  const modes = opt?.modes ?? []
+  const activeMode = modes.find((m) => m.id === mode) ?? modes[0]
+  const credFields = activeMode ? activeMode.fields : (opt?.fields ?? [])
   const canSeal = !!d.sealKey && !!d.box
   const submit = async () => {
     setBusy(true)
     try {
       const form: Record<string, string> = { kind, url, interval_s: interval, tls_fingerprint: pin }
-      const filled = (opt?.fields ?? []).filter((f) => (fields[f] ?? "").trim() !== "")
-      if (!existing && filled.length !== (opt?.fields ?? []).length) throw new Error("Zugangsdaten unvollständig.")
+      const filled = credFields.filter((f) => (fields[f] ?? "").trim() !== "")
+      if (!existing && filled.length !== credFields.length) throw new Error("Zugangsdaten unvollständig.")
       if (filled.length > 0) {
-        if (filled.length !== (opt?.fields ?? []).length) throw new Error("Zugangsdaten unvollständig; entweder alle Felder oder keins.")
+        if (filled.length !== credFields.length) throw new Error("Zugangsdaten unvollständig; entweder alle Felder oder keins.")
         const cred: Record<string, string> = {}
-        for (const f of opt?.fields ?? []) cred[f] = fields[f].trim()
+        for (const f of credFields) cred[f] = fields[f].trim()
         form.sealed = await sealFor(d.sealKey, JSON.stringify(cred))
       }
       const r = await post(existing ? `/api/connectors/${existing.id}/secret` : `/api/devices/${deviceId}/connectors`, form)
@@ -209,7 +213,7 @@ function ConnectDialog({ d, deviceId, onDone, existing }: { d: DeviceConnectors;
       setBusy(false)
     }
   }
-  const fieldLabel: Record<string, string> = { token: "API-Token", user: "Benutzer", password: "Passwort" }
+  const fieldLabel: Record<string, string> = { token: "API-Token", user: "Benutzer", password: "Passwort", admin_user: "Administrator", admin_password: "Administrator-Passwort" }
   return (
     <>
       <Button size="sm" variant={existing ? "outline" : "default"} onClick={() => setOpen(true)} disabled={!canSeal} title={canSeal ? "" : "Die Box hat noch keinen Siegelschlüssel gemeldet"}>{existing ? <><RefreshCw />Zugangsdaten erneuern</> : <><Plug />Verbinden</>}</Button>
@@ -225,11 +229,16 @@ function ConnectDialog({ d, deviceId, onDone, existing }: { d: DeviceConnectors;
                 <Select value={kind} onValueChange={setKind}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{d.kinds.map((k) => <SelectItem key={k.kind} value={k.kind}>{k.label}</SelectItem>)}</SelectContent></Select>
               </div>
             )}
+            {modes.length > 0 && (
+              <div className="grid gap-2"><Label>Zugang</Label>
+                <Select value={activeMode?.id ?? ""} onValueChange={(v) => { setMode(v); setFields({}) }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{modes.map((m) => <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>)}</SelectContent></Select>
+                {activeMode && <span className="text-xs text-muted-foreground">{activeMode.hint}</span>}
+              </div>
+            )}
             <div className="grid gap-2"><Label>Adresse der API</Label><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={kind === "starface" ? "https://starface.kunde.local" : "https://192.168.1.1"} className="font-mono" /><span className="text-xs text-muted-foreground">Nur Schema und Host, wie die Box das Gerät im LAN erreicht.</span></div>
-            {(opt?.fields ?? []).map((f) => (
-              <div key={f} className="grid gap-2"><Label>{fieldLabel[f] ?? f}{existing ? " (leer lassen = unverändert)" : ""}</Label><Input type={f === "token" || f === "password" ? "password" : "text"} autoComplete="off" value={fields[f] ?? ""} onChange={(e) => setFields({ ...fields, [f]: e.target.value })} className="font-mono" /></div>
+            {credFields.map((f) => (
+              <div key={f} className="grid gap-2"><Label>{fieldLabel[f] ?? f}{existing ? " (leer lassen = unverändert)" : ""}</Label><Input type={f === "token" || f.endsWith("password") ? "password" : "text"} autoComplete="off" value={fields[f] ?? ""} onChange={(e) => setFields({ ...fields, [f]: e.target.value })} className="font-mono" /></div>
             ))}
-            {kind === "fortigate" && !existing && <p className="text-xs text-muted-foreground">FortiGate: REST-API-Admin mit Leserechten anlegen (System → Administrators → REST API Admin), Trusted Host = Adresse der Box, Token hier eintragen.</p>}
             {kind === "starface" && !existing && <p className="text-xs text-muted-foreground">STARFACE: ein Benutzer mit Administratorrecht; ab Version 10 wird OAuth 2.0 (rest-client-headless) benutzt, davor die klassische Anmeldung.</p>}
             <div className="grid gap-4 @md/main:grid-cols-2">
               <div className="grid gap-2"><Label>Lesetakt</Label>

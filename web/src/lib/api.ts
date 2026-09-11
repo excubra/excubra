@@ -123,5 +123,6 @@ export interface ConnectorView {
   tlsFingerprint: string; seenFingerprint: string; disabled: boolean; lastOk: boolean | null; lastError: string; lastAt: string | null
   facts: Record<string, unknown>; factsAt: string | null; metrics: Record<string, number>; class: "ok" | "failed" | "paused" | "pending"
 }
-export interface KindOption { kind: string; label: string; fields: string[] }
+export interface KindMode { id: string; label: string; hint: string; fields: string[] }
+export interface KindOption { kind: string; label: string; fields: string[]; modes?: KindMode[] }
 export interface DeviceConnectors { box: BoxRow | null; sealKey: string; fingerprint: string; online: boolean; kinds: KindOption[]; connectors: ConnectorView[] }

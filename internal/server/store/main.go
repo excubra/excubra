@@ -1363,3 +1363,9 @@ func (s *Store) UpdateConnectorReading(ctx context.Context, boxID string, r wire
 	args = append(args, r.ID, boxID)
 	return s.exec1(ctx, "update connector reading", q, args...)
 }
+
+// ReplaceConnectorSealed swaps in the credential the box made for itself (bootstrap):
+// the admin login the operator sealed is gone from the server from now on.
+func (s *Store) ReplaceConnectorSealed(ctx context.Context, boxID, id, sealed string, at time.Time) error {
+	return s.exec1(ctx, "replace connector sealed", `UPDATE connectors SET sealed = ?, sealed_by = ?, sealed_at = ? WHERE id = ? AND box_id = ?`, sealed, "box:"+boxID, ts(at), id, boxID)
+}

@@ -85,13 +85,25 @@ type deviceConnectors struct {
 }
 
 type kindOption struct {
-	Kind   string   `json:"kind"`
+	Kind   string     `json:"kind"`
+	Label  string     `json:"label"`
+	Fields []string   `json:"fields"` // what the credential document needs
+	Modes  []kindMode `json:"modes,omitempty"`
+}
+
+// kindMode is an alternative credential document for a kind.
+type kindMode struct {
+	ID     string   `json:"id"`
 	Label  string   `json:"label"`
-	Fields []string `json:"fields"` // what the credential document needs
+	Hint   string   `json:"hint"`
+	Fields []string `json:"fields"`
 }
 
 var kindOptions = []kindOption{
-	{Kind: wire.ConnectorFortiGate, Label: "FortiGate", Fields: []string{"token"}},
+	{Kind: wire.ConnectorFortiGate, Label: "FortiGate", Fields: []string{"token"}, Modes: []kindMode{
+		{ID: "bootstrap", Label: "Admin-Zugang, EX0 legt den API-Benutzer selbst an", Hint: "Die Box meldet sich einmal als Administrator an, legt Profil „excubra-ro“ (nur lesen) und API-Benutzer „excubra“ mit Trusted Host = Box an, erzeugt den Token und meldet ihn versiegelt zurück. Der Admin-Zugang wird danach auf dem Server gelöscht.", Fields: []string{"admin_user", "admin_password"}},
+		{ID: "token", Label: "Vorhandener API-Token", Hint: "REST-API-Admin auf der FortiGate mit Leserechten, Trusted Host = Adresse der Box.", Fields: []string{"token"}},
+	}},
 	{Kind: wire.ConnectorStarface, Label: "STARFACE", Fields: []string{"user", "password"}},
 }
 
