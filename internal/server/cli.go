@@ -13,6 +13,7 @@ import (
 	"github.com/excubra/excubra/internal/auth"
 	"github.com/excubra/excubra/internal/id"
 	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/seal"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/store"
 )
@@ -369,7 +370,11 @@ func boxCmd(args []string) error {
 				ver = "-"
 			}
 			plat := strings.TrimSuffix(b.OS+"/"+b.Arch, "/")
-			fmt.Printf("%s\tsite=%s\tv=%s\t%s\tseen=%s\tnb=%s\n", b.ID, site, ver, plat, seen, b.NetbirdStatus)
+			sealFP := "-"
+			if fp := seal.Fingerprint(b.SealKey); fp != "" {
+				sealFP = strings.ReplaceAll(fp, " ", "")
+			}
+			fmt.Printf("%s\tsite=%s\tv=%s\t%s\tseen=%s\tnb=%s\tseal=%s\n", b.ID, site, ver, plat, seen, b.NetbirdStatus, sealFP)
 		}
 		return nil
 	case len(rest) == 3 && rest[0] == "assign":
