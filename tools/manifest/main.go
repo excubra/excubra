@@ -45,7 +45,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "manifest:", err)
 		os.Exit(1)
 	}
-	defer sums.Close()
+	defer func() { _ = sums.Close() }()
 	m := manifest{Version: strings.TrimPrefix(*version, "v"), MinAgentVersion: *minAgent}
 	sc := bufio.NewScanner(sums)
 	for sc.Scan() {
