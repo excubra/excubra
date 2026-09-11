@@ -95,6 +95,7 @@ func (s *Server) funcs() template.FuncMap {
 			return t.In(s.Loc).Format("2006-01-02T15:04")
 		},
 		"add": func(a, b int) int { return a + b },
+		"sub": func(a, b int) int { return a - b },
 		"gb":  func(b uint64) string { return fmt.Sprintf("%.1f", float64(b)/1e9) },
 		"pct": func(f float64) string { return fmt.Sprintf("%.1f", f) },
 		"short": func(s string) string {
