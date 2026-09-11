@@ -213,27 +213,23 @@ type siteData struct {
 	Subnets     string
 }
 
-func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	site, err := s.Store.Site(ctx, r.PathValue("id"))
+func (s *Server) buildSite(ctx context.Context, siteID, tab, rng string) (siteData, error) {
+	site, err := s.Store.Site(ctx, siteID)
 	if err != nil {
-		s.fail(w, r, err, http.StatusNotFound)
-		return
+		return siteData{}, err
 	}
 	d := siteData{Site: site, TenantNames: map[string]string{}, Fingerprint: s.CA.Fingerprint()}
 	d.Tenant, _ = s.Store.Tenant(ctx, site.TenantID)
 	tm, sm, err := s.lookups(ctx)
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return siteData{}, err
 	}
 	for _, t := range tm {
 		d.TenantNames[t.ID] = t.Name
 	}
 	boxes, err := s.Store.Boxes(ctx, site.ID)
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return siteData{}, err
 	}
 	boxNames := map[string]bool{}
 	for _, b := range boxes {
@@ -256,14 +252,12 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if d.Sites, err = s.Store.Sites(ctx, ""); err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return siteData{}, err
 	}
 
 	views, err := s.Engine.HostViews(ctx, site.TenantID)
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return siteData{}, err
 	}
 	byHostID := map[string]hostRow{}
 	names := map[string]string{}
@@ -304,8 +298,7 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 			hc.UplinkName = names[v.ParentID]
 		}
 		if hc.Avail, err = s.availability(ctx, v.TenantID, v.ID, now); err != nil {
-			s.fail(w, r, err, http.StatusInternalServerError)
-			return
+			return siteData{}, err
 		}
 		d.Hosts = append(d.Hosts, hc)
 	}
@@ -322,8 +315,7 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 
 	devices, err := s.Store.Devices(ctx, site.TenantID, site.ID, time.Time{})
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return siteData{}, err
 	}
 	counts := map[string]int{}
 	for _, dev := range devices {
@@ -367,8 +359,7 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 
 	evs, err := s.Store.Events(ctx, site.TenantID, now.Add(-24*time.Hour), now.Add(time.Minute), "", 300)
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return siteData{}, err
 	}
 	for i := len(evs) - 1; i >= 0; i-- {
 		ev := evs[i]
@@ -383,17 +374,16 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.SliceStable(d.Events, func(i, j int) bool { return d.Events[i].OccurredAt.After(d.Events[j].OccurredAt) })
 
-	if d.Chart, err = s.buildChart(ctx, []string{site.TenantID}, "", r.URL.Query().Get("range"), now); err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+	if d.Chart, err = s.buildChart(ctx, []string{site.TenantID}, "", rng, now); err != nil {
+		return siteData{}, err
 	}
-	d.Tab = r.URL.Query().Get("tab")
+	d.Tab = tab
 	switch d.Tab {
 	case "ueberwachung", "ereignisse", "technik":
 	default:
 		d.Tab = "netz"
 	}
-	s.renderOpts(w, r, "site", site.Name, d, pageOpts{Search: true, Crumbs: []crumb{{"Kunden", "/tenants"}, {d.Tenant.Name, "/tenants"}, {site.Name, ""}}})
+	return d, nil
 }
 
 func kindIndex(key string) int {
@@ -456,7 +446,7 @@ func (s *Server) deviceWatch(w http.ResponseWriter, r *http.Request) {
 	}
 	back := "/sites/" + dev.SiteID + "?tab=netz"
 	if dev.IP == "" {
-		s.flash(w, r, "Das Gerät hat noch keine IPv4-Adresse gezeigt; ohne Adresse kann die Box es nicht prüfen.", back)
+		s.flashErr(w, r, "Das Gerät hat noch keine IPv4-Adresse gezeigt; ohne Adresse kann die Box es nicht prüfen.", back)
 		return
 	}
 	boxes, err := s.Store.Boxes(ctx, dev.SiteID)
@@ -472,14 +462,14 @@ func (s *Server) deviceWatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if box == nil {
-		s.flash(w, r, "Diesem Standort ist keine Box zugeordnet; erst eine Box zuordnen.", back)
+		s.flashErr(w, r, "Diesem Standort ist keine Box zugeordnet; erst eine Box zuordnen.", back)
 		return
 	}
 	name := deviceName(dev)
 	h := store.Host{ID: id.New("host"), TenantID: dev.TenantID, SiteID: dev.SiteID, BoxID: box.ID, DeviceID: dev.ID, Name: name, Address: dev.IP,
 		MAC: dev.MAC, Vendor: dev.Vendor, IsUplink: r.PostForm.Get("uplink") == "1", Checks: []wire.CheckConfig{{Type: wire.CheckICMP}}, CreatedAt: s.Now()}
 	if err := s.Engine.CreateHost(ctx, h, actor(r)); err != nil {
-		s.flash(w, r, "Nicht eingeschaltet: "+err.Error(), back)
+		s.flashErr(w, r, "Nicht eingeschaltet: "+err.Error(), back)
 		return
 	}
 	s.flash(w, r, name+" wird jetzt jede Minute geprüft.", back)
@@ -695,4 +685,14 @@ func (s *Server) siteCards(ctx context.Context, d *statusData) error {
 		}
 	}
 	return nil
+}
+
+func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	d, err := s.buildSite(r.Context(), r.PathValue("id"), q.Get("tab"), q.Get("range"))
+	if err != nil {
+		s.fail(w, r, err, statusFor(err))
+		return
+	}
+	s.renderOpts(w, r, "site", d.Site.Name, d, pageOpts{Search: true, Crumbs: []crumb{{"Kunden", "/tenants"}, {d.Tenant.Name, "/tenants"}, {d.Site.Name, ""}}})
 }

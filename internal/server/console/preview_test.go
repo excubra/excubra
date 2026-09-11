@@ -30,6 +30,16 @@ func TestPreviewDump(t *testing.T) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	f := seedPreview(t)
+	ctx := context.Background()
+	hosts, err := f.st.Hosts(ctx, "ten_kft", "")
+	must(t, err)
+	dumpPreview(t, f, out, hosts)
+}
+
+// seedPreview builds a logged-in fixture with data that looks like the KfT pilot.
+func seedPreview(t *testing.T) *fixture {
+	t.Helper()
 	f := newFixture(t)
 	f.login(t)
 	ctx := context.Background()
@@ -131,7 +141,11 @@ func TestPreviewDump(t *testing.T) {
 	must(t, f.st.CreateBox(ctx, store.Box{ID: "box_rn4ebjmtknby", HWID: "e3b0c44298fc1c14", CertSerial: "2", CertNotAfter: now.Add(89 * 24 * time.Hour),
 		EnrolledAt: now.Add(-5 * time.Hour), AgentVersion: "0.0.0-dev+83953d0", OS: "linux", Arch: "arm64", Channel: "stable"}))
 	f.eng.RegisterBox(store.Box{ID: "box_rn4ebjmtknby"})
+	return f
+}
 
+func dumpPreview(t *testing.T, f *fixture, out string, hosts []store.Host) {
+	t.Helper()
 	var fwHost string
 	for _, h := range hosts {
 		if h.Address == "192.168.100.254" {

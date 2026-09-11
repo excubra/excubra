@@ -86,16 +86,23 @@ func (s *Server) auth(next http.HandlerFunc) http.Handler {
 		}
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+			// Parse the form here for every write: the handlers read r.PostForm directly,
+			// whether the token arrived as a form field (templates) or a header (the app).
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "bad form", http.StatusBadRequest)
+				return
+			}
 			tok := r.Header.Get("X-CSRF-Token")
 			if tok == "" {
-				if err := r.ParseForm(); err != nil {
-					http.Error(w, "bad form", http.StatusBadRequest)
-					return
-				}
 				tok = r.PostForm.Get("csrf")
 			}
 			if tok == "" || tok != sess.CSRF {
-				http.Error(w, "CSRF-Token fehlt oder passt nicht — Seite neu laden.", http.StatusForbidden)
+				const msg = "CSRF-Token fehlt oder passt nicht — Seite neu laden."
+				if wantsJSON(r) {
+					writeJSON(w, http.StatusForbidden, map[string]string{"error": msg})
+					return
+				}
+				http.Error(w, msg, http.StatusForbidden)
 				return
 			}
 		}
@@ -107,6 +114,11 @@ func (s *Server) auth(next http.HandlerFunc) http.Handler {
 }
 
 func (s *Server) toLogin(w http.ResponseWriter, r *http.Request) {
+	if wantsJSON(r) {
+		// The app sends the browser to /login itself when it sees a 401.
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "nicht angemeldet"})
+		return
+	}
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", "/login")
 		w.WriteHeader(http.StatusUnauthorized)

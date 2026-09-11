@@ -17,7 +17,9 @@ itself. Every dependency is an update path, an audit surface and a supply-chain 
    opens the PRs, CI (`govulncheck`) fails the build on a known vulnerability.
 4. `go.sum` is authoritative; builds use `-mod=readonly`; CI verifies `go mod tidy`
    produces no diff.
-5. Vendored web assets (JS/CSS) are checked in with their version and SHA-256 in
+5. Web assets: the console is an npm project (`web/`) whose lockfile is authoritative;
+   a package needs a line in ADR-0013 the way a Go module needs one here. The few
+   assets of the server-rendered pages are vendored with version and SHA-256 in
    `internal/server/console/static/VENDORED.md`. Nothing is loaded from a CDN — the
    console runs inside an overlay without internet.
 
@@ -42,7 +44,7 @@ Explicitly **not** used, and why:
 | a TOTP library | RFC 6238 is 40 lines on `crypto/hmac` |
 | cosign / Sigstore clients | `crypto/ecdsa` verification of cosign's blob signature (ADR-0006) |
 | a UUID/ULID library | `internal/id` (crypto/rand + base32) |
-| a JS framework | server-rendered `html/template` + vendored htmx (single file) |
+| a JS framework on the server | `html/template` for login and status pages; the console itself is a React app built at build time and embedded (ADR-0013) |
 
 Test-only dependencies: none. Integration tests drive Docker through `os/exec`.
 

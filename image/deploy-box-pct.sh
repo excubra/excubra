@@ -16,6 +16,9 @@ VERSION="$(sh "$(git rev-parse --show-toplevel)/scripts/version.sh" 2>/dev/null 
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 MODULE=github.com/excubra/excubra
+echo "== building console"
+sh "$(git rev-parse --show-toplevel)/scripts/web-build.sh"
+
 echo "== building $VERSION for linux/$ARCH"
 mkdir -p dist
 CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath -mod=readonly \
