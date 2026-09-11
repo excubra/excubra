@@ -111,14 +111,14 @@ func (s *Store) RenameSite(ctx context.Context, siteID, name string) error {
 // ---- boxes -----------------------------------------------------------------------
 
 const boxCols = `id, site_id, name, hw_id, agent_version, os, arch, cert_serial, cert_not_after, channel, discovery_mode, discovery_subnets,
-	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at`
+	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key`
 
 func scanBox(sc interface{ Scan(...any) error }) (Box, error) {
 	var b Box
 	var site, revoked sql.NullString
 	var notAfter, enrolled, subnets, lastSeen string
 	err := sc.Scan(&b.ID, &site, &b.Name, &b.HWID, &b.AgentVersion, &b.OS, &b.Arch, &b.CertSerial, &notAfter, &b.Channel, &b.DiscoveryMode, &subnets,
-		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked)
+		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey)
 	b.SiteID = site.String
 	b.CertNotAfter = parseTS(notAfter)
 	b.LastSeen = parseTS(lastSeen)
@@ -137,9 +137,9 @@ func (s *Store) CreateBox(ctx context.Context, b Box) error {
 		b.DiscoveryMode = wire.DiscoverySweep
 	}
 	subnets, _ := json.Marshal(nonNil(b.DiscoverySubnets))
-	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ID, nullIfEmpty(b.SiteID), b.Name, b.HWID, b.AgentVersion, b.OS, b.Arch, b.CertSerial, ts(b.CertNotAfter), b.Channel, b.DiscoveryMode, string(subnets),
-		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt))
+		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey)
 	return wrap("create box", err)
 }
 
@@ -1236,4 +1236,130 @@ func (s *Store) Acks(ctx context.Context) (map[string]Ack, error) {
 		out[a.Kind+"/"+a.TargetID] = a
 	}
 	return out, wrap("acks", rows.Err())
+}
+
+// ---- connectors (ADR-0015) ----------------------------------------------------------------
+
+// SetBoxSealKey records the seal key a box reported; unchanged keys cost nothing.
+func (s *Store) SetBoxSealKey(ctx context.Context, boxID, key string) error {
+	_, err := s.main.ExecContext(ctx, `UPDATE boxes SET seal_key = ? WHERE id = ? AND seal_key != ?`, key, boxID, key)
+	return wrap("set box seal key", err)
+}
+
+const connCols = `id, tenant_id, site_id, box_id, device_id, kind, url, sealed, sealed_by, sealed_at, interval_s, tls_fingerprint, created_at, disabled,
+	last_ok, last_error, last_at, seen_fingerprint, facts, facts_at, metrics`
+
+func scanConnector(sc interface{ Scan(...any) error }) (Connector, error) {
+	var c Connector
+	var sealedAt, createdAt, facts, metrics string
+	var disabled int
+	var lastOK sql.NullBool
+	var lastAt, factsAt sql.NullString
+	err := sc.Scan(&c.ID, &c.TenantID, &c.SiteID, &c.BoxID, &c.DeviceID, &c.Kind, &c.URL, &c.Sealed, &c.SealedBy, &sealedAt, &c.IntervalS, &c.TLSFingerprint, &createdAt, &disabled,
+		&lastOK, &c.LastError, &lastAt, &c.SeenFingerprint, &facts, &factsAt, &metrics)
+	if err != nil {
+		return c, err
+	}
+	c.SealedAt, c.CreatedAt = parseTS(sealedAt), parseTS(createdAt)
+	c.Disabled = disabled != 0
+	if lastOK.Valid {
+		v := lastOK.Bool
+		c.LastOK = &v
+	}
+	c.LastAt, c.FactsAt = parseTSP(lastAt), parseTSP(factsAt)
+	c.Facts = json.RawMessage(facts)
+	c.Metrics = map[string]float64{}
+	_ = json.Unmarshal([]byte(metrics), &c.Metrics)
+	return c, nil
+}
+
+// CreateConnector stores a connector with its sealed credential.
+func (s *Store) CreateConnector(ctx context.Context, c Connector) error {
+	if c.IntervalS <= 0 {
+		c.IntervalS = 300
+	}
+	_, err := s.main.ExecContext(ctx, `INSERT INTO connectors (id, tenant_id, site_id, box_id, device_id, kind, url, sealed, sealed_by, sealed_at, interval_s, tls_fingerprint, created_at, disabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.TenantID, c.SiteID, c.BoxID, c.DeviceID, c.Kind, c.URL, c.Sealed, c.SealedBy, ts(c.SealedAt), c.IntervalS, c.TLSFingerprint, ts(c.CreatedAt), boolInt(c.Disabled))
+	return wrap("create connector", err)
+}
+
+// Connector returns one connector.
+func (s *Store) Connector(ctx context.Context, id string) (Connector, error) {
+	c, err := scanConnector(s.main.QueryRowContext(ctx, `SELECT `+connCols+` FROM connectors WHERE id = ?`, id))
+	return c, wrap("connector", err)
+}
+
+func (s *Store) connectors(ctx context.Context, q string, args ...any) ([]Connector, error) {
+	rows, err := s.main.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, wrap("connectors", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Connector
+	for rows.Next() {
+		c, err := scanConnector(rows)
+		if err != nil {
+			return nil, wrap("connectors", err)
+		}
+		out = append(out, c)
+	}
+	return out, wrap("connectors", rows.Err())
+}
+
+// ConnectorsForBox returns the connectors a box has to read, including disabled ones.
+func (s *Store) ConnectorsForBox(ctx context.Context, boxID string) ([]Connector, error) {
+	return s.connectors(ctx, `SELECT `+connCols+` FROM connectors WHERE box_id = ? ORDER BY created_at, id`, boxID)
+}
+
+// ConnectorsForDevice returns the connectors of one device.
+func (s *Store) ConnectorsForDevice(ctx context.Context, deviceID string) ([]Connector, error) {
+	return s.connectors(ctx, `SELECT `+connCols+` FROM connectors WHERE device_id = ? ORDER BY created_at, id`, deviceID)
+}
+
+// Connectors returns every connector of a tenant, or of all tenants when tenantID is empty.
+func (s *Store) Connectors(ctx context.Context, tenantID string) ([]Connector, error) {
+	if tenantID == "" {
+		return s.connectors(ctx, `SELECT `+connCols+` FROM connectors ORDER BY tenant_id, site_id, created_at`)
+	}
+	return s.connectors(ctx, `SELECT `+connCols+` FROM connectors WHERE tenant_id = ? ORDER BY site_id, created_at`, tenantID)
+}
+
+// UpdateConnectorSecret replaces the sealed credential, URL and pin; the box re-reads.
+func (s *Store) UpdateConnectorSecret(ctx context.Context, id, url, sealed, by, fingerprint string, intervalS int, at time.Time) error {
+	return s.exec1(ctx, "update connector", `UPDATE connectors SET url = ?, sealed = ?, sealed_by = ?, sealed_at = ?, tls_fingerprint = ?, interval_s = ?, last_ok = NULL, last_error = '' WHERE id = ?`,
+		url, sealed, by, ts(at), fingerprint, intervalS, id)
+}
+
+// SetConnectorDisabled pauses or resumes a connector.
+func (s *Store) SetConnectorDisabled(ctx context.Context, id string, disabled bool) error {
+	return s.exec1(ctx, "set connector disabled", `UPDATE connectors SET disabled = ? WHERE id = ?`, boolInt(disabled), id)
+}
+
+// DeleteConnector removes a connector; its samples in the day databases stay until pruned.
+func (s *Store) DeleteConnector(ctx context.Context, id string) error {
+	return s.exec1(ctx, "delete connector", `DELETE FROM connectors WHERE id = ?`, id)
+}
+
+// UpdateConnectorReading records what a box reported. Facts are kept when the report
+// carries none (the box sends them only on change). A report for a connector the
+// box does not own is ErrNotFound.
+func (s *Store) UpdateConnectorReading(ctx context.Context, boxID string, r wire.ConnectorReport, at time.Time) error {
+	metrics, _ := json.Marshal(r.Metrics)
+	if r.Metrics == nil {
+		metrics = []byte("{}")
+	}
+	q := `UPDATE connectors SET last_ok = ?, last_error = ?, last_at = ?, metrics = ?`
+	args := []any{boolInt(r.OK), r.Error, ts(at), string(metrics)}
+	if r.TLSFingerprint != "" {
+		q += `, seen_fingerprint = ?`
+		args = append(args, r.TLSFingerprint)
+	}
+	if len(r.Facts) > 0 && json.Valid(r.Facts) {
+		q += `, facts = ?, facts_at = ?`
+		args = append(args, string(r.Facts), ts(at))
+	}
+	q += ` WHERE id = ? AND box_id = ?`
+	args = append(args, r.ID, boxID)
+	return s.exec1(ctx, "update connector reading", q, args...)
 }

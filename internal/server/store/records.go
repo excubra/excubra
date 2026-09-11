@@ -1,6 +1,10 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/excubra/excubra/internal/wire"
@@ -45,6 +49,7 @@ type Box struct {
 	LastSeen       time.Time
 	EnrolledAt     time.Time
 	RevokedAt      *time.Time
+	SealKey        string // base64 X25519 public key the box reported (ADR-0015)
 }
 
 // EnrollmentKey is a one-time key; only the hash of the secret is stored.
@@ -246,4 +251,44 @@ type Ack struct {
 	Actor    string
 	At       time.Time
 	Note     string
+}
+
+// Connector is one device the box reads through its API (ADR-0015). Sealed is
+// ciphertext only this box can open; the server never sees the credential.
+type Connector struct {
+	ID             string
+	TenantID       string
+	SiteID         string
+	BoxID          string
+	DeviceID       string
+	Kind           string
+	URL            string
+	Sealed         string
+	SealedBy       string
+	SealedAt       time.Time
+	IntervalS      int
+	TLSFingerprint string
+	CreatedAt      time.Time
+	Disabled       bool
+	// last reading, written from heartbeats
+	LastOK          *bool
+	LastError       string
+	LastAt          *time.Time
+	SeenFingerprint string
+	Facts           json.RawMessage
+	FactsAt         *time.Time
+	Metrics         map[string]float64
+}
+
+// Version identifies what the box must know to read: a change restarts the reader.
+func (c Connector) Version() string {
+	h := sha256.Sum256([]byte(c.URL + "\x00" + c.Sealed + "\x00" + c.TLSFingerprint + "\x00" + strconv.Itoa(c.IntervalS)))
+	return "cv_" + hex.EncodeToString(h[:6])
+}
+
+// Sample is one number a connector reported at one time.
+type Sample struct {
+	At    time.Time
+	Key   string
+	Value float64
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/ecdh"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,9 +14,11 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/agent/checks"
+	"github.com/excubra/excubra/internal/agent/connect"
 	"github.com/excubra/excubra/internal/agent/discovery"
 	"github.com/excubra/excubra/internal/agent/update"
 	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/seal"
 	"github.com/excubra/excubra/internal/version"
 	"github.com/excubra/excubra/internal/wire"
 )
@@ -44,6 +47,8 @@ type Agent struct {
 	disc    *discovery.Discovery
 	netbird *Netbird
 	upd     *update.Updater
+	conn    *connect.Runner
+	sealKey *ecdh.PrivateKey
 
 	cfgMu        sync.RWMutex
 	cfg          wire.Config
@@ -150,6 +155,12 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 		doneSet:    map[string]bool{},
 		baseCtx:    context.Background(),
 	}
+	key, err := st.SealKey()
+	if err != nil {
+		return nil, err
+	}
+	a.sealKey = key
+	a.conn = connect.New(log, func(sealed string) ([]byte, error) { return seal.Open(key, sealed) })
 	a.hbInterval, a.checkEvery, a.configMaxAge = 60*time.Second, 30*time.Second, 15*time.Minute
 	a.doneTasks, a.taskResults = st.LoadTasks()
 	for _, id := range a.doneTasks {
@@ -165,6 +176,7 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 func (a *Agent) run(ctx context.Context) error {
 	a.baseCtx = ctx
 	go a.disc.Run(ctx)
+	go a.conn.Run(ctx)
 	go a.checkLoop(ctx)
 
 	hb := time.NewTimer(5 * time.Second)
@@ -319,6 +331,10 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	sightings := a.disc.Sightings(ctx)
 	notes := a.takeNotes()
 	results := a.takeTaskResults()
+	var conns []wire.ConnectorReport
+	if a.conn != nil {
+		conns = a.conn.Reports()
+	}
 	a.cfgMu.RLock()
 	cfgVersion, cfgErrors := a.cfg.Version, append([]string(nil), a.cfgErrors...)
 	a.cfgMu.RUnlock()
@@ -328,7 +344,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	}
 	hb := wire.Heartbeat{
 		SentAt:        a.now().UTC(),
-		Agent:         wire.AgentInfo{Version: version.Version, UptimeS: uptimeSeconds(), BootID: bootID(), OS: runtime.GOOS, Arch: runtime.GOARCH},
+		Agent:         wire.AgentInfo{Version: version.Version, UptimeS: uptimeSeconds(), BootID: bootID(), OS: runtime.GOOS, Arch: runtime.GOARCH, SealKey: a.sealPublic()},
 		Box:           boxInfo(a.st.Dir),
 		Netbird:       a.netbird.Status(ctx),
 		ConfigVersion: cfgVersion,
@@ -338,6 +354,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		Discovery:     wire.DiscoveryReport{Seen: sightings},
 		Buffer:        wire.BufferInfo{Queued: queued, Dropped: dropped},
 		TaskResults:   results,
+		Connectors:    conns,
 	}
 	hb.Box.ClockOffsetMS = a.clockOffset
 
@@ -347,6 +364,9 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	if err != nil {
 		a.putRounds(reports)
 		a.disc.Table.Nack()
+		if a.conn != nil {
+			a.conn.Nack()
+		}
 		a.putTaskResults(results)
 		if len(notes) > 0 {
 			a.notesMu.Lock()
@@ -369,6 +389,9 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		return
 	}
 	a.disc.Table.Ack()
+	if a.conn != nil {
+		a.conn.Ack()
+	}
 	a.upd.Confirm()
 	if len(results) > 0 {
 		a.saveTasks()
@@ -442,6 +465,9 @@ func (a *Agent) applyConfig(cfg wire.Config) {
 	a.roundsMu.Unlock()
 
 	a.startTasks(cfg.Tasks)
+	if a.conn != nil { // unit tests build agents without a runner
+		a.conn.Apply(cfg.Connectors)
+	}
 }
 
 // ---- tasks (ADR-0014) ------------------------------------------------------------------------
@@ -645,4 +671,12 @@ func (a *Agent) checkUpdate(ctx context.Context) error {
 		a.note("update to " + info.Version + " not installed: " + err.Error())
 		return nil
 	}
+}
+
+// sealPublic is the seal key the console seals credentials to ("" without a key).
+func (a *Agent) sealPublic() string {
+	if a.sealKey == nil {
+		return ""
+	}
+	return seal.Public(a.sealKey)
 }

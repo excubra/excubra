@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/seal"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -194,6 +197,29 @@ func (s *State) SaveConfig(c wire.Config) error {
 		return err
 	}
 	return s.writeFile(fileConfig, b, 0o600)
+}
+
+// sealFile holds the box's X25519 seal key (ADR-0015): credentials for device APIs
+// are sealed to its public half in the browser; only this box can open them.
+const sealFile = "seal.key"
+
+// SealKey loads the seal key, creating it on first use.
+func (s *State) SealKey() (*ecdh.PrivateKey, error) {
+	if raw := strings.TrimSpace(s.readFile(sealFile)); raw != "" {
+		if b, err := base64.StdEncoding.DecodeString(raw); err == nil {
+			if k, err := seal.ParsePrivate(b); err == nil {
+				return k, nil
+			}
+		}
+	}
+	k, err := seal.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.writeFile(sealFile, []byte(base64.StdEncoding.EncodeToString(k.Bytes())), 0o600); err != nil {
+		return nil, err
+	}
+	return k, nil
 }
 
 // taskFile remembers which tasks ran (so a re-pulled config never repeats one) and

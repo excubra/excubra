@@ -50,6 +50,7 @@ export interface BoxRow {
   ID: string; SiteID: string; Name: string; HWID: string; AgentVersion: string; OS: string; Arch: string; CertSerial: string; CertNotAfter: string
   Channel: string; DiscoveryMode: string; DiscoverySubnets: string[] | null; NetbirdStatus: string; NetbirdIP: string
   DiskTotalBytes: number; DiskFreeBytes: number; UptimeS: number; LastSeen: string; EnrolledAt: string; RevokedAt: string | null
+  SealKey?: string
   State: BoxState; SiteName: string; TenantName: string; Assigned: boolean
 }
 export interface Tenant { ID: string; Name: string; CreatedAt: string }
@@ -117,3 +118,10 @@ export interface WebhookRow { id: string; name: string; url: string; enabled: bo
 export interface UserRow { id: string; name: string; totp: boolean; disabled: boolean; locked: boolean; lockedUntil: string | null; failedLogins: number; createdAt: string }
 export interface AuditRow { ID: number; At: string; Actor: string; Action: string; Target: string; Summary: string }
 export interface SearchHit { kind: string; id: string; title: string; sub: string; href: string; tenant: string }
+export interface ConnectorView {
+  id: string; deviceId: string; kind: string; kindLabel: string; url: string; sealedBy: string; sealedAt: string; intervalS: number
+  tlsFingerprint: string; seenFingerprint: string; disabled: boolean; lastOk: boolean | null; lastError: string; lastAt: string | null
+  facts: Record<string, unknown>; factsAt: string | null; metrics: Record<string, number>; class: "ok" | "failed" | "paused" | "pending"
+}
+export interface KindOption { kind: string; label: string; fields: string[] }
+export interface DeviceConnectors { box: BoxRow | null; sealKey: string; fingerprint: string; online: boolean; kinds: KindOption[]; connectors: ConnectorView[] }

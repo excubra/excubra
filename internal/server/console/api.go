@@ -102,6 +102,7 @@ func (s *Server) buildAttention(ctx context.Context, d statusData, now time.Time
 	for _, b := range d.Unassigned {
 		out = append(out, attention{Kind: "box_unassigned", Since: b.EnrolledAt, Name: b.ID, ID: b.ID, Href: "/boxes/" + b.ID, Detail: "keinem Standort zugeordnet"})
 	}
+	out = append(out, s.failedConnectors(ctx)...)
 	for i := range out {
 		out[i].Ack = ackFor(acks, out[i].Kind, out[i].ID, out[i].Since)
 	}
@@ -556,3 +557,40 @@ func classOfState(b state.Box) string {
 var _ = classOfState
 var _ context.Context
 var _ event.Type
+
+// failedConnectors lists connectors whose last reading failed, as problems.
+func (s *Server) failedConnectors(ctx context.Context) []attention {
+	cons, err := s.Store.Connectors(ctx, "")
+	if err != nil {
+		s.Log.Error("connectors", "err", err)
+		return nil
+	}
+	var out []attention
+	var tm map[string]store.Tenant
+	var sm map[string]store.Site
+	for _, c := range cons {
+		if c.Disabled || c.LastOK == nil || *c.LastOK {
+			continue
+		}
+		if tm == nil {
+			if tm, sm, err = s.lookups(ctx); err != nil {
+				return out
+			}
+		}
+		a := attention{Kind: "connector_failed", ID: c.ID, Name: ConnectorLabel(c.Kind), Address: c.URL, Href: "/devices/" + c.DeviceID + "?tab=konnektor", Detail: c.LastError, TenantID: c.TenantID, SiteID: c.SiteID}
+		if c.LastAt != nil {
+			a.Since = *c.LastAt
+		}
+		if t, ok := tm[c.TenantID]; ok {
+			a.Tenant = t.Name
+		}
+		if st, ok := sm[c.SiteID]; ok {
+			a.Site = st.Name
+		}
+		if dev, err := s.Store.Device(ctx, c.DeviceID); err == nil {
+			a.Name = ConnectorLabel(c.Kind) + " · " + firstNonEmpty(dev.Hostname, dev.IP)
+		}
+		out = append(out, a)
+	}
+	return out
+}

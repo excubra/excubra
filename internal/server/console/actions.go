@@ -279,7 +279,7 @@ func (s *Server) updatesRollout(w http.ResponseWriter, r *http.Request) {
 
 // ---- acknowledgements --------------------------------------------------------------------------
 
-var ackKinds = map[string]bool{"host_down": true, "box_silent": true, "box_unassigned": true}
+var ackKinds = map[string]bool{"host_down": true, "box_silent": true, "box_unassigned": true, "connector_failed": true}
 
 // ackSet marks a problem as seen. The problem is identified by kind, object and the
 // start of the outage, so a new outage of the same object is not covered.
