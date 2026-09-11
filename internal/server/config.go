@@ -22,6 +22,7 @@ type Config struct {
 	OverlayTLS       string // off | internal
 	ConsoleURL       string // base URL for webhook links; derived from OverlayListen when empty
 	UpdateBaseURL    string
+	ReleaseCatalog   string // GitHub-style releases URL the server imports release metadata from; "off" disables
 	LogLevel         string
 	LogFormat        string
 	Timezone         string // IANA name used by the console for display; storage stays UTC
@@ -69,6 +70,7 @@ func LoadConfig(envFile string, getenv func(string) string) (Config, error) {
 		OverlayTLS:       get("EXCUBRA_OVERLAY_TLS", "off"),
 		ConsoleURL:       get("EXCUBRA_CONSOLE_URL", ""),
 		UpdateBaseURL:    get("EXCUBRA_UPDATE_BASE_URL", "https://github.com/excubra/excubra/releases/download"),
+		ReleaseCatalog:   get("EXCUBRA_RELEASE_CATALOG", "https://api.github.com/repos/excubra/excubra/releases"),
 		LogLevel:         get("EXCUBRA_LOG_LEVEL", "info"),
 		LogFormat:        get("EXCUBRA_LOG_FORMAT", "text"),
 		Timezone:         get("EXCUBRA_TIMEZONE", "Europe/Berlin"),

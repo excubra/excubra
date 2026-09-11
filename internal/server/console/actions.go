@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/wire"
@@ -107,6 +108,7 @@ type updatesData struct {
 	Behind   int
 	Current  int
 	NoTarget int
+	Catalog  *catalog.Status // nil when the catalog is off
 }
 
 func (s *Server) buildUpdates(ctx context.Context) (updatesData, error) {
@@ -123,6 +125,10 @@ func (s *Server) buildUpdates(ctx context.Context) (updatesData, error) {
 		return d, err
 	}
 	d.Releases = rels
+	if s.Catalog != nil {
+		st := s.Catalog.Status()
+		d.Catalog = &st
+	}
 	seen := map[string]bool{}
 	for _, rel := range rels {
 		if !seen[rel.Version] {
@@ -228,6 +234,24 @@ func (s *Server) updatesChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.flash(w, r, "Kanal "+ch+" zeigt jetzt auf "+v+". Boxen prüfen täglich, oder sofort über „Update holen“.", "/updates")
+}
+
+// updatesCatalog checks the release catalog now instead of at the next hourly tick.
+func (s *Server) updatesCatalog(w http.ResponseWriter, r *http.Request) {
+	if s.Catalog == nil {
+		s.flashErr(w, r, "Der Release-Katalog ist auf diesem Server abgeschaltet (EXCUBRA_RELEASE_CATALOG=off).", "/updates")
+		return
+	}
+	added, err := s.Catalog.Sync(r.Context())
+	if err != nil {
+		s.flashErr(w, r, "Katalog nicht erreichbar: "+err.Error(), "/updates")
+		return
+	}
+	if len(added) == 0 {
+		s.flash(w, r, "Katalog geprüft, keine neue Version.", "/updates")
+		return
+	}
+	s.flash(w, r, "Neu im Katalog: "+strings.Join(added, ", ")+". Unten je Kanal die Version wählen.", "/updates")
 }
 
 // updatesRollout queues an update task for every box on a channel.

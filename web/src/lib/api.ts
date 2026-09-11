@@ -105,7 +105,8 @@ export interface BoxNote { ID: number; BoxID: string; At: string; Text: string }
 export interface BoxData { Row: BoxRow; Sites: Site[] | null; TenantNames: Record<string, string>; Hosts: HostRow[] | null; Netbird: { ManagementURL: string; ClaimedAt: string | null } | null; Fingerprint: string; Subnets: string; Tasks: BoxTask[] | null; Notes: BoxNote[] | null }
 export interface Release { Version: string; OS: string; Arch: string; URL: string; SHA256: string; Signature: string; MinAgentVersion: string; CreatedAt: string }
 export interface UpdateRow extends BoxRow { Target: string; Behind: boolean; LastNote: BoxNote | null; Pending: BoxTask[] | null }
-export interface UpdatesData { Boxes: UpdateRow[] | null; Releases: Release[] | null; Channels: Record<string, string>; Versions: string[] | null; Behind: number; Current: number; NoTarget: number }
+export interface CatalogStatus { url: string; lastCheck: string; lastError: string; lastAdded: string[] }
+export interface UpdatesData { Boxes: UpdateRow[] | null; Releases: Release[] | null; Channels: Record<string, string>; Versions: string[] | null; Behind: number; Current: number; NoTarget: number; Catalog: CatalogStatus | null }
 export interface HostData {
   View: HostRow; Row: HostRow; Box: BoxRow; Site: Site; Tenant: Tenant; Siblings: HostRow[] | null
   Windows: MaintenanceWindow[] | null; Form: { ICMP: boolean; TCPPort: number; HTTPURL: string }; Rounds: number; Failed: number; Availability: number

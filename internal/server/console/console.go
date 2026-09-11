@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/version"
@@ -44,6 +45,7 @@ type Server struct {
 	Secure   bool   // set the Secure flag on cookies (overlay TLS on)
 	Ingest   string // host of the ingest, for enrollment keys
 	IngestPt int
+	Catalog  *catalog.Client // release catalog, nil when disabled (ADR-0006)
 
 	pages    map[string]*template.Template
 	partials *template.Template
@@ -220,6 +222,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/updates", s.auth(s.apiUpdates))
 	mux.Handle("POST /api/updates/channel", s.auth(s.updatesChannel))
 	mux.Handle("POST /api/updates/rollout", s.auth(s.updatesRollout))
+	mux.Handle("POST /api/updates/catalog", s.auth(s.updatesCatalog))
 	mux.Handle("POST /api/ack", s.auth(s.ackSet))
 	mux.Handle("POST /api/ack/delete", s.auth(s.ackDelete))
 	mux.Handle("GET /api/maintenance", s.auth(s.apiMaintenance))
