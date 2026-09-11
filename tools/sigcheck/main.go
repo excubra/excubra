@@ -19,12 +19,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: sigcheck <file> <file.sig>")
 		os.Exit(2)
 	}
-	blob, err := os.ReadFile(os.Args[1])
+	blob, err := os.ReadFile(os.Args[1]) //nolint:gosec // a CLI reads the file its operator names
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sigcheck:", err)
 		os.Exit(1)
 	}
-	s, err := os.ReadFile(os.Args[2])
+	s, err := os.ReadFile(os.Args[2]) //nolint:gosec // same
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sigcheck:", err)
 		os.Exit(1)
