@@ -3,7 +3,7 @@
 # the container itself. Files go in with `pct push`, the provisioning runs with `pct exec`.
 # From the repository root:
 #
-#   image/deploy-box-pct.sh <ssh-host-of-proxmox> <ctid> --enroll-key 'EX0:1:…' --hostname kft-box
+#   image/deploy-box-pct.sh <ssh-host-of-proxmox> <ctid> --enroll-key 'EX0:1:…' --hostname muster-box
 #
 # The Proxmox host is reached over SSH as root (an ~/.ssh/config alias works). Everything
 # after the ctid is passed to provision-box.sh unchanged. EXCUBRA_ARCH=arm64 for ARM hosts.

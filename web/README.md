@@ -19,7 +19,7 @@ than the lockfile.
 ## Develop
 
 Vite serves the app with hot reload and proxies `/api`, `/login`, `/logout` to a Go
-server on `127.0.0.1:18080`. The quickest backend is the preview server with KfT-like
+server on `127.0.0.1:18080`. The quickest backend is the preview server with pilot-like
 sample data, which needs no password:
 
 ```

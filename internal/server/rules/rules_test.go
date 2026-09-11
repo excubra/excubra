@@ -43,7 +43,7 @@ func TestFortiGateRules(t *testing.T) {
 	}{
 		{"quiet device", `{"interfaces":[{"name":"internal","role":"lan","admin":"ping https ssh","ip":"192.168.1.1"}],"ipsec":[{"name":"a","up":true}],"licenses":{"forticare":{"status":"registered"},"ips":{"status":"licensed","expires":` + itoa(later) + `}},"ha_mode":"standalone","admin_timeout_min":5}`,
 			map[string]float64{"mem_pct": 40}, true, ""},
-		{"admin on wan by role and public ip, plain http on lan", `{"interfaces":[{"name":"port1","role":"wan","admin":"ping https","ip":"203.0.113.5"},{"name":"internal","role":"lan","admin":"http https","ip":"10.0.0.1"},{"name":"x","role":"undefined","admin":"ssh","ip":"62.91.168.158"}]}`,
+		{"admin on wan by role and public ip, plain http on lan", `{"interfaces":[{"name":"port1","role":"wan","admin":"ping https","ip":"203.0.113.5"},{"name":"internal","role":"lan","admin":"http https","ip":"10.0.0.1"},{"name":"x","role":"undefined","admin":"ssh","ip":"203.0.113.5"}]}`,
 			nil, true, "fgt.admin_on_wan[port1] fgt.admin_on_wan[x] fgt.admin_plaintext[internal]"},
 		{"interfaces without address or with mask notation", `{"interfaces":[{"name":"dmz","role":"dmz","admin":"ping https","ip":""},{"name":"port2","role":"undefined","admin":"https","ip":"203.0.113.9 255.255.255.0"}]}`, nil, true, "fgt.admin_on_wan[port2]"},
 		{"wan by name without admin is fine", `{"interfaces":[{"name":"wan1","role":"wan","admin":"ping","ip":"203.0.113.5"}]}`, nil, true, ""},
@@ -63,8 +63,8 @@ func TestFortiGateRules(t *testing.T) {
 }
 
 func TestFindingsCarryWhatAPersonNeeds(t *testing.T) {
-	fs := Evaluate(Input{Kind: "fortigate", Pinned: true, Now: now, Facts: facts(t, `{"interfaces":[{"name":"wan1","role":"wan","admin":"ping https ssh","ip":"62.91.168.158"}]}`)})
-	if len(fs) != 1 || fs[0].Severity != High || !strings.Contains(fs[0].Detail, "https, ssh") || fs[0].Evidence["ip"] != "62.91.168.158" {
+	fs := Evaluate(Input{Kind: "fortigate", Pinned: true, Now: now, Facts: facts(t, `{"interfaces":[{"name":"wan1","role":"wan","admin":"ping https ssh","ip":"203.0.113.5"}]}`)})
+	if len(fs) != 1 || fs[0].Severity != High || !strings.Contains(fs[0].Detail, "https, ssh") || fs[0].Evidence["ip"] != "203.0.113.5" {
 		t.Fatalf("%+v", fs)
 	}
 }

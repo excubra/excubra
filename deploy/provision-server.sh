@@ -5,7 +5,7 @@
 # the flags.
 #
 #   provision-server.sh --binary ./dist/excubra_linux_amd64 \
-#                       --ingest-host ingest.ex0.viico-cloud.de \
+#                       --ingest-host ingest.ex0.example.test \
 #                       [--overlay 127.0.0.1:8080] [--hostname ex0] [--allow-ubuntu]
 #
 # Run it ON the target host as root (the deploy helper copies it there).

@@ -2,7 +2,7 @@
 
 package console_test
 
-// Design preview for the single-page console: seeds KfT-like data, logs in, and keeps a
+// Design preview for the single-page console: seeds pilot-like data, logs in, and keeps a
 // local server running for a while. It prints the URL and the raw session cookie so a
 // browser can be pointed at the app without typing a password.
 //

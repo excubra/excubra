@@ -28,7 +28,7 @@ func fakeFortiGate(t *testing.T, sessions float64) *httptest.Server {
 		var body any
 		switch r.URL.Path {
 		case "/api/v2/monitor/system/status":
-			body = env(map[string]any{"hostname": "kft-fw", "model_name": "FortiGate", "model_number": "60F", "log_disk_status": "available"})
+			body = env(map[string]any{"hostname": "fw-1", "model_name": "FortiGate", "model_number": "60F", "log_disk_status": "available"})
 		case "/api/v2/monitor/system/resource/usage":
 			cur := func(v float64) []map[string]any { return []map[string]any{{"current": v}} }
 			body = env(map[string]any{"cpu": cur(7), "mem": cur(41), "session": cur(sessions), "disk": cur(3)})
@@ -72,7 +72,7 @@ func TestFortiGateReading(t *testing.T) {
 	if err := json.Unmarshal(rep.Facts, &facts); err != nil {
 		t.Fatal(err)
 	}
-	if facts["serial"] != "FGT60FTK1234" || facts["version"] != "v7.2.8" || facts["hostname"] != "kft-fw" || facts["model"] != "FortiGate 60F" || facts["ha_mode"] != "standalone" {
+	if facts["serial"] != "FGT60FTK1234" || facts["version"] != "v7.2.8" || facts["hostname"] != "fw-1" || facts["model"] != "FortiGate 60F" || facts["ha_mode"] != "standalone" {
 		t.Fatalf("facts: %v", facts)
 	}
 	if facts["admin_https_port"] != 8443.0 {

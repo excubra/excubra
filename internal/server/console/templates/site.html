@@ -143,7 +143,7 @@
         {{else}}<p class="hint">{{if eq .Box.NetbirdStatus "connected"}}Nicht nötig: Die Box ist bereits im Kunden-Stack verbunden.{{else}}Kein Schlüssel hinterlegt. Die Box holt ihn genau einmal ab und setzt sich damit in den Kunden-Stack.{{end}}</p>{{end}}
         <form method="post" action="/boxes/{{.Box.ID}}/netbird" class="row">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
-          <label class="field grow"><span>Management-URL</span><input name="management_url" placeholder="https://kunde.vpn.viico-cloud.de"></label>
+          <label class="field grow"><span>Management-URL</span><input name="management_url" placeholder="https://kunde.vpn.example.test"></label>
           <label class="field grow"><span>Setup-Key</span><input name="setup_key" autocomplete="off"></label>
           <button class="sm">Hinterlegen</button>
         </form>
@@ -160,7 +160,7 @@
     <div class="ph line"><div><h2>Einstellungen</h2><div class="desc">Die Box holt Änderungen mit dem nächsten Heartbeat.</div></div></div>
     <form class="pb" method="post" action="/boxes/{{.Box.ID}}/settings">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <label class="field"><span>Name der Box</span><input name="name" value="{{.Box.Name}}" placeholder="z. B. kft-box"></label>
+      <label class="field"><span>Name der Box</span><input name="name" value="{{.Box.Name}}" placeholder="z. B. muster-box"></label>
       <div class="row">
         <label class="field"><span>Update-Kanal</span><select name="channel"><option value="stable"{{if eq .Box.Channel "stable"}} selected{{end}}>stable</option><option value="canary"{{if eq .Box.Channel "canary"}} selected{{end}}>canary</option></select></label>
         <label class="field grow"><span>Discovery</span><select name="discovery_mode"><option value="sweep"{{if eq .Box.DiscoveryMode "sweep"}} selected{{end}}>passiv + Sweep alle 15 min</option><option value="passive"{{if eq .Box.DiscoveryMode "passive"}} selected{{end}}>nur passiv</option></select></label>

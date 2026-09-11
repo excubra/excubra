@@ -47,7 +47,7 @@ func run(dir string) error {
 		}
 	}
 	must(st.CreateTenant(ctx, store.Tenant{ID: "ten_viico", Name: "VIICO GmbH", CreatedAt: now.Add(-30 * 24 * time.Hour)}))
-	must(st.CreateTenant(ctx, store.Tenant{ID: "ten_kaempf", Name: "Kämpf Hebezeugservice GmbH", CreatedAt: now.Add(-20 * 24 * time.Hour)}))
+	must(st.CreateTenant(ctx, store.Tenant{ID: "ten_muster", Name: "Muster Hebezeugservice GmbH", CreatedAt: now.Add(-20 * 24 * time.Hour)}))
 	must(st.CreateWebhookTarget(ctx, store.WebhookTarget{ID: "tgt_crm", Name: "VIICO-CRM", URL: "https://crm.viico.internal/ex0/webhook", Secret: id.Secret(32), TenantScope: "*", Enabled: true, CreatedAt: now.Add(-30 * 24 * time.Hour)}))
 	must(st.CreateAPIToken(ctx, store.APIToken{ID: "tok_crm", Name: "crm", TokenHash: "demo", Tenants: []string{"*"}, CreatedAt: now.Add(-30 * 24 * time.Hour)}))
 	must(st.CreateEnrollmentKey(ctx, store.EnrollmentKey{ID: "key_charge01", SecretHash: "demo1", Note: "Charge September", CreatedAt: now.Add(-3 * 24 * time.Hour), ExpiresAt: now.Add(27 * 24 * time.Hour)}))
@@ -58,8 +58,8 @@ func run(dir string) error {
 		return err
 	}
 	must(eng.CreateSite(ctx, store.Site{ID: "site_buero", TenantID: "ten_viico", Name: "Büro Ludwigshafen", CreatedAt: now.Add(-30 * 24 * time.Hour)}, "demo"))
-	must(eng.CreateSite(ctx, store.Site{ID: "site_werk", TenantID: "ten_kaempf", Name: "Werk Frankenthal", CreatedAt: now.Add(-20 * 24 * time.Hour)}, "demo"))
-	must(eng.CreateSite(ctx, store.Site{ID: "site_lager", TenantID: "ten_kaempf", Name: "Lager Worms", CreatedAt: now.Add(-10 * 24 * time.Hour)}, "demo"))
+	must(eng.CreateSite(ctx, store.Site{ID: "site_werk", TenantID: "ten_muster", Name: "Werk Frankenthal", CreatedAt: now.Add(-20 * 24 * time.Hour)}, "demo"))
+	must(eng.CreateSite(ctx, store.Site{ID: "site_lager", TenantID: "ten_muster", Name: "Lager Worms", CreatedAt: now.Add(-10 * 24 * time.Hour)}, "demo"))
 
 	boxes := []store.Box{
 		{ID: "box_buero", SiteID: "site_buero", Name: "Büro", HWID: "3f1a9c2e77b04d1a", AgentVersion: "0.1.0", OS: "linux", Arch: "amd64", CertSerial: "1a2b3c", CertNotAfter: now.Add(80 * 24 * time.Hour), Channel: "canary", DiscoveryMode: "sweep", NetbirdStatus: "connected", NetbirdIP: "100.85.12.4", DiskTotalBytes: 250e9, DiskFreeBytes: 212e9, UptimeS: 864000, LastSeen: now, EnrolledAt: now.Add(-28 * 24 * time.Hour)},
@@ -74,7 +74,7 @@ func run(dir string) error {
 			must(eng.AssignBox(ctx, b.ID, b.SiteID, "demo"))
 		}
 	}
-	must(st.SetNetbirdKey(ctx, store.NetbirdKey{BoxID: "box_lager", ManagementURL: "https://kaempf.vpn.viico-cloud.de", SetupKey: "demo", CreatedAt: now.Add(-1 * time.Hour)}))
+	must(st.SetNetbirdKey(ctx, store.NetbirdKey{BoxID: "box_lager", ManagementURL: "https://muster.vpn.example.test", SetupKey: "demo", CreatedAt: now.Add(-1 * time.Hour)}))
 
 	type h struct {
 		id, site, box, name, ip, mac, vendor, parent string
@@ -100,7 +100,7 @@ func run(dir string) error {
 		}
 		tenant := "ten_viico"
 		if x.site != "site_buero" {
-			tenant = "ten_kaempf"
+			tenant = "ten_muster"
 		}
 		checks := x.checks
 		for i := range checks {
@@ -178,7 +178,7 @@ func run(dir string) error {
 		}
 	}
 	// a maintenance window and a few older events for the timeline
-	must(eng.StartMaintenance(ctx, store.Maintenance{TenantID: "ten_kaempf", SiteID: "site_lager", Scope: "site", TargetID: "site_lager", Until: now.Add(90 * time.Minute), Reason: "Umzug Serverschrank"}, "jeremia"))
+	must(eng.StartMaintenance(ctx, store.Maintenance{TenantID: "ten_muster", SiteID: "site_lager", Scope: "site", TargetID: "site_lager", Until: now.Add(90 * time.Minute), Reason: "Umzug Serverschrank"}, "jeremia"))
 	older := []struct {
 		t    event.Type
 		ago  time.Duration

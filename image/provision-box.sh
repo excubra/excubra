@@ -4,7 +4,7 @@
 #
 #   provision-box.sh --binary ./excubra_linux_amd64 --enroll-key 'EX0:1:…' \
 #                    [--hostname ex0-box-buero] [--netbird-version 0.78.1] [--ssh-lan]
-#                    [--netbird-url https://kunde.vpn.viico-cloud.de --netbird-setup-key KEY]
+#                    [--netbird-url https://kunde.vpn.example.test --netbird-setup-key KEY]
 #
 # What a box is (salt: Konzept, "Die Box"): one unprivileged agent, no listening
 # port, outbound only. SSH is bound to the NetBird interface once that exists;

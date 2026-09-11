@@ -2,7 +2,7 @@
 
 package console_test
 
-// Design preview: renders the console pages with data that looks like the KfT pilot
+// Design preview: renders the console pages with data that looks like the pilot customer
 // into a directory, so the pages can be opened in a browser without a login.
 //
 //	EX0_PREVIEW_DIR=/tmp/ex0-preview go test -tags preview -run TestPreviewDump ./internal/server/console/
@@ -34,12 +34,12 @@ func TestPreviewDump(t *testing.T) {
 	}
 	f := seedPreview(t)
 	ctx := context.Background()
-	hosts, err := f.st.Hosts(ctx, "ten_kft", "")
+	hosts, err := f.st.Hosts(ctx, "ten_muster", "")
 	must(t, err)
 	dumpPreview(t, f, out, hosts)
 }
 
-// seedPreview builds a logged-in fixture with data that looks like the KfT pilot.
+// seedPreview builds a logged-in fixture with data that looks like the pilot customer.
 func seedPreview(t *testing.T) *fixture {
 	t.Helper()
 	f := newFixture(t)
@@ -47,44 +47,44 @@ func seedPreview(t *testing.T) *fixture {
 	ctx := context.Background()
 	now := time.Now()
 
-	f.post("/tenants", url.Values{"slug": {"kft"}, "name": {"Klub für Terrier von 1894 e.V."}}, true)
-	f.post("/tenants/ten_kft/sites", url.Values{"slug": {"geschaeftsstelle"}, "name": {"Geschäftsstelle"}}, true)
+	f.post("/tenants", url.Values{"slug": {"muster"}, "name": {"Muster Sport e.V."}}, true)
+	f.post("/tenants/ten_muster/sites", url.Values{"slug": {"geschaeftsstelle"}, "name": {"Geschäftsstelle"}}, true)
 	must(t, f.st.CreateBox(ctx, store.Box{ID: "box_wns7sxvzvnrc", HWID: "ff65b128111ed14d", CertSerial: "bb055137284f7ab04745abbf7ee06237",
 		CertNotAfter: now.Add(89 * 24 * time.Hour), EnrolledAt: now.Add(-2 * time.Hour), Channel: "stable", DiscoveryMode: "sweep", OS: "linux", Arch: "amd64"}))
 	f.eng.RegisterBox(store.Box{ID: "box_wns7sxvzvnrc"})
 	f.post("/boxes/box_wns7sxvzvnrc/assign", url.Values{"site_id": {"site_geschaeftsstelle"}}, true)
-	f.post("/boxes/box_wns7sxvzvnrc/settings", url.Values{"name": {"kft-box"}, "channel": {"stable"}, "discovery_mode": {"sweep"}}, true)
+	f.post("/boxes/box_wns7sxvzvnrc/settings", url.Values{"name": {"muster-box"}, "channel": {"stable"}, "discovery_mode": {"sweep"}}, true)
 	box, err := f.st.Box(ctx, "box_wns7sxvzvnrc")
 	must(t, err)
 
 	type dev struct{ ip, mac, ven, host string }
 	devs := []dev{
-		{"192.168.100.254", "84:39:8f:74:63:48", "Fortinet, Inc.", ""},
-		{"192.168.100.24", "5c:ba:2c:55:11:08", "Hewlett Packard Enterprise", ""},
-		{"192.168.100.25", "bc:24:11:a1:3b:15", "Proxmox Server Solutions GmbH", ""},
-		{"192.168.100.19", "bc:24:11:b5:fa:53", "Proxmox Server Solutions GmbH", "KFT-RDS"},
-		{"192.168.100.15", "bc:24:11:bc:9a:c2", "Proxmox Server Solutions GmbH", "truenas"},
-		{"192.168.100.3", "bc:24:11:88:c4:a7", "Proxmox Server Solutions GmbH", ""},
-		{"192.168.100.60", "bc:24:11:80:c7:71", "Proxmox Server Solutions GmbH", "kft-box.local"},
-		{"192.168.100.21", "44:4e:6d:72:8d:ab", "AVM Audiovisuelles Marketing und Computersysteme GmbH", ""},
-		{"192.168.100.36", "00:90:33:4c:ea:e4", "INNOVAPHONE AG", ""},
-		{"192.168.100.41", "00:90:33:4c:cc:29", "INNOVAPHONE AG", ""},
-		{"192.168.100.42", "00:90:33:47:02:95", "INNOVAPHONE AG", ""},
-		{"192.168.100.121", "00:90:33:4c:eb:83", "INNOVAPHONE AG", ""},
-		{"192.168.100.122", "00:90:33:4c:4a:4b", "INNOVAPHONE AG", ""},
-		{"192.168.100.153", "00:90:33:4c:cb:ec", "INNOVAPHONE AG", ""},
-		{"192.168.100.8", "b4:22:00:45:35:ab", "Brother Industries, LTD.", "BRNB422004535AB"},
-		{"192.168.100.35", "b4:22:00:c2:e3:3b", "Brother Industries, LTD.", "BRNB42200C2E33B"},
-		{"192.168.100.20", "6c:f2:d8:80:b2:a3", "CANON INC.", ""},
-		{"192.168.100.33", "00:1a:fd:15:01:b2", "EVOLIS", ""},
-		{"192.168.100.157", "00:07:4d:6c:7e:76", "Zebra Technologies Corp.", ""},
-		{"192.168.100.38", "c4:ef:bb:59:06:28", "LCFC(Hefei) Electronics Technology co., ltd", ""},
-		{"192.168.100.39", "c4:c6:e6:02:ce:c1", "LCFC(Hefei) Electronics Technology co., ltd", ""},
-		{"", "18:3d:2d:4d:40:d6", "LCFC(Hefei) Electronics Technology co., ltd", ""},
-		{"", "d0:ad:08:a1:59:c2", "HP Inc.", ""},
-		{"", "78:99:87:08:d7:6a", "Xiaomi Communications Co Ltd", ""},
-		{"192.168.100.2", "a2:98:9f:a7:3e:1c", "", ""},
-		{"", "8e:3c:02:41:86:27", "", ""},
+		{"192.168.100.254", "02:00:00:da:1c:4b", "Fortinet, Inc.", ""},
+		{"192.168.100.24", "02:00:00:6e:63:b6", "Hewlett Packard Enterprise", ""},
+		{"192.168.100.25", "02:00:00:de:1e:2f", "Proxmox Server Solutions GmbH", ""},
+		{"192.168.100.19", "02:00:00:61:d0:70", "Proxmox Server Solutions GmbH", "MUSTER-RDS"},
+		{"192.168.100.15", "02:00:00:cd:b7:34", "Proxmox Server Solutions GmbH", "truenas"},
+		{"192.168.100.3", "02:00:00:dd:13:4b", "Proxmox Server Solutions GmbH", ""},
+		{"192.168.100.60", "02:00:00:b4:37:5d", "Proxmox Server Solutions GmbH", "muster-box.local"},
+		{"192.168.100.21", "02:00:00:e0:db:14", "AVM Audiovisuelles Marketing und Computersysteme GmbH", ""},
+		{"192.168.100.36", "02:00:00:e7:38:66", "INNOVAPHONE AG", ""},
+		{"192.168.100.41", "02:00:00:b4:74:96", "INNOVAPHONE AG", ""},
+		{"192.168.100.42", "02:00:00:ea:4d:9b", "INNOVAPHONE AG", ""},
+		{"192.168.100.121", "02:00:00:5c:77:dd", "INNOVAPHONE AG", ""},
+		{"192.168.100.122", "02:00:00:2b:55:94", "INNOVAPHONE AG", ""},
+		{"192.168.100.153", "02:00:00:b2:e5:2a", "INNOVAPHONE AG", ""},
+		{"192.168.100.8", "02:00:00:7e:5d:d1", "Brother Industries, LTD.", "BRNB422004535AB"},
+		{"192.168.100.35", "02:00:00:3c:27:2e", "Brother Industries, LTD.", "BRNB42200C2E33B"},
+		{"192.168.100.20", "02:00:00:83:14:e0", "CANON INC.", ""},
+		{"192.168.100.33", "02:00:00:a5:52:81", "EVOLIS", ""},
+		{"192.168.100.157", "02:00:00:a3:05:8f", "Zebra Technologies Corp.", ""},
+		{"192.168.100.38", "02:00:00:76:ee:cb", "LCFC(Hefei) Electronics Technology co., ltd", ""},
+		{"192.168.100.39", "02:00:00:a9:d9:31", "LCFC(Hefei) Electronics Technology co., ltd", ""},
+		{"", "02:00:00:d6:ae:a8", "LCFC(Hefei) Electronics Technology co., ltd", ""},
+		{"", "02:00:00:c4:07:ed", "HP Inc.", ""},
+		{"", "02:00:00:35:49:ad", "Xiaomi Communications Co Ltd", ""},
+		{"192.168.100.2", "02:00:00:e6:2c:1c", "", ""},
+		{"", "02:00:00:48:d3:4e", "", ""},
 	}
 	var seen []wire.Sighting
 	for _, d := range devs {
@@ -98,7 +98,7 @@ func seedPreview(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 
-	stored, err := f.st.Devices(ctx, "ten_kft", "site_geschaeftsstelle", time.Time{})
+	stored, err := f.st.Devices(ctx, "ten_muster", "site_geschaeftsstelle", time.Time{})
 	must(t, err)
 	byIP := map[string]store.Device{}
 	for _, d := range stored {
@@ -113,7 +113,7 @@ func seedPreview(t *testing.T) *fixture {
 			t.Fatalf("watch %s: %d", ip, status)
 		}
 	}
-	hosts, err := f.st.Hosts(ctx, "ten_kft", "")
+	hosts, err := f.st.Hosts(ctx, "ten_muster", "")
 	must(t, err)
 	var reports []wire.HostReport
 	for _, h := range hosts {
@@ -188,7 +188,7 @@ func seedActions(t *testing.T, f *fixture) {
 	if err := f.st.SetBoxSealKey(ctx, box, "TzzOyQfgRGO42lA8akZ+KD6gNw7wrOUoWromV7sS/Sw="); err != nil {
 		t.Fatal(err)
 	}
-	devs, err := f.st.Devices(ctx, "ten_kft", "site_geschaeftsstelle", time.Time{})
+	devs, err := f.st.Devices(ctx, "ten_muster", "site_geschaeftsstelle", time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,15 +196,15 @@ func seedActions(t *testing.T, f *fixture) {
 		if d.IP != "192.168.100.254" {
 			continue
 		}
-		c := store.Connector{ID: "con_fgt01", TenantID: "ten_kft", SiteID: "site_geschaeftsstelle", BoxID: box, DeviceID: d.ID, Kind: wire.ConnectorFortiGate, URL: "https://192.168.100.254",
+		c := store.Connector{ID: "con_fgt01", TenantID: "ten_muster", SiteID: "site_geschaeftsstelle", BoxID: box, DeviceID: d.ID, Kind: wire.ConnectorFortiGate, URL: "https://192.168.100.254",
 			Sealed: strings.Repeat("A", 120), SealedBy: "console:jeremia", SealedAt: now.Add(-2 * time.Hour), IntervalS: 300, CreatedAt: now.Add(-2 * time.Hour)}
 		if err := f.st.CreateConnector(ctx, c); err != nil {
 			t.Fatal(err)
 		}
-		facts := `{"serial":"FGT60FTK21012345","version":"v7.2.8","build":1639,"hostname":"KFT-FW01","model":"FortiGate 60F","log_disk":"available","ha_mode":"standalone",
+		facts := `{"serial":"FGT60FTK21012345","version":"v7.2.8","build":1639,"hostname":"MUSTER-FW01","model":"FortiGate 60F","log_disk":"available","ha_mode":"standalone",
 			"admin_https_port":8443,"admin_ssh_port":22,"admin_timeout_min":5,"timezone":"Europe/Berlin",
-			"interfaces":[{"name":"wan1","alias":"Telekom","link":true,"ip":"217.0.0.12","speed":1000,"role":"wan","admin":"ping https ssh","enabled":true},{"name":"internal","alias":"LAN","link":true,"ip":"192.168.100.254","speed":1000,"role":"lan","admin":"ping https ssh http","enabled":true},{"name":"dmz","alias":"","link":false,"ip":"","speed":0,"role":"dmz","admin":"ping","enabled":true}],
-			"ipsec":[{"name":"to-viico","gateway":"144.76.67.109","up":true,"phase2":[{"name":"to-viico-p2","status":"up","in_bytes":1284211,"out_bytes":934102}]},{"name":"to-hq","gateway":"198.51.100.1","up":false,"phase2":[{"name":"hq-p2","status":"down"}]}],
+			"interfaces":[{"name":"wan1","alias":"Telekom","link":true,"ip":"203.0.113.12","speed":1000,"role":"wan","admin":"ping https ssh","enabled":true},{"name":"internal","alias":"LAN","link":true,"ip":"192.168.100.254","speed":1000,"role":"lan","admin":"ping https ssh http","enabled":true},{"name":"dmz","alias":"","link":false,"ip":"","speed":0,"role":"dmz","admin":"ping","enabled":true}],
+			"ipsec":[{"name":"to-viico","gateway":"203.0.113.10","up":true,"phase2":[{"name":"to-viico-p2","status":"up","in_bytes":1284211,"out_bytes":934102}]},{"name":"to-hq","gateway":"198.51.100.1","up":false,"phase2":[{"name":"hq-p2","status":"down"}]}],
 			"licenses":{"forticare":{"status":"registered"},"antivirus":{"status":"licensed","expires":1790000000},"ips":{"status":"licensed","expires":1790000000},"web_filter":{"status":"expired","expires":1750000000}}}`
 		rep := wire.ConnectorReport{ID: c.ID, DeviceID: d.ID, Kind: wire.ConnectorFortiGate, OK: true, CollectedAt: now.Add(-3 * time.Minute), Facts: json.RawMessage(facts),
 			Metrics:        map[string]float64{"cpu_pct": 6, "mem_pct": 38, "sessions": 1240, "disk_pct": 3, "interfaces_up": 2, "interfaces_down": 1, "ipsec_up": 1, "ipsec_down": 1, "licenses_expired": 1},
@@ -218,10 +218,10 @@ func seedActions(t *testing.T, f *fixture) {
 		}
 		for i := 0; i < 24; i++ {
 			at := now.Add(-time.Duration(i) * time.Hour)
-			_ = f.st.AddConnectorSamples(ctx, "ten_kft", c.ID, at, map[string]float64{"cpu_pct": float64(4 + i%7), "sessions": float64(900 + (i*137)%600)})
+			_ = f.st.AddConnectorSamples(ctx, "ten_muster", c.ID, at, map[string]float64{"cpu_pct": float64(4 + i%7), "sessions": float64(900 + (i*137)%600)})
 		}
 	}
-	views, err := f.eng.HostViews(ctx, "ten_kft")
+	views, err := f.eng.HostViews(ctx, "ten_muster")
 	if err != nil {
 		t.Fatal(err)
 	}

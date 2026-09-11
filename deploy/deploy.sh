@@ -2,7 +2,7 @@
 # Builds the Linux binary from the current commit and provisions a host with it.
 # Run from the repository root:
 #
-#   deploy/deploy.sh root@49.12.65.47 --ingest-host ingest.ex0.viico-cloud.de --hostname ex0
+#   deploy/deploy.sh root@ex0.example.test --ingest-host ingest.ex0.example.test --hostname ex0
 #
 # Everything after the target is passed to provision-server.sh.
 set -euo pipefail

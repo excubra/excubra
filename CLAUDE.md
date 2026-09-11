@@ -136,7 +136,7 @@ Vorgänge Phase 1 (Meilenstein „EX0 dünn (Phase 1)"):
 | Erste Box im VIICO-Büro, 7 Tage stabil | `bd64e2f33184a849f2bad54a4997f5f3` |
 | Security-Audit (Fable 5.1, getaggter Stand) | `017339447c5a0c2302873434f2757097` |
 | Phase 2: Erkennung | `490a8f0a742c6c4a3cc239d6eef00ead` |
-| Erste Kundenbox beim KfT (Container kft-box auf dem Proxmox) | `7a730e2d28eb1101f9b2ccc3d7fb2dac` |
+| Erste Kundenbox beim Pilotkunden (Container muster-box auf dem Proxmox) | `7a730e2d28eb1101f9b2ccc3d7fb2dac` |
 | Konsole: Neuaufbau 2026 (Vollbild, Standort-Seite, HTTPS, 2-Schritt-Login) | `394362a764f565df0ac8bf6f380295e5` |
 | Konsole: Aktionen — Aufgaben an Boxen, Update-Verwaltung, Quittieren, Box-Meldungen | `fe2be95e18e19c52a1d7710a46694fe7` |
 

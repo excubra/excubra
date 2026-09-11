@@ -3,7 +3,7 @@
 # binary, copies the binary next to the installed one, swaps it atomically, restarts the
 # service and checks /healthz on the overlay listener. Run from the repository root:
 #
-#   deploy/update-server.sh root@100.85.182.212
+#   deploy/update-server.sh root@100.64.0.10
 #
 # Only the binary changes. Configuration, units, timers and data stay as they are; for
 # those, run deploy/deploy.sh (idempotent) instead.

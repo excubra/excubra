@@ -70,7 +70,7 @@ export function BoxTech({ box, site, sites, tenantNames, fingerprint, netbird, s
               <p className="text-sm text-muted-foreground">Hinterlegt für <span className="font-mono">{netbird.ManagementURL}</span>{netbird.ClaimedAt ? `, abgeholt ${fmtDateTime(netbird.ClaimedAt)}` : ", wird beim nächsten Config-Pull einmalig abgeholt"}. <Button variant="link" size="sm" className="h-auto p-0" onClick={() => m.mutate({ path: `/api/boxes/${box.ID}/netbird`, form: { action: "clear" } })}>Entfernen</Button></p>
             ) : <p className="text-sm text-muted-foreground">{box.NetbirdStatus === "connected" ? "Nicht nötig: Die Box ist bereits im Kunden-Stack verbunden." : "Kein Schlüssel hinterlegt. Die Box holt ihn genau einmal ab und setzt sich damit in den Kunden-Stack."}</p>}
             <div className="grid gap-2 @xl/main:grid-cols-[1fr_1fr_auto]">
-              <Input value={mgmt} onChange={(e) => setMgmt(e.target.value)} placeholder="https://kunde.vpn.viico-cloud.de" />
+              <Input value={mgmt} onChange={(e) => setMgmt(e.target.value)} placeholder="https://kunde.vpn.example.test" />
               <Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="Setup-Key" autoComplete="off" />
               <Button variant="outline" onClick={() => m.mutate({ path: `/api/boxes/${box.ID}/netbird`, form: { management_url: mgmt, setup_key: key } })} disabled={!mgmt || !key || m.isPending}>Hinterlegen</Button>
             </div>
@@ -91,7 +91,7 @@ export function BoxTech({ box, site, sites, tenantNames, fingerprint, netbird, s
       <Card>
         <CardHeader><CardTitle>Einstellungen</CardTitle><CardDescription>Die Box holt Änderungen mit dem nächsten Heartbeat.</CardDescription></CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="grid gap-2"><Label htmlFor="bname">Name der Box</Label><Input id="bname" value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. kft-box" /></div>
+          <div className="grid gap-2"><Label htmlFor="bname">Name der Box</Label><Input id="bname" value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. muster-box" /></div>
           <div className="grid gap-4 @xl/main:grid-cols-2">
             <div className="grid gap-2"><Label>Update-Kanal</Label><Select value={channel} onValueChange={setChannel}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stable">stable</SelectItem><SelectItem value="canary">canary</SelectItem></SelectContent></Select></div>
             <div className="grid gap-2"><Label>Discovery</Label><Select value={mode} onValueChange={setMode}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="sweep">passiv + Sweep alle 15 min</SelectItem><SelectItem value="passive">nur passiv</SelectItem></SelectContent></Select></div>

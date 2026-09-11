@@ -20,7 +20,7 @@ Ist die Box ein LXC-Container auf einem Proxmox-Host des Kunden (kein SSH in den
 nötig), läuft dasselbe über den Host — Dateien per `pct push`, Provisionierung per `pct exec`:
 
 ```bash
-image/deploy-box-pct.sh root@<proxmox> <ctid> --enroll-key 'EX0:1:…' --hostname kft-box
+image/deploy-box-pct.sh root@<proxmox> <ctid> --enroll-key 'EX0:1:…' --hostname muster-box
 ```
 
 In unprivilegierten Containern sind `sysctl`, `ufw`, `hostnamectl` und `timedatectl`

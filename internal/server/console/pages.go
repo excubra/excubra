@@ -165,7 +165,7 @@ func deviceName(dev store.Device) string {
 	return firstNonEmpty(cleanHostname(dev.Hostname), vendorShort(dev.Vendor), dev.IP, "nur IPv6")
 }
 
-// cleanHostname turns "KFT-RDS.local" into "KFT-RDS".
+// cleanHostname turns "MUSTER-RDS.local" into "MUSTER-RDS".
 func cleanHostname(h string) string {
 	h = strings.TrimSpace(h)
 	h = strings.TrimSuffix(h, ".local")

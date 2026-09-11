@@ -50,7 +50,7 @@
   {{else}}<p class="hint">Kein Schlüssel hinterlegt. Die Box holt ihn genau einmal ab und setzt sich damit in den Kunden-Stack.</p>{{end}}
   <form method="post" action="/boxes/{{.Row.ID}}/netbird" style="margin-top:.6rem">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label class="field"><span>Management-URL</span><input name="management_url" placeholder="https://kunde.vpn.viico-cloud.de"></label>
+    <label class="field"><span>Management-URL</span><input name="management_url" placeholder="https://kunde.vpn.example.test"></label>
     <label class="field"><span>Setup-Key</span><input name="setup_key" autocomplete="off"></label>
     <div class="actions-row"><button class="small">Hinterlegen</button></div>
   </form>
