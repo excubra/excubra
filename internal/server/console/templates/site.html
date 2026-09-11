@@ -6,12 +6,6 @@
     <h1>{{.Site.Name}}
       {{if .Box}}{{if .Online}}<span class="pill ok big live">online</span>{{else}}<span class="pill bad big">Box schweigt</span>{{end}}{{else}}<span class="pill big">keine Box</span>{{end}}
     </h1>
-    <div class="meta">
-      {{if .Box}}<span>Box <b class="mono">{{if .Box.Name}}{{.Box.Name}}{{else}}{{.Box.ID}}{{end}}</b></span><span>Heartbeat <b data-ago="{{unix .Box.State.LastHeartbeat}}">{{ago .Box.State.LastHeartbeat}}</b></span>{{end}}
-      <span>Geräte <b>{{len .Devices}}</b></span>
-      <span>Beobachtet <b>{{.Monitored}}</b></span>
-      {{if .Down}}<span>Ausgefallen <b class="err">{{.Down}}</b></span>{{else}}<span>Ausfälle <b>0</b></span>{{end}}
-    </div>
   </div>
   <div class="actions"><a class="btn" href="/maintenance"><svg class="i"><use href="/static/icons.svg#wrench"/></svg>Wartung planen</a></div>
 </div>
@@ -25,9 +19,15 @@
 
 <!-- ===== Netz ===== -->
 <div class="tabpane {{if eq .Tab "netz"}}on{{end}}" data-pane="site:netz">
-<div class="netz">
-<div>
   {{if not .Box}}<div class="notice bad"><span class="pill bad">keine Box</span><span>Diesem Standort ist keine Box zugeordnet. Ohne Box kein Inventar und keine Prüfungen.</span><a class="btn sm" href="/boxes">Zu den Boxen</a></div>{{end}}
+  <div class="tiles">
+    <div class="tile{{if .Box}}{{if .Online}} ok{{else}} bad{{end}}{{end}}"><span class="k">Box</span><span class="v md">{{if .Box}}{{if .Online}}online{{else}}schweigt{{end}}{{else}}keine{{end}}</span><span class="d">{{if .Box}}Heartbeat <span data-ago="{{unix .Box.State.LastHeartbeat}}">{{ago .Box.State.LastHeartbeat}}</span> · Agent {{.Box.AgentVersion}}{{else}}erst zuordnen{{end}}</span></div>
+    <div class="tile"><span class="k">Geräte</span><span class="v">{{len .Devices}}</span><span class="d">{{if .Box}}{{if eq .Box.DiscoveryMode "sweep"}}Sweep alle 15 min{{else}}nur passiv{{end}}{{if .Ignored}} · {{.Ignored}} ignoriert{{end}}{{else}}–{{end}}</span></div>
+    <div class="tile{{if .Monitored}} ok{{end}}"><span class="k">Beobachtet</span><span class="v">{{.Monitored}}</span><span class="d">{{.Up}} erreichbar{{if .Unknown}} · {{.Unknown}} ohne Ergebnis{{end}}</span></div>
+    <div class="tile{{if .Down}} bad{{end}}"><span class="k">Ausgefallen</span><span class="v">{{.Down}}</span><span class="d">{{if .Down}}seit dem letzten Heartbeat gemeldet{{else}}alles erreichbar{{end}}</span></div>
+    <div class="tile"><span class="k">Ereignisse 24 h</span><span class="v">{{len .Events}}</span><span class="d">{{if .Red}}<span class="err">{{.Red}} rot</span>{{else}}nichts Rotes{{end}}</span></div>
+    <div class="tile"><span class="k">Zuletzt</span><span class="v md">{{if .Events}}{{tsTime (index .Events 0).OccurredAt}}{{else}}–{{end}}</span><span class="d">{{if .Events}}{{(index .Events 0).Title}}{{else}}kein Ereignis{{end}}</span></div>
+  </div>
   <div class="toolbar">
     <label class="search"><svg class="i"><use href="/static/icons.svg#search"/></svg><input id="dq" placeholder="Name, IP, MAC, Hersteller" aria-label="Geräte filtern"></label>
     <div id="fchips">
@@ -35,24 +35,17 @@
       {{range .Kinds}}<button class="fchip" data-f="{{.Key}}">{{.Label}} <span class="n">{{.N}}</span></button>{{end}}
       <button class="fchip" data-f="mon">Beobachtet <span class="n">{{.Monitored}}</span></button>
     </div>
-    <span class="spacer"></span>
-    {{if .Box}}<span class="sub">{{if eq .Box.DiscoveryMode "sweep"}}Sweep alle 15 min{{else}}nur passiv{{end}}{{if .Ignored}} · {{.Ignored}} ignoriert{{end}}</span>{{end}}
   </div>
   {{if .Devices}}
-  <div class="devs" id="devs">
+  <div class="board" id="devs">
   {{range .Devices}}
-  <div class="dev{{if .Monitored}} mon{{end}}{{if .Ignored}} ignored{{end}}" data-kind="{{.Kind}}" data-mon="{{if .Monitored}}1{{else}}0{{end}}" data-text="{{.Text}}">
-    <div class="ico"><svg class="i"><use href="/static/icons.svg#{{.Kind}}"/></svg></div>
-    <div class="nm">
-      {{if .Monitored}}<a href="/hosts/{{.HostID}}" title="{{.Name}}">{{.Name}}</a>{{else}}<span class="t" title="{{.Name}}">{{.Name}}</span>{{end}}
-      {{if .IsUplink}}<span class="chip ok">Uplink</span>{{end}}
-      {{if .IsBox}}<span class="chip">diese Box</span>{{end}}
-      {{if and .Monitored (eq .StateClass "down")}}<span class="chip bad">ausgefallen</span>{{end}}
-    </div>
+  <div class="dev{{if .Monitored}} mon{{end}}{{if eq .StateClass "down"}} down{{end}}{{if .Ignored}} ignored{{end}}" data-kind="{{.Kind}}" data-mon="{{if .Monitored}}1{{else}}0{{end}}" data-text="{{.Text}}">
+    <div class="kind"><svg class="i"><use href="/static/icons.svg#{{.Kind}}"/></svg>{{.KindLabel}}{{if .IsUplink}} · Uplink{{end}}{{if .Monitored}}{{if eq .StateClass "down"}} · <span class="err">ausgefallen</span>{{else if eq .StateClass "up"}} · erreichbar{{else}} · wird geprüft{{end}}{{end}}</div>
     {{if .IsBox}}<button class="sw" disabled aria-label="Die Box selbst wird nicht beobachtet" title="Die Box selbst wird nicht beobachtet"></button>
     {{else if .Monitored}}<form method="post" action="/hosts/{{.HostID}}/unwatch"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="sw on" role="switch" aria-checked="true" aria-label="{{.Name}} nicht mehr beobachten" title="Nicht mehr beobachten"></button></form>
     {{else}}<form method="post" action="/devices/{{.ID}}/watch"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="sw" role="switch" aria-checked="false" aria-label="{{.Name}} beobachten" title="Beobachten: jede Minute per Ping prüfen"{{if not .IP}} disabled{{end}}></button></form>{{end}}
-    <div class="ad"><span>{{if .IP}}{{.IP}}{{else}}<span class="none">keine IPv4</span>{{end}}</span><span class="mac">{{.MAC}}</span></div>
+    <div class="nm">{{if .Monitored}}<a href="/hosts/{{.HostID}}" title="{{.Name}}">{{.Name}}</a>{{else}}<span class="t" title="{{.Name}}">{{.Name}}</span>{{end}}{{if .IsBox}}<span class="chip">diese Box</span>{{end}}</div>
+    <div class="ad"><span class="ip">{{if .IP}}{{.IP}}{{else}}<span class="none">keine IPv4</span>{{end}}</span><span class="mac">{{.MAC}}</span></div>
     <div class="ven"><span class="v">{{if .Vendor}}{{.Vendor}}{{else}}Hersteller unbekannt{{end}}{{if and .Hostname (ne (cleanName .Hostname) .Name)}} · {{.Hostname}}{{end}}</span><span class="seen{{if .GoneAt}} bad{{end}}">{{if .GoneAt}}weg seit {{ago (deref .GoneAt)}}{{else}}seit {{tsShort .FirstSeen}}{{end}}</span></div>
   </div>
   {{end}}
@@ -62,62 +55,40 @@
   <div class="panel"><div class="empty"><svg class="i"><use href="/static/icons.svg#radar"/></svg><b>Noch keine Geräte gesehen</b><span>Die Box meldet Geräte mit jedem Heartbeat; der erste Sweep läuft eine halbe Minute nach dem Start.</span></div></div>
   {{end}}
 </div>
-<aside class="aside">
-  <div class="panel">
-    <div class="ph"><h2>Beobachtet</h2><div class="r">{{if .Down}}<span class="chip bad">{{.Down}} ausgefallen</span>{{else if .Monitored}}<span class="chip ok">{{.Up}} erreichbar</span>{{end}}</div></div>
-    <div class="mini">{{range .Hosts}}<a class="it" href="/hosts/{{.ID}}"><span class="dot {{.StateClass}}"></span><span>{{.Name}}</span>{{if .IsUplink}}<span class="chip ok">Uplink</span>{{end}}<span class="ip">{{.Address}}</span></a>{{else}}<div class="it sub">Noch nichts eingeschaltet. Links ein Gerät auf „beobachten" stellen.</div>{{end}}</div>
-  </div>
-  <div class="panel">
-    <div class="ph"><h2>Letzte 24 Stunden</h2><div class="r"><button class="btn sm" data-goto-tab="ereignisse">Alle</button></div></div>
-    <div class="feed">{{range $i, $e := .Events}}{{if lt $i 8}}<div class="it"><span class="t">{{tsTime $e.OccurredAt}}</span><div><div class="w {{$e.Class}}">{{$e.Title}}</div>{{if $e.Info}}<div class="s">{{$e.Info}}</div>{{end}}</div></div>{{end}}{{else}}<div class="it"><span class="t">–</span><div class="s">Kein Ereignis in den letzten 24 Stunden.</div></div>{{end}}</div>
-  </div>
-  {{if .Box}}
-  <div class="panel">
-    <div class="ph"><h2>Box</h2><div class="r">{{if .Online}}<span class="pill ok">online</span>{{else}}<span class="pill bad">schweigt</span>{{end}}</div></div>
-    <div class="pb kv">
-      <div class="k">Heartbeat</div><div class="v" data-ago="{{unix .Box.State.LastHeartbeat}}">{{ago .Box.State.LastHeartbeat}}</div>
-      <div class="k">Agent</div><div class="v">{{if .Box.AgentVersion}}{{.Box.AgentVersion}}{{else}}–{{end}} · {{.Box.Channel}}</div>
-      <div class="k">NetBird</div><div class="v mono">{{if .Box.NetbirdIP}}{{.Box.NetbirdIP}}{{else}}–{{end}}</div>
-      <div class="k">Platte frei</div><div class="v">{{if .Box.DiskTotalBytes}}{{gb .Box.DiskFreeBytes}} von {{gb .Box.DiskTotalBytes}} GB{{else}}–{{end}}</div>
-    </div>
-  </div>
-  {{end}}
-</aside>
-</div>
-</div>
 
 <!-- ===== Überwachung ===== -->
 <div class="tabpane {{if eq .Tab "ueberwachung"}}on{{end}}" data-pane="site:ueberwachung">
-<div class="grid2 wide">
-  <div>
-    {{if .Hosts}}
-    <div class="hosts">
+  <div class="tiles">
+    <div class="tile{{if .Up}} ok{{end}}"><span class="k">Erreichbar</span><span class="v">{{.Up}}</span><span class="d">von {{.Monitored}} beobachtet</span></div>
+    <div class="tile{{if .Down}} bad{{end}}"><span class="k">Ausgefallen</span><span class="v">{{.Down}}</span><span class="d">{{if .Down}}Ereignis unterwegs{{else}}nichts steht{{end}}</span></div>
+    <div class="tile"><span class="k">In Wartung</span><span class="v">{{.Maint}}</span><span class="d">unterdrückt</span></div>
+    <div class="tile"><span class="k">Ohne Ergebnis</span><span class="v">{{.Unknown}}</span><span class="d">noch keine Prüfung</span></div>
+    <div class="tile"><span class="k">Prüfung</span><span class="v md">jede Minute</span><span class="d">ICMP von der Box im LAN</span></div>
+    <div class="tile"><span class="k">Rot ab</span><span class="v md">3 verpasst</span><span class="d">grün wieder ab 2 Erfolgen</span></div>
+  </div>
+  <div class="board">
     {{range .Hosts}}
-    <a class="host {{.StateClass}}" href="/hosts/{{.ID}}">
+    <a class="host c2 r2 {{.StateClass}}" href="/hosts/{{.ID}}">
       <div class="t"><div><div class="nm">{{.Name}}</div><div class="ip">{{.Address}}</div></div>{{if .IsUplink}}<span class="chip ok">Uplink</span>{{end}}<span class="pill{{if eq .StateClass "up"}} ok{{else if eq .StateClass "down"}} bad{{end}}">{{.StateLabel}}</span></div>
-      <div class="row2">
-        <span>{{if .State.Since.IsZero}}noch keine Prüfung{{else}}seit <b>{{ago .State.Since}}</b>{{if eq .StateClass "up"}} ohne Ausfall{{else if eq .StateClass "down"}} nicht erreichbar{{end}}{{end}}</span>
-        <span>Prüfung <b>{{.Checks}}</b></span>
-        <span class="up">{{if .IsUplink}}meldet für alle dahinter{{else if .UplinkName}}hinter {{.UplinkName}}{{end}}</span>
-      </div>
+      <div class="big{{if eq .StateClass "down"}} down{{end}}">{{if .State.Since.IsZero}}Noch keine Prüfung{{else if eq .StateClass "up"}}Erreichbar seit <b>{{ago .State.Since}}</b>{{else if eq .StateClass "down"}}Nicht erreichbar seit <b>{{ago .State.Since}}</b>{{else}}{{.StateLabel}} seit <b>{{ago .State.Since}}</b>{{end}}</div>
+      <div class="avail"><span class="pct{{if ge .Avail.Pct 99.5}} ok{{else if lt .Avail.Pct 90.0}} bad{{end}}">{{pct .Avail.Pct}} %</span><span class="lbl">Verfügbarkeit 24 h · {{.Avail.Failed}} von {{.Avail.Rounds}} Prüfungen fehlgeschlagen</span></div>
+      <div class="strip">{{range .Avail.Hours}}<div class="seg {{.Class}}" data-tip="{{.Label}}: {{if lt .Pct 0.0}}keine Daten{{else}}{{pct .Pct}} %{{end}}"></div>{{end}}</div>
+      <div class="row2"><span>Prüfung <b>{{.Checks}}</b></span><span>Letzte Prüfung <b>{{if .State.LastBoxTime.IsZero}}–{{else}}{{ago .State.LastBoxTime}}{{end}}</b></span><span class="up">{{if .IsUplink}}meldet für alle dahinter{{else if .UplinkName}}hinter {{.UplinkName}}{{end}}</span></div>
     </a>
-    {{end}}
-    </div>
     {{else}}
-    <div class="panel"><div class="empty"><svg class="i"><use href="/static/icons.svg#radar"/></svg><b>Noch nichts beobachtet</b><span>Im Reiter „Netz" ein Gerät einschalten, dann prüft die Box es jede Minute.</span></div></div>
+    <div class="panel c3 r2"><div class="empty"><svg class="i"><use href="/static/icons.svg#radar"/></svg><b>Noch nichts beobachtet</b><span>Im Reiter „Netz" ein Gerät einschalten, dann prüft die Box es jede Minute.</span></div></div>
     {{end}}
-  </div>
-  <div class="panel">
-    <div class="ph"><h2>So entscheidet EX0</h2></div>
-    <div class="pb rules">
-      <div class="rule"><b>3 Prüfungen verpasst</b>Host gilt als ausgefallen, Ereignis <span class="mono">host.down</span>.</div>
-      <div class="rule"><b>2 Erfolge in Folge</b>Host ist wieder da, Ereignis <span class="mono">host.up</span>.</div>
-      <div class="rule"><b>Uplink weg</b>Alles dahinter wird nicht einzeln gemeldet, nur der Uplink.</div>
-      <div class="rule"><b>Box still 3½ Minuten</b>Hosts werden eingefroren, Ereignis <span class="mono">box.silent</span>.</div>
-      <div class="rule"><b>Wartungsfenster</b>Kein Ereignis, solange das Fenster läuft.</div>
+    <div class="panel c2 r2">
+      <div class="ph"><h2>So entscheidet EX0</h2></div>
+      <div class="pb rules">
+        <div class="rule"><b>3 Prüfungen verpasst</b>Host gilt als ausgefallen, Ereignis <span class="mono">host.down</span>.</div>
+        <div class="rule"><b>2 Erfolge in Folge</b>Host ist wieder da, Ereignis <span class="mono">host.up</span>.</div>
+        <div class="rule"><b>Uplink weg</b>Alles dahinter wird nicht einzeln gemeldet, nur der Uplink.</div>
+        <div class="rule"><b>Box still 3½ Minuten</b>Hosts werden eingefroren, Ereignis <span class="mono">box.silent</span>.</div>
+        <div class="rule"><b>Wartungsfenster</b>Kein Ereignis, solange das Fenster läuft.</div>
+      </div>
     </div>
   </div>
-</div>
 </div>
 
 <!-- ===== Ereignisse ===== -->
@@ -139,13 +110,13 @@
 <div class="tabpane {{if eq .Tab "technik"}}on{{end}}" data-pane="site:technik">
 {{if .Box}}
 <div class="tiles">
-  <div class="tile {{if .Online}}ok{{else}}bad{{end}}"><div class="k">Heartbeat</div><div class="v md" data-ago="{{unix .Box.State.LastHeartbeat}}">{{ago .Box.State.LastHeartbeat}}</div><div class="d">{{ts .Box.State.LastHeartbeat}}</div></div>
-  <div class="tile"><div class="k">Agent</div><div class="v md">{{if .Box.AgentVersion}}{{.Box.AgentVersion}}{{else}}–{{end}}</div><div class="d">Kanal {{.Box.Channel}} · {{.Box.OS}}/{{.Box.Arch}}</div></div>
-  <div class="tile {{if eq .Box.NetbirdStatus "connected"}}ok{{end}}"><div class="k">NetBird</div><div class="v md">{{if eq .Box.NetbirdStatus "connected"}}verbunden{{else if .Box.NetbirdStatus}}{{.Box.NetbirdStatus}}{{else}}nicht gemeldet{{end}}</div><div class="d mono">{{if .Box.NetbirdIP}}{{.Box.NetbirdIP}}{{else}}kein Overlay{{end}}</div></div>
-  <div class="tile"><div class="k">Platte frei</div><div class="v md">{{if .Box.DiskTotalBytes}}{{gb .Box.DiskFreeBytes}} GB{{else}}–{{end}}</div><div class="d">{{if .Box.DiskTotalBytes}}von {{gb .Box.DiskTotalBytes}} GB · Uptime {{dur (mulDur .Box.UptimeS)}}{{end}}</div></div>
+  <div class="tile {{if .Online}}ok{{else}}bad{{end}}"><span class="k">Heartbeat</span><span class="v md" data-ago="{{unix .Box.State.LastHeartbeat}}">{{ago .Box.State.LastHeartbeat}}</span><span class="d">{{ts .Box.State.LastHeartbeat}}</span></div>
+  <div class="tile"><span class="k">Agent</span><span class="v md">{{if .Box.AgentVersion}}{{.Box.AgentVersion}}{{else}}–{{end}}</span><span class="d">Kanal {{.Box.Channel}} · {{.Box.OS}}/{{.Box.Arch}}</span></div>
+  <div class="tile{{if eq .Box.NetbirdStatus "connected"}} ok{{end}}"><span class="k">NetBird</span><span class="v md">{{if eq .Box.NetbirdStatus "connected"}}verbunden{{else if .Box.NetbirdStatus}}{{.Box.NetbirdStatus}}{{else}}nicht gemeldet{{end}}</span><span class="d mono">{{if .Box.NetbirdIP}}{{.Box.NetbirdIP}}{{else}}kein Overlay{{end}}</span></div>
+  <div class="tile"><span class="k">Platte frei</span><span class="v md">{{if .Box.DiskTotalBytes}}{{gb .Box.DiskFreeBytes}} GB{{else}}–{{end}}</span><span class="d">{{if .Box.DiskTotalBytes}}von {{gb .Box.DiskTotalBytes}} GB · Uptime {{dur (mulDur .Box.UptimeS)}}{{end}}</span></div>
 </div>
-<div class="grid2 wide">
-  <div class="panel">
+<div class="board">
+  <div class="panel c3 r3">
     <div class="ph"><h2>Box</h2><div class="r"><span class="chip mono">{{.Box.ID}}</span></div></div>
     <div class="pb kv">
       <div class="k">Name</div><div class="v">{{if .Box.Name}}{{.Box.Name}}{{else}}–{{end}}</div>
@@ -184,7 +155,7 @@
       </div>
     </details>
   </div>
-  <div class="panel">
+  <div class="panel c3 r3">
     <div class="ph"><h2>Einstellungen</h2></div>
     <form class="pb" method="post" action="/boxes/{{.Box.ID}}/settings">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">

@@ -1,31 +1,35 @@
 {{define "status_table"}}
 <div class="tiles">
-  <div class="tile{{if .SitesTotal}}{{if eq .SitesOnline .SitesTotal}} ok{{else}} bad{{end}}{{end}}"><div class="k">Standorte online</div><div class="v">{{.SitesOnline}}<small>von {{.SitesTotal}}</small></div><div class="d">{{if .Silent}}{{.Silent}} Box schweigt{{else if .SitesTotal}}alle Boxen melden sich{{else}}noch kein Standort{{end}}</div></div>
-  <div class="tile{{if .Down}} bad{{end}}"><div class="k">Hosts ausgefallen</div><div class="v">{{.Down}}</div><div class="d">{{if .Down}}Ereignisse ans CRM unterwegs{{else}}keine roten Ereignisse{{end}}</div></div>
-  <div class="tile"><div class="k">Beobachtet</div><div class="v">{{.Total}}</div><div class="d">{{.Up}} erreichbar{{if .Maint}} · {{.Maint}} in Wartung{{end}}{{if .Unknown}} · {{.Unknown}} noch ohne Ergebnis{{end}}</div></div>
-  <div class="tile"><div class="k">Geräte im Inventar</div><div class="v">{{.Devices}}</div><div class="d">über alle Standorte</div></div>
+  <a class="tile link{{if .SitesWithBox}}{{if eq .SitesOnline .SitesWithBox}} ok{{else}} bad{{end}}{{end}}" href="/tenants"><span class="k">Standorte online</span><span class="v">{{.SitesOnline}}<small>von {{.SitesWithBox}}</small></span><span class="d">{{if .Silent}}{{.Silent}} Box schweigt{{else if .SitesWithBox}}alle Boxen melden sich{{else}}noch keine Box zugeordnet{{end}}{{if gt .SitesTotal .SitesWithBox}} · {{sub .SitesTotal .SitesWithBox}} ohne Box{{end}}</span></a>
+  <a class="tile link{{if .Down}} bad{{end}}" href="/events"><span class="k">Hosts ausgefallen</span><span class="v">{{.Down}}</span><span class="d">{{if .Down}}Ereignisse ans CRM unterwegs{{else}}keine roten Ereignisse{{end}}</span></a>
+  <div class="tile"><span class="k">Beobachtet</span><span class="v">{{.Total}}</span><span class="d">{{.Up}} erreichbar{{if .Maint}} · {{.Maint}} in Wartung{{end}}{{if .Unknown}} · {{.Unknown}} ohne Ergebnis{{end}}</span></div>
+  <div class="tile"><span class="k">Geräte im Inventar</span><span class="v">{{.Devices}}</span><span class="d">über alle Standorte</span></div>
+  <a class="tile link{{if .Unassigned}} bad{{end}}" href="/boxes"><span class="k">Boxen</span><span class="v">{{.Boxes}}{{if .Unassigned}}<small>+{{len .Unassigned}} ohne Standort</small>{{end}}</span><span class="d">{{if .Unassigned}}zuordnen oder löschen{{else}}alle zugeordnet{{end}}</span></a>
+  <a class="tile link" href="/events"><span class="k">Ereignisse 24 h</span><span class="v">{{.Events24h}}</span><span class="d">{{if .Recent}}zuletzt {{tsTime (index .Recent 0).OccurredAt}}{{else}}alles ruhig{{end}}</span></a>
 </div>
-<div class="sites">
+<div class="board">
 {{range .Cards}}
-<a class="site {{.Class}}" href="/sites/{{.Site.ID}}">
+<a class="site c2 r4 {{.Class}}" href="/sites/{{.Site.ID}}">
   <div class="t"><div><div class="name">{{.Site.Name}}</div><div class="cust">{{.Tenant.Name}}</div></div>{{if .HasBox}}{{if .Online}}<span class="pill ok live">online</span>{{else}}<span class="pill bad">Box schweigt</span>{{end}}{{else}}<span class="pill">keine Box</span>{{end}}</div>
   <div class="stats">
     <div><div class="k">Beobachtet</div><div class="v{{if .Down}} bad{{else if .Monitored}} ok{{end}}">{{.Monitored}}</div></div>
     <div><div class="k">Geräte</div><div class="v">{{.Devices}}</div></div>
     <div><div class="k">Ausfälle</div><div class="v{{if .Down}} bad{{end}}">{{.Down}}</div></div>
   </div>
+  <div class="hosts-mini">
+    {{range $i, $h := .Hosts}}{{if lt $i 9}}<div class="it"><span class="dot {{$h.StateClass}}"></span><span>{{$h.Name}}</span>{{if $h.IsUplink}}<span class="chip ok">Uplink</span>{{end}}{{if eq $h.StateClass "down"}}<span class="chip bad">{{$h.StateLabel}}</span>{{end}}<span class="ip">{{$h.Address}}</span></div>{{end}}{{else}}<div class="none">{{if .HasBox}}Noch nichts beobachtet — im Netz des Standorts Geräte einschalten.{{else}}Erst eine Box zuordnen, dann sieht EX0 das Netz.{{end}}</div>{{end}}
+  </div>
   <div class="last">{{if .HasBox}}<span class="pill{{if .Online}} ok{{else}} bad{{end}}">Heartbeat {{ago .Box.State.LastHeartbeat}}</span>{{end}}{{if .Last}}<span class="mono">{{tsTime .Last.OccurredAt}}</span><span>{{.Last.Title}}</span>{{else}}<span>Kein Ereignis in 24 h</span>{{end}}</div>
 </a>
 {{end}}
-<a class="site add" href="/tenants"><div><div class="plus">+</div><div>Standort anlegen</div></div></a>
+<div class="panel c2 r4">
+  <div class="ph"><h2>Letzte Ereignisse</h2><div class="r"><a class="btn sm" href="/events">Alle</a></div></div>
+  {{if .Recent}}<div class="feed">{{range .Recent}}<div class="it"><span class="t">{{tsTime .OccurredAt}}</span><div><div class="w {{.Class}}">{{.Title}}</div><div class="s">{{.TenantName}}{{if .SiteName}} · {{.SiteName}}{{end}}{{if .Info}} · {{.Info}}{{end}}</div></div></div>{{end}}</div>
+  {{else}}<div class="empty"><svg class="i"><use href="/static/icons.svg#inbox"/></svg><b>Alles ruhig</b><span>Keine Ereignisse in den letzten 24 Stunden.</span></div>{{end}}
+</div>
+<a class="site add c2 r4" href="/tenants"><div><div class="plus">+</div><div>Standort anlegen</div></div></a>
 </div>
 {{range .Unassigned}}
 <div class="notice"><span class="pill{{if eq .State.Status "silent"}} bad{{else if .State.LastHeartbeat.IsZero}}{{else}} ok{{end}}">{{if eq .State.Status "silent"}}still seit {{ago .State.SilentSince}}{{else if .State.LastHeartbeat.IsZero}}noch kein Heartbeat{{else}}online{{end}}</span><span><b class="mono">{{.ID}}</b> ist keinem Standort zugeordnet{{if .AgentVersion}} · Agent {{.AgentVersion}}{{end}}. Zuordnen oder löschen.</span><a class="btn sm" href="/boxes/{{.ID}}">Zur Box</a></div>
-{{end}}
-{{if .Recent}}
-<div class="panel">
-  <div class="ph"><h2>Letzte Ereignisse</h2><div class="r"><a class="btn sm" href="/events">Alle</a></div></div>
-  <div class="feed">{{range $i, $e := .Recent}}{{if lt $i 10}}<div class="it"><span class="t">{{tsTime $e.OccurredAt}}</span><div><div class="w {{$e.Class}}">{{$e.Title}}</div><div class="s">{{$e.TenantName}}{{if $e.SiteName}} · {{$e.SiteName}}{{end}}{{if $e.Info}} · {{$e.Info}}{{end}}</div></div></div>{{end}}{{end}}</div>
-</div>
 {{end}}
 {{end}}

@@ -59,11 +59,13 @@ type statusData struct {
 	Boxes   int
 	Recent  []recentEvent
 
-	Cards       []siteCard
-	Unassigned  []boxRow
-	Devices     int
-	SitesOnline int
-	SitesTotal  int
+	Cards        []siteCard
+	Unassigned   []boxRow
+	Devices      int
+	SitesOnline  int
+	SitesWithBox int
+	SitesTotal   int
+	Events24h    int
 }
 
 // recentEvent is an event with the names the dashboard shows.
@@ -128,6 +130,58 @@ type hourBucket struct {
 	Pct    float64 // -1 when there is no data
 	Class  string  // ok | warn | down | empty
 	Height int     // 4..100, bar height in percent of the chart
+}
+
+// availability is the last 24 hours of a host's check rounds, for cards and the host page.
+type availability struct {
+	Rounds int
+	Failed int
+	Pct    float64
+	Hours  []hourBucket
+}
+
+func (s *Server) availability(ctx context.Context, tenantID, hostID string, now time.Time) (availability, error) {
+	var a availability
+	rollups, err := s.Store.Rollups(ctx, tenantID, hostID, now.Add(-24*time.Hour), now)
+	if err != nil {
+		return a, err
+	}
+	byHour := map[time.Time]store.Rollup{}
+	for _, ru := range rollups {
+		a.Rounds += ru.Rounds
+		a.Failed += ru.Failed
+		cur := byHour[ru.Hour]
+		cur.Rounds += ru.Rounds
+		cur.Failed += ru.Failed
+		byHour[ru.Hour] = cur
+	}
+	a.Pct = 100
+	if a.Rounds > 0 {
+		a.Pct = 100 * float64(a.Rounds-a.Failed) / float64(a.Rounds)
+	}
+	start := now.UTC().Truncate(time.Hour).Add(-23 * time.Hour)
+	for i := 0; i < 24; i++ {
+		h := start.Add(time.Duration(i) * time.Hour)
+		b := hourBucket{Label: h.In(s.Loc).Format("15:04"), Pct: -1, Class: "empty", Height: 4}
+		if ru, ok := byHour[h]; ok && ru.Rounds > 0 {
+			b.Rounds, b.Failed = ru.Rounds, ru.Failed
+			b.Pct = 100 * float64(ru.Rounds-ru.Failed) / float64(ru.Rounds)
+			b.Height = int(b.Pct)
+			if b.Height < 6 {
+				b.Height = 6
+			}
+			switch {
+			case b.Pct >= 99.5:
+				b.Class = "ok"
+			case b.Pct >= 90:
+				b.Class = "warn"
+			default:
+				b.Class = "down"
+			}
+		}
+		a.Hours = append(a.Hours, b)
+	}
+	return a, nil
 }
 
 func classify(v core.HostView) (string, string) {
@@ -284,6 +338,7 @@ func (s *Server) buildStatus(ctx context.Context) (statusData, error) {
 		}
 	}
 	sort.Slice(d.Recent, func(i, j int) bool { return d.Recent[i].OccurredAt.After(d.Recent[j].OccurredAt) })
+	d.Events24h = len(d.Recent)
 	if len(d.Recent) > 20 {
 		d.Recent = d.Recent[:20]
 	}
@@ -453,46 +508,12 @@ func (s *Server) hostPage(w http.ResponseWriter, r *http.Request) {
 		d.Windows = append(d.Windows, s.Engine.MaintenanceFor(target)...)
 	}
 	now := s.Now()
-	rollups, err := s.Store.Rollups(ctx, v.TenantID, v.ID, now.Add(-24*time.Hour), now)
+	av, err := s.availability(ctx, v.TenantID, v.ID, now)
 	if err != nil {
 		s.fail(w, r, err, http.StatusInternalServerError)
 		return
 	}
-	byHour := map[time.Time]store.Rollup{}
-	for _, ru := range rollups {
-		d.Rounds += ru.Rounds
-		d.Failed += ru.Failed
-		cur := byHour[ru.Hour]
-		cur.Rounds += ru.Rounds
-		cur.Failed += ru.Failed
-		byHour[ru.Hour] = cur
-	}
-	d.Availability = 100
-	if d.Rounds > 0 {
-		d.Availability = 100 * float64(d.Rounds-d.Failed) / float64(d.Rounds)
-	}
-	start := now.UTC().Truncate(time.Hour).Add(-23 * time.Hour)
-	for i := 0; i < 24; i++ {
-		h := start.Add(time.Duration(i) * time.Hour)
-		b := hourBucket{Label: h.In(s.Loc).Format("15:04"), Pct: -1, Class: "empty", Height: 4}
-		if ru, ok := byHour[h]; ok && ru.Rounds > 0 {
-			b.Rounds, b.Failed = ru.Rounds, ru.Failed
-			b.Pct = 100 * float64(ru.Rounds-ru.Failed) / float64(ru.Rounds)
-			b.Height = int(b.Pct)
-			if b.Height < 6 {
-				b.Height = 6
-			}
-			switch {
-			case b.Pct >= 99.5:
-				b.Class = "ok"
-			case b.Pct >= 90:
-				b.Class = "warn"
-			default:
-				b.Class = "down"
-			}
-		}
-		d.Hours = append(d.Hours, b)
-	}
+	d.Rounds, d.Failed, d.Availability, d.Hours = av.Rounds, av.Failed, av.Pct, av.Hours
 	evs, err := s.Store.Events(ctx, v.TenantID, now.Add(-24*time.Hour), now.Add(time.Minute), v.ID, 100)
 	if err != nil {
 		s.fail(w, r, err, http.StatusInternalServerError)

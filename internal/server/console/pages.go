@@ -117,6 +117,41 @@ func classifyDevice(vendor, hostname string, boxNames map[string]bool) string {
 	return "q"
 }
 
+var vendorNames = map[string]string{"lcfc": "Lenovo", "hewlett packard enterprise": "HPE", "hp inc": "HP", "proxmox": "Proxmox VM", "avm": "AVM", "xiaomi": "Xiaomi", "innovaphone": "innovaphone", "canon": "Canon", "evolis": "Evolis", "zebra": "Zebra", "brother": "Brother", "fortinet": "Fortinet"}
+var vendorStop = map[string]bool{"inc": true, "inc.": true, "gmbh": true, "ltd": true, "ltd.": true, "ag": true, "co": true, "co.": true, "corp": true, "corp.": true, "corporation": true,
+	"communications": true, "industries": true, "technologies": true, "technology": true, "electronics": true, "server": true, "solutions": true, "audiovisuelles": true, "limited": true, "llc": true}
+
+// vendorShort turns an OUI registrant like "Brother Industries, LTD." into "Brother".
+func vendorShort(v string) string {
+	l := strings.ToLower(strings.TrimSpace(v))
+	for k, n := range vendorNames {
+		if strings.HasPrefix(l, k) {
+			return n
+		}
+	}
+	var out []string
+	for _, w := range strings.Fields(strings.NewReplacer(",", " ", "(", " ", ")", " ").Replace(v)) {
+		if vendorStop[strings.ToLower(w)] {
+			break
+		}
+		out = append(out, w)
+		if len(out) == 2 {
+			break
+		}
+	}
+	name := strings.Join(out, " ")
+	if name != "" && name == strings.ToUpper(name) && len(name) > 3 { // "INNOVAPHONE AG" → "Innovaphone"
+		name = strings.ToUpper(name[:1]) + strings.ToLower(name[1:])
+	}
+	return name
+}
+
+// deviceName is what a device is called before a person names it: what it announces,
+// else its maker, else its address.
+func deviceName(dev store.Device) string {
+	return firstNonEmpty(cleanHostname(dev.Hostname), vendorShort(dev.Vendor), dev.IP, "nur IPv6")
+}
+
 // cleanHostname turns "KFT-RDS.local" into "KFT-RDS".
 func cleanHostname(h string) string {
 	h = strings.TrimSpace(h)
@@ -148,6 +183,7 @@ type kindCount struct {
 type hostCard struct {
 	hostRow
 	UplinkName string
+	Avail      availability
 }
 
 type siteData struct {
@@ -257,6 +293,7 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 		}
 		d.Monitored++
 	}
+	now := s.Now()
 	for _, v := range views {
 		if v.SiteID != site.ID {
 			continue
@@ -264,6 +301,10 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 		hc := hostCard{hostRow: byHostID[v.ID]}
 		if v.ParentID != "" {
 			hc.UplinkName = names[v.ParentID]
+		}
+		if hc.Avail, err = s.availability(ctx, v.TenantID, v.ID, now); err != nil {
+			s.fail(w, r, err, http.StatusInternalServerError)
+			return
 		}
 		d.Hosts = append(d.Hosts, hc)
 	}
@@ -289,7 +330,7 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 		c.Kind = classifyDevice(dev.Vendor, dev.Hostname, boxNames)
 		c.KindLabel = kindLabel(c.Kind)
 		c.IsBox = c.Kind == "box"
-		c.Name = firstNonEmpty(cleanHostname(dev.Hostname), dev.IP, "nur IPv6")
+		c.Name = deviceName(dev)
 		if hid := firstNonEmpty(byDevice[dev.ID], byMAC[strings.ToLower(dev.MAC)], byIP[dev.IP]); hid != "" {
 			if row, ok := byHostID[hid]; ok {
 				c.Monitored, c.HostID, c.IsUplink = true, hid, row.IsUplink
@@ -323,7 +364,6 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	now := s.Now()
 	evs, err := s.Store.Events(ctx, site.TenantID, now.Add(-24*time.Hour), now.Add(time.Minute), "", 300)
 	if err != nil {
 		s.fail(w, r, err, http.StatusInternalServerError)
@@ -430,7 +470,7 @@ func (s *Server) deviceWatch(w http.ResponseWriter, r *http.Request) {
 		s.flash(w, r, "Diesem Standort ist keine Box zugeordnet; erst eine Box zuordnen.", back)
 		return
 	}
-	name := firstNonEmpty(cleanHostname(dev.Hostname), dev.IP)
+	name := deviceName(dev)
 	h := store.Host{ID: id.New("host"), TenantID: dev.TenantID, SiteID: dev.SiteID, BoxID: box.ID, DeviceID: dev.ID, Name: name, Address: dev.IP,
 		MAC: dev.MAC, Vendor: dev.Vendor, IsUplink: r.PostForm.Get("uplink") == "1", Checks: []wire.CheckConfig{{Type: wire.CheckICMP}}, CreatedAt: s.Now()}
 	if err := s.Engine.CreateHost(ctx, h, actor(r)); err != nil {
@@ -572,6 +612,7 @@ type siteCard struct {
 	Devices   int
 	Class     string // ok | bad | (empty for no box)
 	Last      *recentEvent
+	Hosts     []hostRow // down first, then uplinks, then by name
 }
 
 // siteCards derives the Übersicht cards from an already built statusData.
@@ -586,6 +627,17 @@ func (s *Server) siteCards(ctx context.Context, d *statusData) error {
 				c.Box, c.HasBox = &b, true
 				c.Online = b.State.Status != state.Silent && !b.State.LastHeartbeat.IsZero()
 			}
+			c.Hosts = append(c.Hosts, sb.Hosts...)
+			sort.SliceStable(c.Hosts, func(i, j int) bool {
+				a, b := c.Hosts[i], c.Hosts[j]
+				if (a.StateClass == "down") != (b.StateClass == "down") {
+					return a.StateClass == "down"
+				}
+				if a.IsUplink != b.IsUplink {
+					return a.IsUplink
+				}
+				return a.Name < b.Name
+			})
 			for _, h := range sb.Hosts {
 				c.Monitored++
 				switch h.StateClass {
@@ -605,6 +657,12 @@ func (s *Server) siteCards(ctx context.Context, d *statusData) error {
 				}
 			}
 			d.Devices += c.Devices
+			if c.HasBox {
+				d.SitesWithBox++
+				if c.Online {
+					d.SitesOnline++
+				}
+			}
 			switch {
 			case !c.HasBox:
 				c.Class = ""
@@ -612,7 +670,6 @@ func (s *Server) siteCards(ctx context.Context, d *statusData) error {
 				c.Class = "bad"
 			default:
 				c.Class = "ok"
-				d.SitesOnline++
 			}
 			for i := range d.Recent {
 				if d.Recent[i].SiteID == sb.Site.ID {
