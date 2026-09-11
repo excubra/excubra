@@ -49,6 +49,8 @@ func Main(args []string) error {
 		return siteCmd(args)
 	case "box":
 		return boxCmd(args)
+	case "release":
+		return releaseCmd(args)
 	case "backup":
 		return backupCmd(args)
 	case "prune":

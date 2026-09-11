@@ -19,6 +19,7 @@ import HostPage from "@/pages/host"
 import EventsPage from "@/pages/events"
 import BoxesPage from "@/pages/boxes"
 import BoxPage from "@/pages/box"
+import UpdatesPage from "@/pages/updates"
 import MaintenancePage from "@/pages/maintenance"
 import KeysPage from "@/pages/keys"
 import WebhooksPage from "@/pages/webhooks"
@@ -71,6 +72,7 @@ export default function App() {
               <Route path="/events" element={<EventsPage />} />
               <Route path="/boxes" element={<BoxesPage />} />
               <Route path="/boxes/:id" element={<BoxPage />} />
+              <Route path="/updates" element={<UpdatesPage />} />
               <Route path="/maintenance" element={<MaintenancePage />} />
               <Route path="/keys" element={<KeysPage />} />
               <Route path="/webhooks" element={<WebhooksPage />} />

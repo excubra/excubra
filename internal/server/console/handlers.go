@@ -635,6 +635,8 @@ type boxData struct {
 	Netbird     *store.NetbirdKey
 	Fingerprint string
 	Subnets     string
+	Tasks       []store.BoxTask // newest first (ADR-0014)
+	Notes       []store.BoxNote // newest first: what the agent wanted an operator to see
 }
 
 func (s *Server) buildBox(ctx context.Context, boxID string) (boxData, error) {
@@ -658,6 +660,12 @@ func (s *Server) buildBox(ctx context.Context, boxID string) (boxData, error) {
 	}
 	if nk, err := s.Store.NetbirdKey(ctx, b.ID); err == nil {
 		d.Netbird = &nk
+	}
+	if d.Tasks, err = s.Store.BoxTasks(ctx, b.ID, 20); err != nil {
+		return boxData{}, err
+	}
+	if d.Notes, err = s.Store.BoxNotes(ctx, b.ID, 20); err != nil {
+		return boxData{}, err
 	}
 	return d, nil
 }

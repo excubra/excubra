@@ -1073,3 +1073,167 @@ func nonNil[T any](v []T) []T {
 	}
 	return v
 }
+
+// ---- box tasks (ADR-0014) --------------------------------------------------------------
+
+const taskCols = `id, box_id, kind, issued_at, issued_by, expires_at, done_at, ok, detail`
+
+func scanTask(sc interface{ Scan(...any) error }) (BoxTask, error) {
+	var t BoxTask
+	var issued, expires string
+	var done sql.NullString
+	var ok sql.NullBool
+	err := sc.Scan(&t.ID, &t.BoxID, &t.Kind, &issued, &t.IssuedBy, &expires, &done, &ok, &t.Detail)
+	t.IssuedAt, t.ExpiresAt = parseTS(issued), parseTS(expires)
+	t.DoneAt = parseTSP(done)
+	if ok.Valid {
+		v := ok.Bool
+		t.OK = &v
+	}
+	return t, err
+}
+
+// CreateBoxTask queues a task.
+func (s *Store) CreateBoxTask(ctx context.Context, t BoxTask) error {
+	_, err := s.main.ExecContext(ctx, `INSERT INTO box_tasks (`+taskCols+`) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, '')`,
+		t.ID, t.BoxID, t.Kind, ts(t.IssuedAt), t.IssuedBy, ts(t.ExpiresAt))
+	return wrap("create box task", err)
+}
+
+// PendingBoxTasks returns the tasks of a box that are neither done nor expired, oldest first.
+func (s *Store) PendingBoxTasks(ctx context.Context, boxID string, now time.Time) ([]BoxTask, error) {
+	return s.tasks(ctx, `SELECT `+taskCols+` FROM box_tasks WHERE box_id = ? AND done_at IS NULL AND expires_at > ? ORDER BY issued_at, id`, boxID, ts(now))
+}
+
+// BoxTasks returns the newest tasks of a box, or of every box when boxID is empty.
+func (s *Store) BoxTasks(ctx context.Context, boxID string, limit int) ([]BoxTask, error) {
+	if boxID == "" {
+		return s.tasks(ctx, `SELECT `+taskCols+` FROM box_tasks ORDER BY issued_at DESC, id DESC LIMIT ?`, limit)
+	}
+	return s.tasks(ctx, `SELECT `+taskCols+` FROM box_tasks WHERE box_id = ? ORDER BY issued_at DESC, id DESC LIMIT ?`, boxID, limit)
+}
+
+func (s *Store) tasks(ctx context.Context, q string, args ...any) ([]BoxTask, error) {
+	rows, err := s.main.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, wrap("box tasks", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []BoxTask
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, wrap("box tasks", err)
+		}
+		out = append(out, t)
+	}
+	return out, wrap("box tasks", rows.Err())
+}
+
+// CompleteBoxTask records a result. A second result for the same task, or one for
+// a task that already expired, is ErrNotFound and changes nothing.
+func (s *Store) CompleteBoxTask(ctx context.Context, boxID, taskID string, ok bool, detail string, at time.Time) error {
+	return s.exec1(ctx, "complete box task", `UPDATE box_tasks SET done_at = ?, ok = ?, detail = ? WHERE id = ? AND box_id = ? AND done_at IS NULL`, ts(at), boolInt(ok), detail, taskID, boxID)
+}
+
+// ExpireBoxTasks fails every pending task whose deadline has passed and returns them.
+func (s *Store) ExpireBoxTasks(ctx context.Context, now time.Time) ([]BoxTask, error) {
+	expired, err := s.tasks(ctx, `SELECT `+taskCols+` FROM box_tasks WHERE done_at IS NULL AND expires_at <= ?`, ts(now))
+	if err != nil || len(expired) == 0 {
+		return nil, err
+	}
+	_, err = s.main.ExecContext(ctx, `UPDATE box_tasks SET done_at = ?, ok = 0, detail = 'not picked up: the box did not pull its config in time' WHERE done_at IS NULL AND expires_at <= ?`, ts(now), ts(now))
+	return expired, wrap("expire box tasks", err)
+}
+
+// PruneBoxTasks deletes finished tasks older than before.
+func (s *Store) PruneBoxTasks(ctx context.Context, before time.Time) error {
+	_, err := s.main.ExecContext(ctx, `DELETE FROM box_tasks WHERE done_at IS NOT NULL AND done_at < ?`, ts(before))
+	return wrap("prune box tasks", err)
+}
+
+// ---- box notes ----------------------------------------------------------------------------
+
+// boxNotesKeep is how many notes a box keeps; older ones go when a new one arrives.
+const boxNotesKeep = 50
+
+// AddBoxNote stores a heartbeat note and trims the box to the newest boxNotesKeep.
+func (s *Store) AddBoxNote(ctx context.Context, boxID string, at time.Time, text string) error {
+	if _, err := s.main.ExecContext(ctx, `INSERT INTO box_notes (box_id, at, text) VALUES (?, ?, ?)`, boxID, ts(at), text); err != nil {
+		return wrap("add box note", err)
+	}
+	_, err := s.main.ExecContext(ctx, `DELETE FROM box_notes WHERE box_id = ? AND id NOT IN (SELECT id FROM box_notes WHERE box_id = ? ORDER BY id DESC LIMIT ?)`, boxID, boxID, boxNotesKeep)
+	return wrap("trim box notes", err)
+}
+
+func (s *Store) notes(ctx context.Context, q string, args ...any) ([]BoxNote, error) {
+	rows, err := s.main.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, wrap("box notes", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []BoxNote
+	for rows.Next() {
+		var n BoxNote
+		var at string
+		if err := rows.Scan(&n.ID, &n.BoxID, &at, &n.Text); err != nil {
+			return nil, wrap("box notes", err)
+		}
+		n.At = parseTS(at)
+		out = append(out, n)
+	}
+	return out, wrap("box notes", rows.Err())
+}
+
+// BoxNotes returns the newest notes of a box.
+func (s *Store) BoxNotes(ctx context.Context, boxID string, limit int) ([]BoxNote, error) {
+	return s.notes(ctx, `SELECT id, box_id, at, text FROM box_notes WHERE box_id = ? ORDER BY id DESC LIMIT ?`, boxID, limit)
+}
+
+// LatestBoxNotes returns the newest note of every box that has one.
+func (s *Store) LatestBoxNotes(ctx context.Context) (map[string]BoxNote, error) {
+	ns, err := s.notes(ctx, `SELECT id, box_id, at, text FROM box_notes WHERE id IN (SELECT MAX(id) FROM box_notes GROUP BY box_id)`)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]BoxNote{}
+	for _, n := range ns {
+		out[n.BoxID] = n
+	}
+	return out, nil
+}
+
+// ---- acknowledgements --------------------------------------------------------------------
+
+// SetAck records an acknowledgement, replacing an older one for the same problem.
+func (s *Store) SetAck(ctx context.Context, a Ack) error {
+	_, err := s.main.ExecContext(ctx, `INSERT OR REPLACE INTO acks (kind, target_id, since, actor, at, note) VALUES (?, ?, ?, ?, ?, ?)`,
+		a.Kind, a.TargetID, ts(a.Since), a.Actor, ts(a.At), a.Note)
+	return wrap("set ack", err)
+}
+
+// DeleteAck removes an acknowledgement; a missing one is not an error.
+func (s *Store) DeleteAck(ctx context.Context, kind, targetID string) error {
+	_, err := s.main.ExecContext(ctx, `DELETE FROM acks WHERE kind = ? AND target_id = ?`, kind, targetID)
+	return wrap("delete ack", err)
+}
+
+// Acks returns every acknowledgement, keyed by kind + "/" + target id.
+func (s *Store) Acks(ctx context.Context) (map[string]Ack, error) {
+	rows, err := s.main.QueryContext(ctx, `SELECT kind, target_id, since, actor, at, note FROM acks`)
+	if err != nil {
+		return nil, wrap("acks", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]Ack{}
+	for rows.Next() {
+		var a Ack
+		var since, at string
+		if err := rows.Scan(&a.Kind, &a.TargetID, &since, &a.Actor, &at, &a.Note); err != nil {
+			return nil, wrap("acks", err)
+		}
+		a.Since, a.At = parseTS(since), parseTS(at)
+		out[a.Kind+"/"+a.TargetID] = a
+	}
+	return out, wrap("acks", rows.Err())
+}

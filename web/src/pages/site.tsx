@@ -13,6 +13,7 @@ import { Ago } from "@/components/clock"
 import { KindIcon } from "@/components/kind-icon"
 import { DeviceCardView } from "@/components/device-card"
 import { BoxTech } from "@/components/box-tech"
+import { TaskMenu } from "@/components/task-menu"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -87,7 +88,7 @@ export default function SitePage() {
       <PageHeader crumbs={[{ label: "Kunden", to: "/tenants" }, { label: d.Tenant.Name, to: `/tenants/${d.Tenant.ID}` }, { label: d.Site.Name }]}
         title={<>{d.Site.Name}{d.Box ? <span className="flex items-center gap-2 text-sm font-medium"><LiveDot ok={online} />{online ? "online" : "Box schweigt"}</span> : <Badge variant="secondary">keine Box</Badge>}</>}
         sub={<span className="font-mono">{d.Site.ID}</span>}
-        actions={<Button asChild variant="outline" size="sm"><Link to={`/maintenance?site=${d.Site.ID}`}><Wrench />Wartung planen</Link></Button>} />
+        actions={<>{d.Box && <TaskMenu path={`/api/sites/${id}/tasks`} onDone={refresh} />}<Button asChild variant="outline" size="sm"><Link to={`/maintenance?site=${d.Site.ID}`}><Wrench />Wartung planen</Link></Button></>} />
 
       <StatGrid>
         <StatCard label="Box" value={d.Box ? (online ? "online" : "schweigt") : "keine"} tone={d.Box ? (online ? "ok" : "bad") : undefined} badge={d.Box ? <Badge variant="outline" className="font-mono">{d.Box.Name || d.Box.ID}</Badge> : undefined}

@@ -69,6 +69,7 @@ type attention struct {
 	ID       string    `json:"id"`
 	Href     string    `json:"href"`
 	Detail   string    `json:"detail"`
+	Ack      *ackView  `json:"ack,omitempty"` // set when an operator has seen this outage
 }
 
 type overviewData struct {
@@ -76,8 +77,12 @@ type overviewData struct {
 	Attention []attention `json:"attention"`
 }
 
-func (s *Server) buildAttention(d statusData, now time.Time) []attention {
+func (s *Server) buildAttention(ctx context.Context, d statusData, now time.Time) []attention {
 	var out []attention
+	acks, err := s.Store.Acks(ctx)
+	if err != nil {
+		s.Log.Error("acks", "err", err)
+	}
 	for _, c := range d.Cards {
 		if c.HasBox && !c.Online {
 			a := attention{Kind: "box_silent", Since: c.Box.State.SilentSince, Tenant: c.Tenant.Name, TenantID: c.Tenant.ID, Site: c.Site.Name, SiteID: c.Site.ID,
@@ -97,7 +102,13 @@ func (s *Server) buildAttention(d statusData, now time.Time) []attention {
 	for _, b := range d.Unassigned {
 		out = append(out, attention{Kind: "box_unassigned", Since: b.EnrolledAt, Name: b.ID, ID: b.ID, Href: "/boxes/" + b.ID, Detail: "keinem Standort zugeordnet"})
 	}
-	sort.SliceStable(out, func(i, j int) bool { // oldest problem first
+	for i := range out {
+		out[i].Ack = ackFor(acks, out[i].Kind, out[i].ID, out[i].Since)
+	}
+	sort.SliceStable(out, func(i, j int) bool { // unacknowledged first, then oldest problem first
+		if (out[i].Ack == nil) != (out[j].Ack == nil) {
+			return out[i].Ack == nil
+		}
 		return out[i].Since.Before(out[j].Since)
 	})
 	_ = now
@@ -110,7 +121,7 @@ func (s *Server) apiOverview(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, overviewData{statusData: d, Attention: s.buildAttention(d, s.Now())})
+	writeJSON(w, http.StatusOK, overviewData{statusData: d, Attention: s.buildAttention(r.Context(), d, s.Now())})
 }
 
 // ---- tenants -----------------------------------------------------------------------------

@@ -141,7 +141,58 @@ func seedPreview(t *testing.T) *fixture {
 	must(t, f.st.CreateBox(ctx, store.Box{ID: "box_rn4ebjmtknby", HWID: "e3b0c44298fc1c14", CertSerial: "2", CertNotAfter: now.Add(89 * 24 * time.Hour),
 		EnrolledAt: now.Add(-5 * time.Hour), AgentVersion: "0.0.0-dev+83953d0", OS: "linux", Arch: "arm64", Channel: "stable"}))
 	f.eng.RegisterBox(store.Box{ID: "box_rn4ebjmtknby"})
+	seedActions(t, f)
 	return f
+}
+
+// seedActions adds what the action features show: tasks with results, heartbeat
+// notes, an acknowledged outage, releases and channel pointers.
+func seedActions(t *testing.T, f *fixture) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now()
+	const box = "box_wns7sxvzvnrc"
+	for _, n := range []string{"update to 0.2.0 not installed: sig: no release key embedded", "netbird up failed: management unreachable"} {
+		if err := f.st.AddBoxNote(ctx, box, now.Add(-3*time.Hour), n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done, err := f.eng.QueueTask(ctx, box, wire.TaskRecheck, "jeremia")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.CompleteBoxTask(ctx, box, done.ID, true, "26 hosts checked, 1 failed", now.Add(-40*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := f.eng.QueueTask(ctx, box, wire.TaskUpdate, "jeremia")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.CompleteBoxTask(ctx, box, failed.ID, false, "update check failed: 204 no release for channel stable", now.Add(-20*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.eng.QueueTask(ctx, box, wire.TaskSweep, "jeremia"); err != nil {
+		t.Fatal(err)
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		if err := f.st.PutRelease(ctx, store.Release{Version: "0.2.0", OS: "linux", Arch: arch, URL: "https://github.com/excubra/excubra/releases/download/v0.2.0/excubra_linux_" + arch, SHA256: "9f2c…", Signature: "MEUCIQ…", MinAgentVersion: "0.1.0", CreatedAt: now.Add(-24 * time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.st.SetChannelVersion(ctx, "canary", "0.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	views, err := f.eng.HostViews(ctx, "ten_kft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range views {
+		if string(v.State.Observed) == "down" {
+			if err := f.st.SetAck(ctx, store.Ack{Kind: "host_down", TargetID: v.ID, Since: v.State.Since, Actor: "jeremia", At: now.Add(-25 * time.Minute), Note: "Ticket 4711, Techniker unterwegs"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 }
 
 func dumpPreview(t *testing.T, f *fixture, out string, hosts []store.Host) {

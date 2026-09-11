@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router"
-import { Activity, Box, Building2, FileClock, KeyRound, LayoutDashboard, LogOut, Search, ShieldCheck, Users, Webhook, Wrench } from "lucide-react"
+import { Activity, Box, Building2, Download, FileClock, KeyRound, LayoutDashboard, LogOut, Search, ShieldCheck, Users, Webhook, Wrench } from "lucide-react"
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
   SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarRail,
@@ -13,8 +13,11 @@ const watch = [
   { to: "/events", label: "Ereignisse", icon: Activity, count: (m: Me) => m.Nav.Attention, bad: true },
   { to: "/maintenance", label: "Wartung", icon: Wrench },
 ]
-const system = [
+const fleet = [
   { to: "/boxes", label: "Boxen", icon: Box, count: (m: Me) => m.Nav.Boxes, bad: (m: Me) => m.Nav.Unassigned > 0 },
+  { to: "/updates", label: "Updates", icon: Download },
+]
+const system = [
   { to: "/keys", label: "Enrollment-Keys", icon: KeyRound },
   { to: "/webhooks", label: "Webhooks", icon: Webhook },
   { to: "/tokens", label: "API-Tokens", icon: ShieldCheck },
@@ -70,12 +73,31 @@ export function AppSidebar({ me, onSearch }: { me: Me; onSearch: () => void }) {
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarGroup>
-          <SidebarGroupLabel>System</SidebarGroupLabel>
+          <SidebarGroupLabel>Flotte</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {fleet.map((it) => {
+                const c = it.count?.(me) ?? 0
+                const bad = typeof it.bad === "function" ? it.bad(me) : false
+                return (
+                  <SidebarMenuItem key={it.to}>
+                    <SidebarMenuButton asChild isActive={isActive(pathname, it.to)} tooltip={it.label}>
+                      <Link to={it.to}><it.icon /><span>{it.label}</span></Link>
+                    </SidebarMenuButton>
+                    {c > 0 && <SidebarMenuBadge className={bad ? "text-destructive font-semibold" : ""}>{c}</SidebarMenuBadge>}
+                  </SidebarMenuItem>
+                )
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Verwaltung</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {system.map((it) => {
-                const c = it.count?.(me) ?? 0
-                const bad = typeof it.bad === "function" ? it.bad(me) : false
+                const c = 0
+                const bad = false
                 return (
                   <SidebarMenuItem key={it.to}>
                     <SidebarMenuButton asChild isActive={isActive(pathname, it.to)} tooltip={it.label}>
