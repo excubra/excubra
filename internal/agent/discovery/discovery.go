@@ -455,6 +455,13 @@ func (d *Discovery) sweep(ctx context.Context, cfg Config) {
 	}
 }
 
+// SweepNow runs one sweep round immediately with the current configuration and
+// returns how many devices the table holds afterwards (the "sweep" task, ADR-0014).
+func (d *Discovery) SweepNow(ctx context.Context) int {
+	d.sweep(ctx, d.config())
+	return d.Table.Len()
+}
+
 // Sightings annotates and drains the table for a heartbeat.
 func (d *Discovery) Sightings(ctx context.Context) []wire.Sighting {
 	d.Table.Annotate(ctx, d.OUI, d.Names)

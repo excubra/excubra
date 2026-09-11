@@ -76,6 +76,7 @@ type Heartbeat struct {
 	Hosts         []HostReport    `json:"hosts,omitempty"`
 	Discovery     DiscoveryReport `json:"discovery"`
 	Buffer        BufferInfo      `json:"buffer"`
+	TaskResults   []TaskResult    `json:"task_results,omitempty"` // finished tasks since the last successful heartbeat
 }
 
 // AgentInfo describes the running agent.
@@ -183,6 +184,7 @@ type Config struct {
 	Discovery      DiscoveryConfig `json:"discovery"`
 	NetbirdPending bool            `json:"netbird_pending"`
 	Update         UpdateConfig    `json:"update"`
+	Tasks          []Task          `json:"tasks,omitempty"` // pending one-shot tasks (ADR-0014)
 }
 
 // Intervals in seconds.
@@ -250,6 +252,50 @@ const (
 	ChannelStable = "stable"
 	ChannelCanary = "canary"
 )
+
+// ---- tasks ----------------------------------------------------------------------
+
+// Task is one request the server puts into the config for the box to run once
+// (ADR-0014). The list of kinds is closed and a task has no parameters: every kind
+// is something the box does on its own anyway, the server only chooses the moment.
+type Task struct {
+	ID       string    `json:"id"`
+	Kind     string    `json:"kind"`
+	IssuedAt time.Time `json:"issued_at"`
+}
+
+// Task kinds — the complete list. The agent refuses others and reports that.
+const (
+	TaskSweep   = "sweep"   // one discovery sweep now instead of at the next interval
+	TaskRecheck = "recheck" // one check round of every host now
+	TaskUpdate  = "update"  // ask for update metadata now instead of at the daily tick
+	TaskRestart = "restart" // exit 75 so the service manager starts the agent again
+)
+
+// TaskKinds lists the kinds in display order.
+var TaskKinds = []string{TaskSweep, TaskRecheck, TaskUpdate, TaskRestart}
+
+// ValidTaskKind reports whether k is one of the closed list.
+func ValidTaskKind(k string) bool {
+	for _, x := range TaskKinds {
+		if x == k {
+			return true
+		}
+	}
+	return false
+}
+
+// MaxTasks bounds Config.Tasks; the server queues at most one pending task per kind.
+const MaxTasks = 4
+
+// TaskResult reports one finished task in the next heartbeat.
+type TaskResult struct {
+	ID         string    `json:"id"`
+	Kind       string    `json:"kind"`
+	OK         bool      `json:"ok"`
+	Detail     string    `json:"detail,omitempty"`
+	FinishedAt time.Time `json:"finished_at"` // box time
+}
 
 // ---- update and netbird -------------------------------------------------------
 

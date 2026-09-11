@@ -452,3 +452,143 @@ func pruneCmd(args []string) error {
 	fmt.Printf("%d day file(s) removed\n", len(removed))
 	return nil
 }
+
+// releaseCmd registers release metadata (ADR-0006) and points channels at versions:
+//
+//	excubra server release list
+//	excubra server release add --version 0.2.0 --os linux --arch amd64 --url https://… --sha256 … --sig … [--min-agent 0.1.0]
+//	excubra server release import --version 0.2.0 --dir dist/ --base-url https://github.com/excubra/excubra/releases/download/v0.2.0 [--min-agent 0.1.0]
+//	excubra server release channel <stable|canary> <version|->
+//
+// import reads SHA256SUMS and excubra_linux_<arch>.sig from a release directory, which
+// is exactly what the release workflow produces. The server never stores a binary.
+func releaseCmd(args []string) error {
+	fs := flag.NewFlagSet("excubra server release", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "server env file")
+	version := fs.String("version", "", "release version without the v")
+	osName := fs.String("os", "linux", "operating system")
+	arch := fs.String("arch", "", "amd64 or arm64")
+	url := fs.String("url", "", "where the binary lies (add)")
+	sha := fs.String("sha256", "", "hex sha256 of the binary (add)")
+	sig := fs.String("sig", "", "base64 cosign signature over the binary (add)")
+	minAgent := fs.String("min-agent", "", "oldest agent allowed to install this")
+	dir := fs.String("dir", "", "release directory with SHA256SUMS and .sig files (import)")
+	baseURL := fs.String("base-url", "", "URL prefix the binaries are published under (import)")
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
+		return err
+	}
+	st, _, err := cliStore(*envFile)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	v := strings.TrimPrefix(strings.TrimSpace(*version), "v")
+	switch {
+	case len(rest) == 1 && rest[0] == "list":
+		rels, err := st.Releases(ctx)
+		if err != nil {
+			return err
+		}
+		for _, ch := range []string{"stable", "canary"} {
+			cv, _ := st.ChannelVersion(ctx, ch)
+			if cv == "" {
+				cv = "-"
+			}
+			fmt.Printf("channel %s → %s\n", ch, cv)
+		}
+		if len(rels) == 0 {
+			fmt.Println("(no releases stored)")
+			return nil
+		}
+		for _, r := range rels {
+			fmt.Printf("%s\t%s/%s\tmin=%s\t%s\n", r.Version, r.OS, r.Arch, orDash(r.MinAgentVersion), r.URL)
+		}
+		return nil
+	case len(rest) == 1 && rest[0] == "add":
+		if v == "" || *arch == "" || *url == "" || *sha == "" || *sig == "" {
+			return fmt.Errorf("release add needs --version, --arch, --url, --sha256 and --sig")
+		}
+		r := store.Release{Version: v, OS: *osName, Arch: *arch, URL: *url, SHA256: strings.ToLower(*sha), Signature: *sig, MinAgentVersion: *minAgent, CreatedAt: time.Now()}
+		if err := st.PutRelease(ctx, r); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "release.add", v, r.OS+"/"+r.Arch)
+		fmt.Printf("release %s %s/%s stored\n", v, r.OS, r.Arch)
+		return nil
+	case len(rest) == 1 && rest[0] == "import":
+		if v == "" || *dir == "" || *baseURL == "" {
+			return fmt.Errorf("release import needs --version, --dir and --base-url")
+		}
+		sums, err := os.ReadFile(filepath.Join(*dir, "SHA256SUMS"))
+		if err != nil {
+			return err
+		}
+		n := 0
+		for _, line := range strings.Split(string(sums), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 || !strings.HasPrefix(fields[1], "excubra_linux_") {
+				continue
+			}
+			name := strings.TrimPrefix(fields[1], "*")
+			a := strings.TrimPrefix(name, "excubra_linux_")
+			if a != "amd64" && a != "arm64" { // the checksum file names the path; only the two known names are read
+				continue
+			}
+			sigB, err := os.ReadFile(filepath.Join(*dir, name+".sig")) //nolint:gosec // name is one of two constants after the check above
+			if err != nil {
+				return fmt.Errorf("%s: %w", name+".sig", err)
+			}
+			r := store.Release{Version: v, OS: "linux", Arch: a, URL: strings.TrimSuffix(*baseURL, "/") + "/" + name,
+				SHA256: strings.ToLower(fields[0]), Signature: strings.TrimSpace(string(sigB)), MinAgentVersion: *minAgent, CreatedAt: time.Now()}
+			if err := st.PutRelease(ctx, r); err != nil {
+				return err
+			}
+			_ = st.Audit(ctx, time.Now(), "cli", "release.add", v, "linux/"+a)
+			fmt.Printf("release %s linux/%s stored → %s\n", v, a, r.URL)
+			n++
+		}
+		if n == 0 {
+			return fmt.Errorf("no excubra_linux_* entries in %s", filepath.Join(*dir, "SHA256SUMS"))
+		}
+		return nil
+	case len(rest) == 3 && rest[0] == "channel":
+		ch, want := rest[1], strings.TrimPrefix(rest[2], "v")
+		if ch != "stable" && ch != "canary" {
+			return fmt.Errorf("channel must be stable or canary")
+		}
+		if want == "-" {
+			want = ""
+		}
+		if want != "" {
+			rels, err := st.Releases(ctx)
+			if err != nil {
+				return err
+			}
+			known := false
+			for _, r := range rels {
+				if r.Version == want {
+					known = true
+				}
+			}
+			if !known {
+				return fmt.Errorf("version %s is not stored; release add or import it first", want)
+			}
+		}
+		if err := st.SetChannelVersion(ctx, ch, want); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "release.channel", ch, want)
+		fmt.Printf("channel %s → %s\n", ch, orDash(want))
+		return nil
+	}
+	return fmt.Errorf("usage: excubra server release list | add … | import … | channel <stable|canary> <version|->")
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}

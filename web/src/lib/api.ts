@@ -81,7 +81,8 @@ export interface Overview {
   Chart: ChartData
   attention: Attention[] | null
 }
-export interface Attention { kind: string; since: string; tenant: string; tenantId: string; site: string; siteId: string; name: string; address: string; id: string; href: string; detail: string }
+export interface AckView { actor: string; at: string; note: string }
+export interface Attention { kind: string; since: string; tenant: string; tenantId: string; site: string; siteId: string; name: string; address: string; id: string; href: string; detail: string; ack?: AckView }
 export interface TenantRow extends Tenant { sites: number; boxes: number; boxesOnline: number; hosts: number; down: number; devices: number; attention: number }
 export interface TenantDetail { tenant: Tenant; sites: SiteCard[] | null; events: EventRow[] | null }
 export interface DeviceCard {
@@ -98,7 +99,12 @@ export interface SiteData {
 }
 export interface DeviceDetail { device: DeviceCard; tenant: Tenant; site: Site; host: HostCard | null; events: EventRow[] | null; logsNote: string }
 export interface BoxesData { Unassigned: BoxRow[] | null; Assigned: BoxRow[] | null }
-export interface BoxData { Row: BoxRow; Sites: Site[] | null; TenantNames: Record<string, string>; Hosts: HostRow[] | null; Netbird: { ManagementURL: string; ClaimedAt: string | null } | null; Fingerprint: string; Subnets: string }
+export interface BoxTask { ID: string; BoxID: string; Kind: string; IssuedAt: string; IssuedBy: string; ExpiresAt: string; DoneAt: string | null; OK: boolean | null; Detail: string }
+export interface BoxNote { ID: number; BoxID: string; At: string; Text: string }
+export interface BoxData { Row: BoxRow; Sites: Site[] | null; TenantNames: Record<string, string>; Hosts: HostRow[] | null; Netbird: { ManagementURL: string; ClaimedAt: string | null } | null; Fingerprint: string; Subnets: string; Tasks: BoxTask[] | null; Notes: BoxNote[] | null }
+export interface Release { Version: string; OS: string; Arch: string; URL: string; SHA256: string; Signature: string; MinAgentVersion: string; CreatedAt: string }
+export interface UpdateRow extends BoxRow { Target: string; Behind: boolean; LastNote: BoxNote | null; Pending: BoxTask[] | null }
+export interface UpdatesData { Boxes: UpdateRow[] | null; Releases: Release[] | null; Channels: Record<string, string>; Versions: string[] | null; Behind: number; Current: number; NoTarget: number }
 export interface HostData {
   View: HostRow; Row: HostRow; Box: BoxRow; Site: Site; Tenant: Tenant; Siblings: HostRow[] | null
   Windows: MaintenanceWindow[] | null; Form: { ICMP: boolean; TCPPort: number; HTTPURL: string }; Rounds: number; Failed: number; Availability: number

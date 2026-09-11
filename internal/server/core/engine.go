@@ -163,6 +163,8 @@ func (e *Engine) RevokeBox(ctx context.Context, boxID, actor string) error {
 func (e *Engine) DeleteBox(ctx context.Context, boxID, actor string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	_ = e.Store.DeleteAck(ctx, "box_silent", boxID)
+	_ = e.Store.DeleteAck(ctx, "box_unassigned", boxID)
 	b, err := e.Store.Box(ctx, boxID)
 	if err != nil {
 		return err
@@ -192,6 +194,7 @@ func (e *Engine) AssignBox(ctx context.Context, boxID, siteID, actor string) err
 			return err
 		}
 		e.m.AssignBox(boxID, site.TenantID, siteID)
+		_ = e.Store.DeleteAck(ctx, "box_unassigned", boxID)
 	} else {
 		if err := e.Store.AssignBox(ctx, boxID, ""); err != nil {
 			return err
@@ -260,6 +263,7 @@ func (e *Engine) UpdateHost(ctx context.Context, h store.Host, actor string) err
 func (e *Engine) DeleteHost(ctx context.Context, hostID, actor string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	_ = e.Store.DeleteAck(ctx, "host_down", hostID)
 	if err := e.Store.DeleteHost(ctx, hostID); err != nil {
 		return err
 	}
@@ -435,6 +439,7 @@ func (e *Engine) Heartbeat(ctx context.Context, box store.Box, hb wire.Heartbeat
 	if err := e.Store.UpdateBoxHeartbeat(ctx, box.ID, hb, now); err != nil {
 		return wire.HeartbeatResponse{}, err
 	}
+	e.absorbNotesAndResults(ctx, box.ID, hb, now)
 
 	site, assigned := e.sites[box.SiteID]
 	if assigned {
@@ -552,6 +557,15 @@ func (e *Engine) config(ctx context.Context, box store.Box) (wire.Config, error)
 			return wire.Config{}, err
 		}
 	}
+	if box.RevokedAt == nil {
+		pending, err := e.Store.PendingBoxTasks(ctx, box.ID, e.Now())
+		if err != nil {
+			return wire.Config{}, err
+		}
+		for _, t := range pending {
+			cfg.Tasks = append(cfg.Tasks, wire.Task{ID: t.ID, Kind: t.Kind, IssuedAt: t.IssuedAt})
+		}
+	}
 	cfg.Version = configVersion(cfg)
 	return cfg, nil
 }
@@ -571,6 +585,16 @@ func (e *Engine) Tick(ctx context.Context) error {
 	now := e.Now()
 	events := e.m.Tick(now)
 	if err := e.persistDirty(ctx); err != nil {
+		return err
+	}
+	expired, err := e.Store.ExpireBoxTasks(ctx, now)
+	if err != nil {
+		return err
+	}
+	for _, t := range expired {
+		_ = e.audit(ctx, "server", "box.task.expired", t.ID, t.Kind+" for "+t.BoxID)
+	}
+	if err := e.Store.PruneBoxTasks(ctx, now.Add(-taskHistory)); err != nil {
 		return err
 	}
 	// windows the machine expired are deleted from the store
@@ -650,6 +674,12 @@ func (e *Engine) persistDirty(ctx context.Context) error {
 
 func (e *Engine) publish(ctx context.Context, events []event.Event) {
 	for _, ev := range events {
+		switch ev.Type { // a recovery ends the acknowledged problem
+		case event.HostUp:
+			_ = e.Store.DeleteAck(ctx, "host_down", ev.HostID)
+		case event.BoxBack:
+			_ = e.Store.DeleteAck(ctx, "box_silent", ev.BoxID)
+		}
 		if err := e.Pub.Publish(ctx, ev); err != nil {
 			e.Log.Error("publish", "type", ev.Type, "event", ev.ID, "err", err)
 		}
@@ -658,4 +688,93 @@ func (e *Engine) publish(ctx context.Context, events []event.Event) {
 
 func (e *Engine) audit(ctx context.Context, actor, action, target, summary string) error {
 	return e.Store.Audit(ctx, e.Now(), actor, action, target, summary)
+}
+
+// ---- tasks (ADR-0014) ------------------------------------------------------------------------
+
+// TaskTTL is how long a queued task waits for the box before it expires as failed.
+const TaskTTL = time.Hour
+
+// taskHistory is how long finished tasks stay visible on the box page.
+const taskHistory = 30 * 24 * time.Hour
+
+// Bounds on what a box may write into the console through notes and results.
+const (
+	maxNotesPerHeartbeat = 20
+	maxNoteLen           = 500
+)
+
+// ErrTaskPending says a task of that kind is already waiting for the box.
+var ErrTaskPending = errors.New("core: a task of this kind is already waiting for the box")
+
+// ErrBadTask says the kind is not on the closed list.
+var ErrBadTask = errors.New("core: unknown task kind")
+
+// QueueTask queues one task for a box: the kind must be on the closed list, the box
+// must exist and not be revoked, and at most one task per kind waits at a time. The
+// box sees it with its next config pull; nothing is pushed.
+func (e *Engine) QueueTask(ctx context.Context, boxID, kind, actor string) (store.BoxTask, error) {
+	if !wire.ValidTaskKind(kind) {
+		return store.BoxTask{}, fmt.Errorf("%w: %q", ErrBadTask, kind)
+	}
+	box, err := e.Store.Box(ctx, boxID)
+	if err != nil {
+		return store.BoxTask{}, err
+	}
+	if box.RevokedAt != nil {
+		return store.BoxTask{}, errors.New("core: the box is revoked")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	now := e.Now()
+	pending, err := e.Store.PendingBoxTasks(ctx, boxID, now)
+	if err != nil {
+		return store.BoxTask{}, err
+	}
+	for _, t := range pending {
+		if t.Kind == kind {
+			return t, ErrTaskPending
+		}
+	}
+	t := store.BoxTask{ID: id.New("task"), BoxID: boxID, Kind: kind, IssuedAt: now, IssuedBy: actor, ExpiresAt: now.Add(TaskTTL)}
+	if err := e.Store.CreateBoxTask(ctx, t); err != nil {
+		return store.BoxTask{}, err
+	}
+	return t, e.audit(ctx, actor, "box.task", boxID, kind+" "+t.ID)
+}
+
+// absorbNotesAndResults stores what the box wants an operator to see and closes the
+// tasks it reports. Delivery is at-least-once, so a repeated result is ignored.
+func (e *Engine) absorbNotesAndResults(ctx context.Context, boxID string, hb wire.Heartbeat, now time.Time) {
+	notes := hb.Notes
+	if len(notes) > maxNotesPerHeartbeat {
+		notes = notes[:maxNotesPerHeartbeat]
+	}
+	for _, n := range notes {
+		if len(n) > maxNoteLen {
+			n = n[:maxNoteLen]
+		}
+		if err := e.Store.AddBoxNote(ctx, boxID, now, n); err != nil {
+			e.Log.Error("box note", "box", boxID, "err", err)
+		}
+	}
+	for _, r := range hb.TaskResults {
+		detail := r.Detail
+		if len(detail) > maxNoteLen {
+			detail = detail[:maxNoteLen]
+		}
+		err := e.Store.CompleteBoxTask(ctx, boxID, r.ID, r.OK, detail, now)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			// already recorded, expired, or not this box's task: nothing changes
+		case err != nil:
+			e.Log.Error("task result", "box", boxID, "task", r.ID, "err", err)
+		default:
+			outcome := "ok"
+			if !r.OK {
+				outcome = "failed"
+			}
+			_ = e.audit(ctx, "box:"+boxID, "box.task.done", r.ID, fmt.Sprintf("%s %s: %s", r.Kind, outcome, detail))
+		}
+	}
 }

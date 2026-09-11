@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/excubra/excubra/internal/agent/checks"
@@ -61,6 +62,15 @@ type Agent struct {
 
 	clockOffset *int64
 	updateNow   chan struct{}
+	restartNow  chan struct{}
+
+	// tasks (ADR-0014): ids already run, results waiting for a heartbeat
+	tasksMu     sync.Mutex
+	doneTasks   []string
+	doneSet     map[string]bool
+	taskResults []wire.TaskResult
+	tasksWG     sync.WaitGroup // tests wait for running tasks
+	baseCtx     context.Context
 }
 
 // Run is the agent main loop. It returns when ctx ends, or ErrRestart after a
@@ -130,14 +140,21 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 	}
 	a := &Agent{
 		st: st, client: client, log: log, now: time.Now,
-		checker:   checks.NewRunner(checks.NewPinger()),
-		disc:      discovery.New(log),
-		netbird:   NewNetbird(st.Dir),
-		upd:       upd,
-		rounds:    map[string][]wire.Round{},
-		updateNow: make(chan struct{}, 1),
+		checker:    checks.NewRunner(checks.NewPinger()),
+		disc:       discovery.New(log),
+		netbird:    NewNetbird(st.Dir),
+		upd:        upd,
+		rounds:     map[string][]wire.Round{},
+		updateNow:  make(chan struct{}, 1),
+		restartNow: make(chan struct{}, 1),
+		doneSet:    map[string]bool{},
+		baseCtx:    context.Background(),
 	}
 	a.hbInterval, a.checkEvery, a.configMaxAge = 60*time.Second, 30*time.Second, 15*time.Minute
+	a.doneTasks, a.taskResults = st.LoadTasks()
+	for _, id := range a.doneTasks {
+		a.doneSet[id] = true
+	}
 	if cfg, ok := st.LoadConfig(); ok {
 		a.applyConfig(cfg)
 		a.cfgPulledAt = time.Time{} // from disk: pull again soon
@@ -146,6 +163,7 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 }
 
 func (a *Agent) run(ctx context.Context) error {
+	a.baseCtx = ctx
 	go a.disc.Run(ctx)
 	go a.checkLoop(ctx)
 
@@ -178,6 +196,11 @@ func (a *Agent) run(ctx context.Context) error {
 			if err := a.checkUpdate(ctx); err != nil {
 				return err
 			}
+		case <-a.restartNow:
+			// the "restart" task: report it first, then let the service manager start us again
+			a.heartbeat(ctx)
+			a.log.Info("restarting as requested by a task")
+			return update.ErrRestart
 		case <-confirmDeadline.C:
 			// a freshly installed build that never managed a heartbeat is rolled back
 			if err := a.upd.RollbackIfStale(); err != nil {
@@ -213,9 +236,11 @@ func (a *Agent) checkLoop(ctx context.Context) {
 	}
 }
 
-func (a *Agent) runRounds(ctx context.Context, hosts []wire.HostConfig) {
+// runRounds checks every host once, in parallel, and reports how many failed.
+func (a *Agent) runRounds(ctx context.Context, hosts []wire.HostConfig) (checked, failed int) {
 	sem := make(chan struct{}, checkHosts)
 	var wg sync.WaitGroup
+	var nFailed atomic.Int64
 	for _, h := range hosts {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -223,10 +248,14 @@ func (a *Agent) runRounds(ctx context.Context, hosts []wire.HostConfig) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			r := a.checker.Round(ctx, h)
+			if !r.OK {
+				nFailed.Add(1)
+			}
 			a.addRound(h.HostID, r)
 		}(h)
 	}
 	wg.Wait()
+	return len(hosts), int(nFailed.Load())
 }
 
 func (a *Agent) addRound(hostID string, r wire.Round) {
@@ -289,6 +318,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	reports, dropped := a.takeRounds()
 	sightings := a.disc.Sightings(ctx)
 	notes := a.takeNotes()
+	results := a.takeTaskResults()
 	a.cfgMu.RLock()
 	cfgVersion, cfgErrors := a.cfg.Version, append([]string(nil), a.cfgErrors...)
 	a.cfgMu.RUnlock()
@@ -307,6 +337,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		Hosts:         reports,
 		Discovery:     wire.DiscoveryReport{Seen: sightings},
 		Buffer:        wire.BufferInfo{Queued: queued, Dropped: dropped},
+		TaskResults:   results,
 	}
 	hb.Box.ClockOffsetMS = a.clockOffset
 
@@ -316,6 +347,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	if err != nil {
 		a.putRounds(reports)
 		a.disc.Table.Nack()
+		a.putTaskResults(results)
 		if len(notes) > 0 {
 			a.notesMu.Lock()
 			a.notes = append(notes, a.notes...)
@@ -338,6 +370,9 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	}
 	a.disc.Table.Ack()
 	a.upd.Confirm()
+	if len(results) > 0 {
+		a.saveTasks()
+	}
 	off := hb.SentAt.Sub(resp.ServerTime).Milliseconds()
 	a.clockOffset = &off
 	a.log.Debug("heartbeat ok", "hosts", len(reports), "sightings", len(sightings), "assigned", resp.Assigned)
@@ -405,6 +440,120 @@ func (a *Agent) applyConfig(cfg wire.Config) {
 		}
 	}
 	a.roundsMu.Unlock()
+
+	a.startTasks(cfg.Tasks)
+}
+
+// ---- tasks (ADR-0014) ------------------------------------------------------------------------
+
+// startTasks runs every task of the config that has not run yet, each once, in the
+// background. The id is remembered before the task starts so a config pulled twice
+// or a restart mid-task never repeats it.
+func (a *Agent) startTasks(tasks []wire.Task) {
+	if len(tasks) > wire.MaxTasks {
+		tasks = tasks[:wire.MaxTasks]
+	}
+	a.tasksMu.Lock()
+	var fresh []wire.Task
+	for _, t := range tasks {
+		if t.ID == "" || a.doneSet[t.ID] {
+			continue
+		}
+		a.doneSet[t.ID] = true
+		a.doneTasks = append(a.doneTasks, t.ID)
+		fresh = append(fresh, t)
+	}
+	if len(fresh) > 0 {
+		a.saveTasksLocked()
+	}
+	a.tasksMu.Unlock()
+	for _, t := range fresh {
+		a.tasksWG.Add(1)
+		go func(t wire.Task) {
+			defer a.tasksWG.Done()
+			a.runTask(a.baseCtx, t)
+		}(t)
+	}
+}
+
+// runTask executes one task and queues its result for the next heartbeat.
+func (a *Agent) runTask(ctx context.Context, t wire.Task) {
+	res := wire.TaskResult{ID: t.ID, Kind: t.Kind, OK: true}
+	a.log.Info("task", "kind", t.Kind, "id", t.ID)
+	switch t.Kind {
+	case wire.TaskSweep:
+		n := a.disc.SweepNow(ctx)
+		res.Detail = fmt.Sprintf("sweep done, %d devices in the table", n)
+	case wire.TaskRecheck:
+		a.cfgMu.RLock()
+		hosts := append([]wire.HostConfig(nil), a.cfg.Hosts...)
+		a.cfgMu.RUnlock()
+		checked, failed := a.runRounds(ctx, hosts)
+		res.Detail = fmt.Sprintf("%d hosts checked, %d failed", checked, failed)
+	case wire.TaskUpdate:
+		select {
+		case a.updateNow <- struct{}{}:
+		default:
+		}
+		res.Detail = "update check triggered"
+	case wire.TaskRestart:
+		res.Detail = "restarting"
+		res.FinishedAt = a.now().UTC()
+		a.addTaskResult(res)
+		select {
+		case a.restartNow <- struct{}{}:
+		default:
+		}
+		return
+	default:
+		res.OK = false
+		res.Detail = "unknown task kind " + t.Kind
+	}
+	res.FinishedAt = a.now().UTC()
+	a.addTaskResult(res)
+}
+
+func (a *Agent) addTaskResult(r wire.TaskResult) {
+	a.tasksMu.Lock()
+	a.taskResults = append(a.taskResults, r)
+	a.saveTasksLocked()
+	a.tasksMu.Unlock()
+}
+
+func (a *Agent) takeTaskResults() []wire.TaskResult {
+	a.tasksMu.Lock()
+	defer a.tasksMu.Unlock()
+	r := a.taskResults
+	a.taskResults = nil
+	return r
+}
+
+func (a *Agent) putTaskResults(rs []wire.TaskResult) {
+	if len(rs) == 0 {
+		return
+	}
+	a.tasksMu.Lock()
+	a.taskResults = append(rs, a.taskResults...)
+	a.tasksMu.Unlock()
+}
+
+func (a *Agent) saveTasks() {
+	a.tasksMu.Lock()
+	a.saveTasksLocked()
+	a.tasksMu.Unlock()
+}
+
+func (a *Agent) saveTasksLocked() {
+	if err := a.st.SaveTasks(a.doneTasks, a.taskResults); err != nil {
+		a.log.Warn("saving task memory", "err", err)
+	}
+	if len(a.doneTasks) > maxDoneTasks {
+		a.doneTasks = a.doneTasks[len(a.doneTasks)-maxDoneTasks:]
+		a.doneSet = map[string]bool{}
+		for _, id := range a.doneTasks {
+			a.doneSet[id] = true
+		}
+	}
 }
 
 func clamp(d, lo, hi, def time.Duration) time.Duration {

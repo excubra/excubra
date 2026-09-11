@@ -214,3 +214,36 @@ type Rollup struct {
 	LatencySumMS int64
 	LatencyMaxMS int64
 }
+
+// BoxTask is a one-shot request to a box (ADR-0014): queued by the console, pulled
+// with the config, reported back in a heartbeat.
+type BoxTask struct {
+	ID        string
+	BoxID     string
+	Kind      string
+	IssuedAt  time.Time
+	IssuedBy  string
+	ExpiresAt time.Time
+	DoneAt    *time.Time
+	OK        *bool
+	Detail    string
+}
+
+// BoxNote is a line the agent wanted an operator to see (heartbeat notes).
+type BoxNote struct {
+	ID    int64
+	BoxID string
+	At    time.Time
+	Text  string
+}
+
+// Ack records that an operator has seen a problem. Since is the start of that
+// outage, so the same object failing again is a new, unacknowledged problem.
+type Ack struct {
+	Kind     string
+	TargetID string
+	Since    time.Time
+	Actor    string
+	At       time.Time
+	Note     string
+}

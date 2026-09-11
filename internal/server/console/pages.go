@@ -33,6 +33,7 @@ type navCounts struct {
 
 func (s *Server) navCounts(ctx context.Context) navCounts {
 	var n navCounts
+	acks, _ := s.Store.Acks(ctx)
 	if ts, err := s.Store.Tenants(ctx); err == nil {
 		n.Tenants = len(ts)
 	}
@@ -45,13 +46,19 @@ func (s *Server) navCounts(ctx context.Context) navCounts {
 			if b.SiteID == "" {
 				n.Unassigned++
 			} else if st, ok := s.Engine.BoxState(b.ID); ok && st.Status == state.Silent {
-				n.Attention++
+				since := st.SilentSince
+				if since.IsZero() {
+					since = st.LastHeartbeat
+				}
+				if ackFor(acks, "box_silent", b.ID, since) == nil {
+					n.Attention++
+				}
 			}
 		}
 	}
 	if vs, err := s.Engine.HostViews(ctx, ""); err == nil {
 		for _, v := range vs {
-			if c, _ := classify(v); c == "down" {
+			if c, _ := classify(v); c == "down" && ackFor(acks, "host_down", v.ID, v.State.Since) == nil {
 				n.Attention++
 			}
 		}

@@ -196,6 +196,45 @@ func (s *State) SaveConfig(c wire.Config) error {
 	return s.writeFile(fileConfig, b, 0o600)
 }
 
+// taskFile remembers which tasks ran (so a re-pulled config never repeats one) and
+// which results still wait for a successful heartbeat (ADR-0014).
+const taskFile = "tasks.json"
+
+// taskMemory is the on-disk shape of taskFile.
+type taskMemory struct {
+	Done    []string          `json:"done"`
+	Results []wire.TaskResult `json:"results,omitempty"`
+}
+
+// maxDoneTasks bounds the remembered ids; the server expires tasks after an hour,
+// so a few hundred ids cover every realistic replay.
+const maxDoneTasks = 200
+
+// LoadTasks returns the remembered task ids and the results not yet delivered.
+func (s *State) LoadTasks() ([]string, []wire.TaskResult) {
+	b, err := os.ReadFile(s.path(taskFile))
+	if err != nil {
+		return nil, nil
+	}
+	var m taskMemory
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, nil
+	}
+	return m.Done, m.Results
+}
+
+// SaveTasks persists the remembered ids (newest last, trimmed) and pending results.
+func (s *State) SaveTasks(done []string, results []wire.TaskResult) error {
+	if len(done) > maxDoneTasks {
+		done = done[len(done)-maxDoneTasks:]
+	}
+	b, err := json.Marshal(taskMemory{Done: done, Results: results})
+	if err != nil {
+		return err
+	}
+	return s.writeFile(taskFile, b, 0o600)
+}
+
 // EnrollKeyPaths lists where a key file may lie: the explicit path, else the state
 // directory, else /etc/excubra/enroll.
 func EnrollKeyPaths(stateDir, explicit string) []string {
