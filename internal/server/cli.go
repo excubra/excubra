@@ -16,6 +16,7 @@ import (
 	"github.com/excubra/excubra/internal/seal"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/store"
+	"github.com/excubra/excubra/internal/wire"
 )
 
 // cliArgs separates positional words from flags, so both
@@ -403,8 +404,39 @@ func boxCmd(args []string) error {
 		fmt.Printf("%s unassigned\n", rest[1])
 		fmt.Println("restart the server to apply: systemctl restart excubra-server")
 		return nil
+	case len(rest) == 3 && rest[0] == "task":
+		// the same closed list the console offers (ADR-0014), for an operator on the server
+		kind := rest[2]
+		if !wire.ValidTaskKind(kind) {
+			return fmt.Errorf("task kind must be one of %s", strings.Join(wire.TaskKinds, ", "))
+		}
+		box, err := st.Box(ctx, rest[1])
+		if err != nil {
+			return fmt.Errorf("box %s: %w", rest[1], err)
+		}
+		if box.RevokedAt != nil {
+			return fmt.Errorf("box %s is revoked", box.ID)
+		}
+		now := time.Now()
+		pending, err := st.PendingBoxTasks(ctx, box.ID, now)
+		if err != nil {
+			return err
+		}
+		for _, t := range pending {
+			if t.Kind == kind {
+				fmt.Printf("%s already waits for the box since %s\n", kind, t.IssuedAt.UTC().Format(time.RFC3339))
+				return nil
+			}
+		}
+		t := store.BoxTask{ID: id.New("task"), BoxID: box.ID, Kind: kind, IssuedAt: now, IssuedBy: "cli", ExpiresAt: now.Add(time.Hour)}
+		if err := st.CreateBoxTask(ctx, t); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, now, "cli", "box.task", box.ID, kind+" "+t.ID)
+		fmt.Printf("%s queued for %s (%s); the box picks it up with its next config pull\n", kind, box.ID, t.ID)
+		return nil
 	}
-	return fmt.Errorf("usage: excubra server box list | assign <box_id> <site_id> | unassign <box_id>")
+	return fmt.Errorf("usage: excubra server box list | assign <box_id> <site_id> | unassign <box_id> | task <box_id> <sweep|recheck|update|restart>")
 }
 
 // backupCmd: excubra server backup <dir>
