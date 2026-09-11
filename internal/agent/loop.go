@@ -161,6 +161,7 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 	}
 	a.sealKey = key
 	a.conn = connect.New(log, func(sealed string) ([]byte, error) { return seal.Open(key, sealed) })
+	a.conn.Seal = func(plain []byte) (string, error) { return seal.Seal(seal.Public(key), plain) }
 	a.hbInterval, a.checkEvery, a.configMaxAge = 60*time.Second, 30*time.Second, 15*time.Minute
 	a.doneTasks, a.taskResults = st.LoadTasks()
 	for _, id := range a.doneTasks {

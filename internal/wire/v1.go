@@ -353,6 +353,10 @@ type ConnectorReport struct {
 	Facts          json.RawMessage    `json:"facts,omitempty"`
 	Metrics        map[string]float64 `json:"metrics,omitempty"`
 	TLSFingerprint string             `json:"tls_fingerprint,omitempty"` // what the device presented
+	// TokenSealed is set once when the box turned an admin login into an API token of
+	// its own (FortiGate bootstrap): the token sealed to the box's own key, for the
+	// server to store in place of the admin credential. The server never sees the token.
+	TokenSealed string `json:"token_sealed,omitempty"`
 }
 
 // ---- update and netbird -------------------------------------------------------
