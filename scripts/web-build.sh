@@ -21,4 +21,6 @@ if [ "${1:-}" = "--check" ]; then
   npm run --silent lint
   exit 0
 fi
+# a fresh build: old hashed assets go, the committed placeholder stays
+rm -rf ../internal/server/console/webdist/assets ../internal/server/console/webdist/index.html ../internal/server/console/webdist/favicon.svg ../internal/server/console/webdist/icons.svg
 npm run --silent build
