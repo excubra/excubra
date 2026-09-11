@@ -132,6 +132,7 @@ func (s *Server) funcs() template.FuncMap {
 			return t.In(s.Loc).Format("02.01. 15:04")
 		},
 		"cleanName": cleanHostname,
+		"chart":     areaSVG,
 		"tsTime": func(t time.Time) string {
 			if t.IsZero() {
 				return "–"

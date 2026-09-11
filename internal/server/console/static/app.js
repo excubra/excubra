@@ -31,7 +31,10 @@
   tick();
 
   // ---- tabs (server renders every pane; the URL keeps the chosen one) ----------
+  function initTabs() {
   $$('[data-tabs]').forEach(function (bar) {
+    if (bar.dataset.wired) return;
+    bar.dataset.wired = '1';
     var scope = bar.getAttribute('data-tabs');
     var panes = $$('[data-pane]').filter(function (p) { return p.getAttribute('data-pane').indexOf(scope + ':') === 0; });
     function show(name, push) {
@@ -43,7 +46,12 @@
     }
     $$('button', bar).forEach(function (b) { b.addEventListener('click', function () { show(b.getAttribute('data-t'), true); }); });
     $$('[data-goto-tab]').forEach(function (b) { b.addEventListener('click', function () { show(b.getAttribute('data-goto-tab'), true); window.scrollTo(0, 0); }); });
+    var want = new URL(location.href).searchParams.get('tab');
+    if (want && $$('button', bar).some(function (b) { return b.getAttribute('data-t') === want; })) show(want, false);
   });
+  }
+  initTabs();
+  document.body.addEventListener('htmx:afterSwap', initTabs);
 
   // ---- device filter: chips by kind, free text, "beobachtet" -------------------
   var grid = $('#devs');
