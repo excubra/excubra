@@ -125,17 +125,17 @@ func areaSVG(c chartData) template.HTML {
 	}
 	base := fmt.Sprintf("%.1f,%.1f %.1f,%.1f", x(n-1), y(0), x(0), y(0))
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`<svg class="chart" viewBox="0 0 %.0f %.0f" preserveAspectRatio="none" role="img" aria-label="Prüfungen je Stunde, erreichbar und ausgefallen">`, w, h))
+	fmt.Fprintf(&sb, `<svg class="chart" viewBox="0 0 %.0f %.0f" preserveAspectRatio="none" role="img" aria-label="Prüfungen je Stunde, erreichbar und ausgefallen">`, w, h)
 	sb.WriteString(`<defs><linearGradient id="gOk" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stop-color="var(--ok)" stop-opacity=".8"/><stop offset="95%" stop-color="var(--ok)" stop-opacity=".1"/></linearGradient><linearGradient id="gBad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stop-color="var(--bad)" stop-opacity=".8"/><stop offset="95%" stop-color="var(--bad)" stop-opacity=".1"/></linearGradient></defs>`)
 	for _, f := range []float64{0.25, 0.5, 0.75, 1} {
 		gy := padT + plotH - plotH*f
-		sb.WriteString(fmt.Sprintf(`<line x1="%.1f" x2="%.1f" y1="%.1f" y2="%.1f" class="grid"/>`, padL, w-padR, gy, gy))
+		fmt.Fprintf(&sb, `<line x1="%.1f" x2="%.1f" y1="%.1f" y2="%.1f" class="grid"/>`, padL, w-padR, gy, gy)
 	}
-	sb.WriteString(fmt.Sprintf(`<polygon class="area ok" fill="url(#gOk)" points="%s %s"/>`, top.String(), base))
-	sb.WriteString(fmt.Sprintf(`<polyline class="line ok" fill="none" points="%s"/>`, top.String()))
+	fmt.Fprintf(&sb, `<polygon class="area ok" fill="url(#gOk)" points="%s %s"/>`, top.String(), base)
+	fmt.Fprintf(&sb, `<polyline class="line ok" fill="none" points="%s"/>`, top.String())
 	if c.Failed > 0 {
-		sb.WriteString(fmt.Sprintf(`<polygon class="area bad" fill="url(#gBad)" points="%s %s"/>`, mid.String(), base))
-		sb.WriteString(fmt.Sprintf(`<polyline class="line bad" fill="none" points="%s"/>`, mid.String()))
+		fmt.Fprintf(&sb, `<polygon class="area bad" fill="url(#gBad)" points="%s %s"/>`, mid.String(), base)
+		fmt.Fprintf(&sb, `<polyline class="line bad" fill="none" points="%s"/>`, mid.String())
 	}
 	sb.WriteString("</svg>")
 	return template.HTML(sb.String()) //nolint:gosec // built from numbers and escaped labels only
