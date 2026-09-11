@@ -11,7 +11,7 @@
 <body class="{{if .User}}app{{else}}login{{end}}" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 {{if .User}}
 <aside class="side">
-  <a class="brand" href="/status"><b>EX<i>0</i></b><span>Konsole</span></a>
+  <a class="brand" href="/status"><span class="mark">EX0</span><span class="txt"><b>EX0 Konsole</b><span>VIICO GmbH</span></span></a>
   <div class="navgrp">Überwachung</div>
   <nav class="nav">
     <a href="/status" {{if eq .Path "/status"}}class="on"{{end}}><svg class="i"><use href="/static/icons.svg#home"/></svg>Übersicht</a>
@@ -34,16 +34,18 @@
     <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link" title="Abmelden" aria-label="Abmelden"><svg class="i"><use href="/static/icons.svg#logout"/></svg></button></form>
   </div>
 </aside>
-<header class="top">
-  <div class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}}<span class="sep">/</span>{{end}}{{if $c.Href}}<a href="{{$c.Href}}">{{$c.Label}}</a>{{else}}<b>{{$c.Label}}</b>{{end}}{{end}}{{if not .Crumbs}}<b>{{.Title}}</b>{{end}}</div>
-  {{if .Search}}<label class="search"><svg class="i"><use href="/static/icons.svg#search"/></svg><input id="q" placeholder="Gerät, Adresse, Hersteller …" aria-label="Suche"><kbd>/</kbd></label>{{end}}
-  <span class="clock" id="clock">{{.Clock}}</span>
-</header>
-<main class="main">
-  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
-  {{template "content" .}}
-  <footer class="foot">EX0 Konsole · nur im Overlay erreichbar · Zeiten in lokaler Zone</footer>
-</main>
+<div class="inset">
+  <header class="top">
+    <div class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}}<span class="sep">/</span>{{end}}{{if $c.Href}}<a href="{{$c.Href}}">{{$c.Label}}</a>{{else}}<b>{{$c.Label}}</b>{{end}}{{end}}{{if not .Crumbs}}<b>{{.Title}}</b>{{end}}</div>
+    {{if .Search}}<label class="search"><svg class="i"><use href="/static/icons.svg#search"/></svg><input id="q" placeholder="Gerät, Adresse, Hersteller …" aria-label="Suche"><kbd>/</kbd></label>{{end}}
+    <span class="clock" id="clock">{{.Clock}}</span>
+  </header>
+  <main class="main">
+    {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+    {{template "content" .}}
+    <footer class="foot">EX0 Konsole · nur im Overlay erreichbar · Zeiten in lokaler Zone</footer>
+  </main>
+</div>
 {{else}}
 {{template "content" .}}
 {{end}}

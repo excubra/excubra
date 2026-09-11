@@ -296,7 +296,8 @@ func (s *Store) AddRollup(ctx context.Context, tenantID, hostID string, at time.
 	return wrap("add rollup", err)
 }
 
-// Rollups returns the hour buckets of a host between from and to, oldest first.
+// Rollups returns the hour buckets of a host (or of every host when hostID is empty)
+// between from and to, oldest first.
 func (s *Store) Rollups(ctx context.Context, tenantID, hostID string, from, to time.Time) ([]Rollup, error) {
 	days, err := s.Days(tenantID)
 	if err != nil {
@@ -312,8 +313,13 @@ func (s *Store) Rollups(ctx context.Context, tenantID, hostID string, from, to t
 		if err != nil {
 			return nil, err
 		}
-		rows, err := db.QueryContext(ctx, `SELECT host_id, hour, check_type, rounds, failed, latency_sum_ms, latency_max_ms FROM check_rollups WHERE host_id = ? AND hour >= ? AND hour < ? ORDER BY hour, check_type`,
-			hostID, ts(from.UTC().Truncate(time.Hour)), ts(to))
+		q := `SELECT host_id, hour, check_type, rounds, failed, latency_sum_ms, latency_max_ms FROM check_rollups WHERE host_id = ? AND hour >= ? AND hour < ? ORDER BY hour, check_type`
+		args := []any{hostID, ts(from.UTC().Truncate(time.Hour)), ts(to)}
+		if hostID == "" { // every host of the tenant, for charts across a site or the fleet
+			q = `SELECT host_id, hour, check_type, rounds, failed, latency_sum_ms, latency_max_ms FROM check_rollups WHERE hour >= ? AND hour < ? ORDER BY hour, host_id, check_type`
+			args = args[1:]
+		}
+		rows, err := db.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, wrap("rollups", err)
 		}

@@ -203,6 +203,7 @@ type siteData struct {
 	Events []recentEvent
 	Red    int
 	Tab    string
+	Chart  chartData
 
 	// Box & Technik
 	Sites       []store.Site
@@ -382,6 +383,10 @@ func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.SliceStable(d.Events, func(i, j int) bool { return d.Events[i].OccurredAt.After(d.Events[j].OccurredAt) })
 
+	if d.Chart, err = s.buildChart(ctx, []string{site.TenantID}, "", r.URL.Query().Get("range"), now); err != nil {
+		s.fail(w, r, err, http.StatusInternalServerError)
+		return
+	}
 	d.Tab = r.URL.Query().Get("tab")
 	switch d.Tab {
 	case "ueberwachung", "ereignisse", "technik":

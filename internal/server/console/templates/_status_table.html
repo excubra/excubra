@@ -1,35 +1,74 @@
 {{define "status_table"}}
-<div class="tiles">
-  <a class="tile link{{if .SitesWithBox}}{{if eq .SitesOnline .SitesWithBox}} ok{{else}} bad{{end}}{{end}}" href="/tenants"><span class="k">Standorte online</span><span class="v">{{.SitesOnline}}<small>von {{.SitesWithBox}}</small></span><span class="d">{{if .Silent}}{{.Silent}} Box schweigt{{else if .SitesWithBox}}alle Boxen melden sich{{else}}noch keine Box zugeordnet{{end}}{{if gt .SitesTotal .SitesWithBox}} · {{sub .SitesTotal .SitesWithBox}} ohne Box{{end}}</span></a>
-  <a class="tile link{{if .Down}} bad{{end}}" href="/events"><span class="k">Hosts ausgefallen</span><span class="v">{{.Down}}</span><span class="d">{{if .Down}}Ereignisse ans CRM unterwegs{{else}}keine roten Ereignisse{{end}}</span></a>
-  <div class="tile"><span class="k">Beobachtet</span><span class="v">{{.Total}}</span><span class="d">{{.Up}} erreichbar{{if .Maint}} · {{.Maint}} in Wartung{{end}}{{if .Unknown}} · {{.Unknown}} ohne Ergebnis{{end}}</span></div>
-  <div class="tile"><span class="k">Geräte im Inventar</span><span class="v">{{.Devices}}</span><span class="d">über alle Standorte</span></div>
-  <a class="tile link{{if .Unassigned}} bad{{end}}" href="/boxes"><span class="k">Boxen</span><span class="v">{{.Boxes}}{{if .Unassigned}}<small>+{{len .Unassigned}} ohne Standort</small>{{end}}</span><span class="d">{{if .Unassigned}}zuordnen oder löschen{{else}}alle zugeordnet{{end}}</span></a>
-  <a class="tile link" href="/events"><span class="k">Ereignisse 24 h</span><span class="v">{{.Events24h}}</span><span class="d">{{if .Recent}}zuletzt {{tsTime (index .Recent 0).OccurredAt}}{{else}}alles ruhig{{end}}</span></a>
-</div>
-<div class="board">
-{{range .Cards}}
-<a class="site c2 r4 {{.Class}}" href="/sites/{{.Site.ID}}">
-  <div class="t"><div><div class="name">{{.Site.Name}}</div><div class="cust">{{.Tenant.Name}}</div></div>{{if .HasBox}}{{if .Online}}<span class="pill ok live">online</span>{{else}}<span class="pill bad">Box schweigt</span>{{end}}{{else}}<span class="pill">keine Box</span>{{end}}</div>
-  <div class="stats">
-    <div><div class="k">Beobachtet</div><div class="v{{if .Down}} bad{{else if .Monitored}} ok{{end}}">{{.Monitored}}</div></div>
-    <div><div class="k">Geräte</div><div class="v">{{.Devices}}</div></div>
-    <div><div class="k">Ausfälle</div><div class="v{{if .Down}} bad{{end}}">{{.Down}}</div></div>
+<div class="stats">
+  <a class="stat link{{if .Silent}} bad{{end}}" href="/tenants">
+    <div class="h"><div><div class="desc">Standorte online</div><div class="val{{if .Silent}} bad{{end}}">{{.SitesOnline}}<small>von {{.SitesWithBox}}</small></div></div>{{if .Silent}}<span class="badge bad">{{.Silent}} schweigt</span>{{else if .SitesWithBox}}<span class="badge ok"><svg class="i"><use href="/static/icons.svg#check"/></svg>alle</span>{{end}}</div>
+    <div class="foot"><span class="l1">{{if .Silent}}Eine Box meldet sich nicht{{else if .SitesWithBox}}Alle Boxen melden sich{{else}}Noch keine Box zugeordnet{{end}}</span><span class="l2">{{if gt .SitesTotal .SitesWithBox}}{{sub .SitesTotal .SitesWithBox}} Standort{{if ne (sub .SitesTotal .SitesWithBox) 1}}e{{end}} ohne Box{{else}}{{.SitesTotal}} Standorte gesamt{{end}}</span></div>
+  </a>
+  <a class="stat link{{if .Down}} bad{{end}}" href="/events">
+    <div class="h"><div><div class="desc">Hosts ausgefallen</div><div class="val{{if .Down}} bad{{end}}">{{.Down}}</div></div>{{if .Down}}<span class="badge bad">rot</span>{{else}}<span class="badge">0 %</span>{{end}}</div>
+    <div class="foot"><span class="l1">{{if .Down}}Ereignisse ans CRM unterwegs{{else}}Keine roten Ereignisse{{end}}</span><span class="l2">{{.Up}} von {{.Total}} beobachteten Hosts erreichbar</span></div>
+  </a>
+  <div class="stat">
+    <div class="h"><div><div class="desc">Beobachtet</div><div class="val">{{.Total}}</div></div><span class="badge">{{.Devices}} Geräte</span></div>
+    <div class="foot"><span class="l1">{{if .Maint}}{{.Maint}} in Wartung{{else if .Unknown}}{{.Unknown}} ohne Ergebnis{{else}}Alle mit Ergebnis{{end}}</span><span class="l2">Prüfung jede Minute von der Box im LAN</span></div>
   </div>
-  <div class="hosts-mini">
-    {{range $i, $h := .Hosts}}{{if lt $i 9}}<div class="it"><span class="dot {{$h.StateClass}}"></span><span>{{$h.Name}}</span>{{if $h.IsUplink}}<span class="chip ok">Uplink</span>{{end}}{{if eq $h.StateClass "down"}}<span class="chip bad">{{$h.StateLabel}}</span>{{end}}<span class="ip">{{$h.Address}}</span></div>{{end}}{{else}}<div class="none">{{if .HasBox}}Noch nichts beobachtet — im Netz des Standorts Geräte einschalten.{{else}}Erst eine Box zuordnen, dann sieht EX0 das Netz.{{end}}</div>{{end}}
+  <a class="stat link" href="/events">
+    <div class="h"><div><div class="desc">Ereignisse 24 h</div><div class="val">{{.Events24h}}</div></div>{{if .Recent}}<span class="badge">{{tsTime (index .Recent 0).OccurredAt}}</span>{{end}}</div>
+    <div class="foot"><span class="l1">{{if .Recent}}{{(index .Recent 0).Title}}{{else}}Alles ruhig{{end}}</span><span class="l2">{{if .Unassigned}}{{len .Unassigned}} Box ohne Standort{{else}}Nur Zustandswechsel, keine Logs{{end}}</span></div>
+  </a>
+</div>
+
+<div class="panel">
+  <div class="ph"><div><h2>Erreichbarkeit</h2><div class="desc">{{if eq .Chart.Range "7d"}}Prüfungen je Tag, letzte 7 Tage{{else}}Prüfungen je Stunde, letzte 24 Stunden{{end}} · {{.Chart.Hosts}} Hosts · {{pct .Chart.Pct}} % erreichbar</div></div>
+    <div class="r"><div class="legend"><span><i class="ok"></i>erreichbar</span><span><i class="bad"></i>ausgefallen</span></div><div class="range"><a class="{{if ne .Chart.Range "7d"}}on{{end}}" href="/status?range=24h">24 h</a><a class="{{if eq .Chart.Range "7d"}}on{{end}}" href="/status?range=7d">7 Tage</a></div></div></div>
+  <div class="chartbox">{{chart .Chart}}</div>
+  <div class="xaxis">{{range .Chart.AxisLabels}}<span>{{.}}</span>{{end}}</div>
+</div>
+
+<div class="tabrow">
+  <div class="tabs" data-tabs="ov">
+    <button data-t="sites" class="on">Standorte <span class="n">{{.SitesTotal}}</span></button>
+    <button data-t="events">Ereignisse <span class="n{{if .Down}} bad{{end}}">{{.Events24h}}</span></button>
+    <button data-t="boxes">Boxen {{if .Unassigned}}<span class="n bad">{{len .Unassigned}}</span>{{end}}</button>
   </div>
-  <div class="last">{{if .HasBox}}<span class="pill{{if .Online}} ok{{else}} bad{{end}}">Heartbeat {{ago .Box.State.LastHeartbeat}}</span>{{end}}{{if .Last}}<span class="mono">{{tsTime .Last.OccurredAt}}</span><span>{{.Last.Title}}</span>{{else}}<span>Kein Ereignis in 24 h</span>{{end}}</div>
-</a>
-{{end}}
-<div class="panel c2 r4">
-  <div class="ph"><h2>Letzte Ereignisse</h2><div class="r"><a class="btn sm" href="/events">Alle</a></div></div>
-  {{if .Recent}}<div class="feed">{{range .Recent}}<div class="it"><span class="t">{{tsTime .OccurredAt}}</span><div><div class="w {{.Class}}">{{.Title}}</div><div class="s">{{.TenantName}}{{if .SiteName}} · {{.SiteName}}{{end}}{{if .Info}} · {{.Info}}{{end}}</div></div></div>{{end}}</div>
-  {{else}}<div class="empty"><svg class="i"><use href="/static/icons.svg#inbox"/></svg><b>Alles ruhig</b><span>Keine Ereignisse in den letzten 24 Stunden.</span></div>{{end}}
+  <div class="r"><a class="btn sm" href="/tenants"><svg class="i"><use href="/static/icons.svg#plus"/></svg>Standort anlegen</a></div>
 </div>
-<a class="site add c2 r4" href="/tenants"><div><div class="plus">+</div><div>Standort anlegen</div></div></a>
+
+<div class="tabpane on" data-pane="ov:sites">
+  <div class="tablewrap"><div class="twrap"><table>
+    <thead><tr><th>Standort</th><th>Box</th><th>Zustand</th><th class="right">Beobachtet</th><th class="right">Erreichbar</th><th class="right">Ausgefallen</th><th class="right">Geräte</th><th>Zuletzt</th><th></th></tr></thead>
+    <tbody>
+    {{range .Cards}}<tr{{if .Down}} class="bad"{{end}}>
+      <td><b>{{.Site.Name}}</b><div class="sub2">{{.Tenant.Name}}</div></td>
+      <td>{{if .HasBox}}<span class="mono">{{if .Box.Name}}{{.Box.Name}}{{else}}{{.Box.ID}}{{end}}</span><div class="sub2">Heartbeat {{ago .Box.State.LastHeartbeat}}</div>{{else}}<span class="badge muted">keine</span>{{end}}</td>
+      <td>{{if not .HasBox}}<span class="badge muted">ohne Box</span>{{else if not .Online}}<span class="badge bad">Box schweigt</span>{{else if .Down}}<span class="badge bad">{{.Down}} ausgefallen</span>{{else}}<span class="badge ok"><svg class="i"><use href="/static/icons.svg#check"/></svg>online</span>{{end}}</td>
+      <td class="right num">{{.Monitored}}</td><td class="right num">{{.Up}}</td><td class="right num{{if .Down}} err{{end}}">{{.Down}}</td><td class="right num">{{.Devices}}</td>
+      <td>{{if .Last}}<span class="ev-t">{{tsTime .Last.OccurredAt}}</span> {{.Last.Title}}{{else}}<span class="muted">–</span>{{end}}</td>
+      <td class="right"><a class="btn xs" href="/sites/{{.Site.ID}}">Öffnen</a></td>
+    </tr>{{else}}<tr><td colspan="9"><div class="empty"><b>Noch kein Standort</b><span>Unter Kunden den ersten anlegen, dann eine Box zuordnen.</span></div></td></tr>{{end}}
+    </tbody>
+  </table></div>
+  <div class="tfoot">{{.SitesTotal}} Standort{{if ne .SitesTotal 1}}e{{end}} · {{.SitesWithBox}} mit Box</div></div>
 </div>
-{{range .Unassigned}}
-<div class="notice"><span class="pill{{if eq .State.Status "silent"}} bad{{else if .State.LastHeartbeat.IsZero}}{{else}} ok{{end}}">{{if eq .State.Status "silent"}}still seit {{ago .State.SilentSince}}{{else if .State.LastHeartbeat.IsZero}}noch kein Heartbeat{{else}}online{{end}}</span><span><b class="mono">{{.ID}}</b> ist keinem Standort zugeordnet{{if .AgentVersion}} · Agent {{.AgentVersion}}{{end}}. Zuordnen oder löschen.</span><a class="btn sm" href="/boxes/{{.ID}}">Zur Box</a></div>
-{{end}}
+
+<div class="tabpane" data-pane="ov:events">
+  <div class="tablewrap"><div class="twrap"><table>
+    <thead><tr><th>Zeit</th><th>Ereignis</th><th>Was</th><th>Kunde · Standort</th><th>Details</th></tr></thead>
+    <tbody>
+    {{range .Recent}}<tr{{if eq .Class "down"}} class="bad"{{end}}><td class="ev-t"><b>{{tsTime .OccurredAt}}</b></td><td><span class="badge{{if eq .Class "down"}} bad{{else if eq .Class "ok"}} ok{{else}} muted{{end}} mono">{{.Type}}</span></td><td>{{.Title}}</td><td>{{.TenantName}}{{if .SiteName}} · {{.SiteName}}{{end}}</td><td class="t2">{{.Info}}</td></tr>{{else}}<tr><td colspan="5"><div class="empty"><b>Alles ruhig</b><span>Keine Ereignisse in den letzten 24 Stunden.</span></div></td></tr>{{end}}
+    </tbody>
+  </table></div>
+  <div class="tfoot">{{len .Recent}} von {{.Events24h}} Ereignissen<div class="r"><a class="btn xs" href="/events">Alle Ereignisse</a></div></div></div>
+</div>
+
+<div class="tabpane" data-pane="ov:boxes">
+  <div class="tablewrap"><div class="twrap"><table>
+    <thead><tr><th>Box</th><th>Standort</th><th>Agent</th><th>Zustand</th><th></th></tr></thead>
+    <tbody>
+    {{range .Unassigned}}<tr><td><b class="mono">{{.ID}}</b></td><td><span class="badge bad">nicht zugeordnet</span></td><td class="mono">{{if .AgentVersion}}{{.AgentVersion}}{{else}}–{{end}}</td><td>{{if eq .State.Status "silent"}}<span class="badge bad">still seit {{ago .State.SilentSince}}</span>{{else if .State.LastHeartbeat.IsZero}}<span class="badge muted">noch kein Heartbeat</span>{{else}}<span class="badge ok">online</span>{{end}}</td><td class="right"><a class="btn xs" href="/boxes/{{.ID}}">Zuordnen</a></td></tr>{{end}}
+    {{range .Cards}}{{if .HasBox}}<tr><td><b>{{if .Box.Name}}{{.Box.Name}}{{else}}{{.Box.ID}}{{end}}</b><div class="sub2">{{.Box.ID}}</div></td><td>{{.Tenant.Name}} · {{.Site.Name}}</td><td class="mono">{{.Box.AgentVersion}}</td><td>{{if .Online}}<span class="badge ok"><svg class="i"><use href="/static/icons.svg#check"/></svg>online</span>{{else}}<span class="badge bad">schweigt</span>{{end}}</td><td class="right"><a class="btn xs" href="/sites/{{.Site.ID}}?tab=technik">Technik</a></td></tr>{{end}}{{end}}
+    </tbody>
+  </table></div>
+  <div class="tfoot">{{.Boxes}} zugeordnet{{if .Unassigned}} · {{len .Unassigned}} ohne Standort{{end}}<div class="r"><a class="btn xs" href="/boxes">Alle Boxen</a></div></div></div>
+</div>
 {{end}}

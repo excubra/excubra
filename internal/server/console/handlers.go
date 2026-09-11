@@ -66,6 +66,7 @@ type statusData struct {
 	SitesWithBox int
 	SitesTotal   int
 	Events24h    int
+	Chart        chartData
 }
 
 // recentEvent is an event with the names the dashboard shows.
@@ -265,10 +266,13 @@ func (s *Server) lookups(ctx context.Context) (map[string]store.Tenant, map[stri
 
 // ---- status ------------------------------------------------------------------------
 
-func (s *Server) buildStatus(ctx context.Context) (statusData, error) {
+func (s *Server) buildStatus(ctx context.Context, rng string) (statusData, error) {
 	var d statusData
 	tenants, err := s.Store.Tenants(ctx)
 	if err != nil {
+		return d, err
+	}
+	if d.Chart, err = s.buildChart(ctx, tenantIDs(tenants), "", rng, s.Now()); err != nil {
 		return d, err
 	}
 	sites, err := s.Store.Sites(ctx, "")
@@ -396,7 +400,7 @@ func eventTitle(ev event.Event) string {
 }
 
 func (s *Server) statusPage(w http.ResponseWriter, r *http.Request) {
-	d, err := s.buildStatus(r.Context())
+	d, err := s.buildStatus(r.Context(), r.URL.Query().Get("range"))
 	if err != nil {
 		s.fail(w, r, err, http.StatusInternalServerError)
 		return
@@ -405,7 +409,7 @@ func (s *Server) statusPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) statusTable(w http.ResponseWriter, r *http.Request) {
-	d, err := s.buildStatus(r.Context())
+	d, err := s.buildStatus(r.Context(), r.URL.Query().Get("range"))
 	if err != nil {
 		http.Error(w, "Fehler", http.StatusInternalServerError)
 		return
