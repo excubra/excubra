@@ -292,3 +292,21 @@ type Sample struct {
 	Key   string
 	Value float64
 }
+
+// Finding is one thing the rules found on a device (salt: Vollausbau 3.8).
+type Finding struct {
+	ID          string
+	TenantID    string
+	SiteID      string
+	DeviceID    string
+	ConnectorID string
+	Rule        string
+	Key         string
+	Severity    string
+	Title       string
+	Detail      string
+	Evidence    json.RawMessage
+	FirstSeen   time.Time
+	LastSeen    time.Time
+	ResolvedAt  *time.Time
+}

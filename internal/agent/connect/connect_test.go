@@ -36,6 +36,8 @@ func fakeFortiGate(t *testing.T, sessions float64) *httptest.Server {
 			body = env(map[string]any{"wan1": map[string]any{"name": "wan1", "link": true, "ip": "203.0.113.5", "speed": 1000}, "internal": map[string]any{"name": "internal", "link": true}, "dmz": map[string]any{"name": "dmz", "link": false}})
 		case "/api/v2/monitor/vpn/ipsec":
 			body = env([]map[string]any{{"name": "to-hq", "rgwy": "198.51.100.1", "proxyid": []map[string]any{{"p2name": "to-hq-p2", "status": "up", "incoming_bytes": 10, "outgoing_bytes": 20}}}, {"name": "to-branch", "proxyid": []map[string]any{{"p2name": "b", "status": "down"}}}})
+		case "/api/v2/cmdb/system/interface":
+			body = env([]map[string]any{{"name": "wan1", "role": "wan", "allowaccess": "ping https ssh", "status": "up", "type": "physical"}, {"name": "internal", "role": "lan", "allowaccess": "ping https ssh http fgfm", "status": "up", "type": "hard-switch"}, {"name": "dmz", "role": "dmz", "allowaccess": "ping", "status": "up", "type": "physical"}})
 		case "/api/v2/cmdb/system/ha":
 			body = env(map[string]any{"mode": "standalone"})
 		case "/api/v2/monitor/license/status":
@@ -75,6 +77,10 @@ func TestFortiGateReading(t *testing.T) {
 	}
 	if facts["admin_https_port"] != 8443.0 {
 		t.Fatalf("admin port: %v", facts["admin_https_port"])
+	}
+	wan1 := facts["interfaces"].([]any)[2].(map[string]any) // sorted by name: dmz, internal, wan1
+	if wan1["name"] != "wan1" || wan1["role"] != "wan" || wan1["admin"] != "ping https ssh" || wan1["enabled"] != true {
+		t.Fatalf("wan1 config not merged: %v", wan1)
 	}
 	for k, want := range map[string]float64{"cpu_pct": 7, "mem_pct": 41, "sessions": 812, "interfaces_up": 2, "interfaces_down": 1, "ipsec_up": 1, "ipsec_down": 1, "licenses_expired": 1} {
 		if rep.Metrics[k] != want {

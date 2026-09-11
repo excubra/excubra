@@ -205,6 +205,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/boxes/{id}/netbird", s.auth(s.boxNetbird))
 	mux.Handle("POST /api/boxes/{id}/revoke", s.auth(s.boxRevoke))
 	mux.Handle("POST /api/boxes/{id}/delete", s.auth(s.boxDelete))
+	mux.Handle("GET /api/findings", s.auth(s.apiFindings))
+	mux.Handle("GET /api/devices/{id}/findings", s.auth(s.apiDeviceFindings))
 	mux.Handle("GET /api/devices/{id}/connectors", s.auth(s.apiDeviceConnectors))
 	mux.Handle("POST /api/devices/{id}/connectors", s.auth(s.connectorCreate))
 	mux.Handle("POST /api/connectors/{id}/secret", s.auth(s.connectorSecret))

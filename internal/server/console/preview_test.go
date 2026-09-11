@@ -203,13 +203,17 @@ func seedActions(t *testing.T, f *fixture) {
 		}
 		facts := `{"serial":"FGT60FTK21012345","version":"v7.2.8","build":1639,"hostname":"KFT-FW01","model":"FortiGate 60F","log_disk":"available","ha_mode":"standalone",
 			"admin_https_port":8443,"admin_ssh_port":22,"admin_timeout_min":5,"timezone":"Europe/Berlin",
-			"interfaces":[{"name":"wan1","alias":"Telekom","link":true,"ip":"217.0.0.12","speed":1000},{"name":"internal","alias":"LAN","link":true,"ip":"192.168.100.254","speed":1000},{"name":"dmz","alias":"","link":false,"ip":"","speed":0}],
+			"interfaces":[{"name":"wan1","alias":"Telekom","link":true,"ip":"217.0.0.12","speed":1000,"role":"wan","admin":"ping https ssh","enabled":true},{"name":"internal","alias":"LAN","link":true,"ip":"192.168.100.254","speed":1000,"role":"lan","admin":"ping https ssh http","enabled":true},{"name":"dmz","alias":"","link":false,"ip":"","speed":0,"role":"dmz","admin":"ping","enabled":true}],
 			"ipsec":[{"name":"to-viico","gateway":"144.76.67.109","up":true,"phase2":[{"name":"to-viico-p2","status":"up","in_bytes":1284211,"out_bytes":934102}]},{"name":"to-hq","gateway":"198.51.100.1","up":false,"phase2":[{"name":"hq-p2","status":"down"}]}],
 			"licenses":{"forticare":{"status":"registered"},"antivirus":{"status":"licensed","expires":1790000000},"ips":{"status":"licensed","expires":1790000000},"web_filter":{"status":"expired","expires":1750000000}}}`
 		rep := wire.ConnectorReport{ID: c.ID, DeviceID: d.ID, Kind: wire.ConnectorFortiGate, OK: true, CollectedAt: now.Add(-3 * time.Minute), Facts: json.RawMessage(facts),
 			Metrics:        map[string]float64{"cpu_pct": 6, "mem_pct": 38, "sessions": 1240, "disk_pct": 3, "interfaces_up": 2, "interfaces_down": 1, "ipsec_up": 1, "ipsec_down": 1, "licenses_expired": 1},
 			TLSFingerprint: "3c9a0f4d7b1e2a5c6d8f9e0b1a2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4"}
-		if err := f.st.UpdateConnectorReading(ctx, box, rep, now.Add(-3*time.Minute)); err != nil {
+		b, err := f.st.Box(ctx, box)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.eng.Heartbeat(ctx, b, wire.Heartbeat{SentAt: now.Add(-3 * time.Minute), Agent: wire.AgentInfo{Version: "v0.1.0", OS: "linux", Arch: "amd64", SealKey: b.SealKey}, Connectors: []wire.ConnectorReport{rep}}); err != nil {
 			t.Fatal(err)
 		}
 		for i := 0; i < 24; i++ {

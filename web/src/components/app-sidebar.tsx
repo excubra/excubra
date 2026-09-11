@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router"
-import { Activity, Box, Building2, Download, FileClock, KeyRound, LayoutDashboard, LogOut, Search, ShieldCheck, Users, Webhook, Wrench } from "lucide-react"
+import { Activity, Box, Building2, Download, ShieldAlert, FileClock, KeyRound, LayoutDashboard, LogOut, Search, ShieldCheck, Users, Webhook, Wrench } from "lucide-react"
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
   SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarRail,
@@ -11,6 +11,7 @@ const watch = [
   { to: "/", label: "Übersicht", icon: LayoutDashboard },
   { to: "/tenants", label: "Kunden", icon: Building2, count: (m: Me) => m.Nav.Tenants },
   { to: "/events", label: "Ereignisse", icon: Activity, count: (m: Me) => m.Nav.Attention, bad: true },
+  { to: "/findings", label: "Prävention", icon: ShieldAlert, count: (m: Me) => m.Nav.Findings },
   { to: "/maintenance", label: "Wartung", icon: Wrench },
 ]
 const fleet = [
