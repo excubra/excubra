@@ -5,8 +5,10 @@
 #
 #   deploy/update-server.sh root@100.64.0.10
 #
-# Only the binary changes. Configuration, units, timers and data stay as they are; for
-# those, run deploy/deploy.sh (idempotent) instead.
+# The binary and the server unit change. Configuration, timers and data stay as they
+# are; for those, run deploy/deploy.sh (idempotent) instead. Boxes and, from 0.3 on,
+# the server itself update through the portal; this script is for the server until
+# it runs a build that can.
 set -euo pipefail
 TARGET="${1:?usage: deploy/update-server.sh <user@host>}"
 
@@ -27,12 +29,23 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath -mod=readonly \
   -o "$ROOT/dist/excubra_linux_$ARCH" "$ROOT/cmd/excubra"
 
 echo "== installing on $TARGET"
-scp -q -o BatchMode=yes "$ROOT/dist/excubra_linux_$ARCH" "$TARGET:/usr/local/bin/excubra.new"
+scp -q -o BatchMode=yes "$ROOT/dist/excubra_linux_$ARCH" "$TARGET:/root/excubra.new"
+scp -q -o BatchMode=yes "$ROOT/deploy/systemd/excubra-server.service" "$TARGET:/root/excubra-server.service"
 ssh -o BatchMode=yes "$TARGET" 'set -eu
-  chmod 0755 /usr/local/bin/excubra.new
+  install -d -m 0755 -o excubra -g excubra /opt/excubra/bin
+  install -m 0755 -o excubra -g excubra /root/excubra.new /opt/excubra/bin/excubra.new
+  rm -f /root/excubra.new
   echo "   was:  $(/usr/local/bin/excubra version 2>/dev/null || echo none)"
-  echo "   new:  $(/usr/local/bin/excubra.new version)"
-  mv /usr/local/bin/excubra.new /usr/local/bin/excubra   # atomic: never a half-written binary
+  echo "   new:  $(/opt/excubra/bin/excubra.new version)"
+  mv /opt/excubra/bin/excubra.new /opt/excubra/bin/excubra   # atomic: never a half-written binary
+  if [ ! -L /usr/local/bin/excubra ]; then rm -f /usr/local/bin/excubra; fi
+  ln -sfn /opt/excubra/bin/excubra /usr/local/bin/excubra
+  if ! cmp -s /root/excubra-server.service /etc/systemd/system/excubra-server.service; then
+    install -m 0644 /root/excubra-server.service /etc/systemd/system/excubra-server.service
+    systemctl daemon-reload
+    echo "   unit updated"
+  fi
+  rm -f /root/excubra-server.service
   systemctl restart excubra-server
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1

@@ -10,13 +10,17 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/excubra/excubra/internal/agent/update"
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/api"
@@ -24,6 +28,7 @@ import (
 	"github.com/excubra/excubra/internal/server/console"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/ingest"
+	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/server/webhook"
 	"github.com/excubra/excubra/internal/version"
@@ -64,6 +69,18 @@ func run(envFile string) error {
 	slog.SetDefault(log)
 	log.Info("excubra server starting", "version", version.Version, "data", cfg.DataDir)
 
+	// self-update (ADR-0006): a build that never confirmed its health is rolled back
+	// before anything else runs; the roll-back itself ends in exit code 75
+	upd, err := update.New(cfg.DataDir, log)
+	if err != nil {
+		return err
+	}
+	upd.Trial = serverTrial(envFile)
+	if err := upd.RollbackIfStale(); err != nil {
+		return err
+	}
+	rolledBack, wasRolledBack := upd.RolledBack()
+
 	if err := waitForOverlayAddress(cfg, log); err != nil {
 		return err
 	}
@@ -72,6 +89,10 @@ func run(envFile string) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
+	if wasRolledBack {
+		log.Warn("self-update rolled back", "failed_version", rolledBack.To, "restored", rolledBack.From)
+		_ = st.Audit(context.Background(), time.Now(), "server", "server.update.rolled_back", rolledBack.To, "restored "+rolledBack.From+": the new build did not confirm within 5 minutes")
+	}
 
 	caDir := filepath.Join(cfg.DataDir, "ca")
 	ca, err := pki.LoadOrCreateCA(caDir)
@@ -160,19 +181,45 @@ func run(envFile string) error {
 		overlaySrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{oc}}
 	}
 
+	// bind first, serve second: a port that is taken fails now, and a freshly
+	// installed build has proven itself once both listeners are up
+	var lc net.ListenConfig
+	ingestLn, err := lc.Listen(ctx, "tcp", cfg.IngestListen)
+	if err != nil {
+		return fmt.Errorf("ingest listener: %w", err)
+	}
+	overlayLn, err := lc.Listen(ctx, "tcp", cfg.OverlayListen)
+	if err != nil {
+		return fmt.Errorf("overlay listener: %w", err)
+	}
 	errc := make(chan error, 2)
 	go func() {
 		log.Info("ingest listening", "addr", cfg.IngestListen)
-		errc <- ingestSrv.ListenAndServeTLS("", "")
+		errc <- ingestSrv.ServeTLS(ingestLn, "", "")
 	}()
 	go func() {
 		log.Info("overlay listening", "addr", cfg.OverlayListen, "tls", cfg.OverlayTLS)
 		if overlaySrv.TLSConfig != nil {
-			errc <- overlaySrv.ListenAndServeTLS("", "")
+			errc <- overlaySrv.ServeTLS(overlayLn, "", "")
 		} else {
-			errc <- overlaySrv.ListenAndServe()
+			errc <- overlaySrv.Serve(overlayLn)
 		}
 	}()
+	upd.Confirm()
+
+	restartc := make(chan error, 1)
+	su := selfupdate.New(st, upd, cfg.DataDir, runtime.GOOS, runtime.GOARCH, cfg.SelfUpdate == "on", log)
+	if wasRolledBack {
+		su.NoteRollback(rolledBack)
+	}
+	con.SelfUpdate = su
+	if cfg.SelfUpdate == "on" {
+		go func() {
+			if err := su.Run(ctx); err != nil {
+				restartc <- err
+			}
+		}()
+	}
 	go eng.RunTicker(ctx, 10*time.Second)
 	if cfg.ReleaseCatalog != "" && cfg.ReleaseCatalog != "off" {
 		// release metadata from the project's published releases, hourly (ADR-0006)
@@ -197,6 +244,7 @@ func run(envFile string) error {
 		}()
 	}
 
+	var result error
 	select {
 	case <-ctx.Done():
 		log.Info("shutting down")
@@ -205,12 +253,35 @@ func run(envFile string) error {
 			stop()
 			return fmt.Errorf("listener: %w", err)
 		}
+	case err := <-restartc:
+		// the self-update swapped the binary: drain, then exit 75 so systemd starts the new one
+		log.Info("self-update installed, restarting")
+		result = err
+		stop()
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = ingestSrv.Shutdown(shutdownCtx)
 	_ = overlaySrv.Shutdown(shutdownCtx)
-	return nil
+	return result
+}
+
+// serverTrial is the updater's trial run for a candidate server binary: it must
+// start, read the configuration and see the data directory.
+func serverTrial(envFile string) func(ctx context.Context, candidate string) error {
+	return func(ctx context.Context, candidate string) error {
+		ctx, cancel := context.WithTimeout(ctx, update.TrialTime)
+		defer cancel()
+		args := []string{"server", "selftest"}
+		if envFile != "" {
+			args = append(args, "--env-file", envFile)
+		}
+		out, err := exec.CommandContext(ctx, candidate, args...).CombinedOutput() //nolint:gosec // the candidate passed sha256 and signature checks
+		if err != nil {
+			return fmt.Errorf("selftest failed: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
 }
 
 // renewLoop reissues the ingest certificate when it approaches expiry.

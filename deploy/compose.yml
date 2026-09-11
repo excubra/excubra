@@ -11,6 +11,7 @@ services:
       # port mapping below restricts it to the host's NetBird address
       EXCUBRA_OVERLAY_LISTEN: "0.0.0.0:8080"
       EXCUBRA_OVERLAY_ALLOW_ANY: "1"
+      EXCUBRA_SELF_UPDATE: "off"   # the image is the update
     ports:
       - "443:8443"                 # public ingest
       - "100.64.0.10:8080:8080"    # console + API, NetBird interface only

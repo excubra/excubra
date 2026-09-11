@@ -19,6 +19,7 @@ import (
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/core"
+	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/version"
 )
@@ -36,16 +37,17 @@ var webdistFS embed.FS
 
 // Server holds the console handlers.
 type Server struct {
-	Engine   *core.Engine
-	Store    *store.Store
-	CA       *pki.CA
-	Log      *slog.Logger
-	Now      func() time.Time
-	Loc      *time.Location
-	Secure   bool   // set the Secure flag on cookies (overlay TLS on)
-	Ingest   string // host of the ingest, for enrollment keys
-	IngestPt int
-	Catalog  *catalog.Client // release catalog, nil when disabled (ADR-0006)
+	Engine     *core.Engine
+	Store      *store.Store
+	CA         *pki.CA
+	Log        *slog.Logger
+	Now        func() time.Time
+	Loc        *time.Location
+	Secure     bool   // set the Secure flag on cookies (overlay TLS on)
+	Ingest     string // host of the ingest, for enrollment keys
+	IngestPt   int
+	Catalog    *catalog.Client        // release catalog, nil when disabled (ADR-0006)
+	SelfUpdate *selfupdate.Controller // this server's own updates, nil in tests
 
 	pages    map[string]*template.Template
 	partials *template.Template
@@ -223,6 +225,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/updates/channel", s.auth(s.updatesChannel))
 	mux.Handle("POST /api/updates/rollout", s.auth(s.updatesRollout))
 	mux.Handle("POST /api/updates/catalog", s.auth(s.updatesCatalog))
+	mux.Handle("POST /api/updates/server", s.auth(s.updatesServer))
+	mux.Handle("POST /api/updates/server-channel", s.auth(s.updatesServerChannel))
 	mux.Handle("POST /api/ack", s.auth(s.ackSet))
 	mux.Handle("POST /api/ack/delete", s.auth(s.ackDelete))
 	mux.Handle("GET /api/maintenance", s.auth(s.apiMaintenance))

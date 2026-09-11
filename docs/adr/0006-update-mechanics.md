@@ -97,3 +97,13 @@ GitHub over HTTPS and verify. No organisation, no key, no password manager. Only
 fork that builds its own binaries needs its own key pair (replace `release.pub`,
 sign with the matching private key, point `EXCUBRA_RELEASE_CATALOG` at its own
 releases). A LAN that blocks GitHub will get a mirror through the ingest later.
+
+**Server self-update (2026-09-11).** Same updater, same procedure as the box:
+`internal/server/selfupdate` follows the setting `server.channel` (stable, canary or
+off), checks daily and on request (console button, `excubra server update now`,
+which writes `<datadir>/update/now`), verifies against the compiled-in key, trial-runs
+`excubra server selftest`, swaps and exits 75; the new process confirms once both
+listeners are bound, otherwise the next start rolls back and audits it. The binary
+lives in `/opt/excubra/bin` (owned by the service user, in `ReadWritePaths`), with
+`/usr/local/bin/excubra` as a symlink for people. `EXCUBRA_SELF_UPDATE=off` in
+containers, where the image is the update.

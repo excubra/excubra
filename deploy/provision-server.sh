@@ -118,8 +118,12 @@ install -d -m 0750 -o root -g excubra /etc/excubra
 install -d -m 0750 -o excubra -g excubra /var/backups/excubra
 
 echo "== binary"
-install -m 0755 "$BINARY" /usr/local/bin/excubra.new
-mv /usr/local/bin/excubra.new /usr/local/bin/excubra   # atomic: never a half-written binary
+# lives where the service user may swap it (self-update, ADR-0006); the symlink is for people
+install -d -m 0755 -o excubra -g excubra /opt/excubra/bin
+install -m 0755 -o excubra -g excubra "$BINARY" /opt/excubra/bin/excubra.new
+mv /opt/excubra/bin/excubra.new /opt/excubra/bin/excubra   # atomic: never a half-written binary
+rm -f /usr/local/bin/excubra.new
+ln -sfn /opt/excubra/bin/excubra /usr/local/bin/excubra
 /usr/local/bin/excubra version
 
 echo "== configuration"
