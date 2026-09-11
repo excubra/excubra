@@ -481,27 +481,22 @@ type hostData struct {
 	Tab          string
 }
 
-func (s *Server) hostPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	v, err := s.Engine.HostView(ctx, r.PathValue("id"))
+func (s *Server) buildHost(ctx context.Context, hostID, tab string) (hostData, error) {
+	v, err := s.Engine.HostView(ctx, hostID)
 	if err != nil {
-		s.fail(w, r, err, http.StatusNotFound)
-		return
+		return hostData{}, err
 	}
 	d := hostData{View: v, Row: s.hostRow(v), Form: checksToForm(v.Checks)}
 	if d.Box, err = s.Store.Box(ctx, v.BoxID); err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return hostData{}, err
 	}
 	if d.Site, err = s.Store.Site(ctx, v.SiteID); err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return hostData{}, err
 	}
 	d.Tenant, _ = s.Store.Tenant(ctx, v.TenantID)
 	all, err := s.Store.Hosts(ctx, "", v.BoxID)
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return hostData{}, err
 	}
 	for _, h := range all {
 		if h.ID != v.ID {
@@ -514,23 +509,21 @@ func (s *Server) hostPage(w http.ResponseWriter, r *http.Request) {
 	now := s.Now()
 	av, err := s.availability(ctx, v.TenantID, v.ID, now)
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return hostData{}, err
 	}
 	d.Rounds, d.Failed, d.Availability, d.Hours = av.Rounds, av.Failed, av.Pct, av.Hours
 	evs, err := s.Store.Events(ctx, v.TenantID, now.Add(-24*time.Hour), now.Add(time.Minute), v.ID, 100)
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return hostData{}, err
 	}
 	for i := len(evs) - 1; i >= 0; i-- { // newest first
 		d.Events = append(d.Events, recentEvent{Event: evs[i], TenantName: d.Tenant.Name, SiteName: d.Site.Name, Class: eventClass(evs[i].Type), Title: eventTitle(evs[i]), Info: eventInfo(evs[i])})
 	}
-	d.Tab = r.URL.Query().Get("tab")
+	d.Tab = tab
 	if d.Tab != "verlauf" && d.Tab != "einstellungen" {
 		d.Tab = "allgemein"
 	}
-	s.render(w, r, "host", v.Name, d)
+	return d, nil
 }
 
 func (s *Server) hostUpdate(w http.ResponseWriter, r *http.Request) {
@@ -542,7 +535,7 @@ func (s *Server) hostUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	checks, err := checksFromForm(r)
 	if err != nil {
-		s.flash(w, r, "Nicht gespeichert: "+err.Error(), "/hosts/"+h.ID)
+		s.flashErr(w, r, "Nicht gespeichert: "+err.Error(), "/hosts/"+h.ID)
 		return
 	}
 	h.Name = strings.TrimSpace(r.PostForm.Get("name"))
@@ -551,11 +544,11 @@ func (s *Server) hostUpdate(w http.ResponseWriter, r *http.Request) {
 	h.IsUplink = r.PostForm.Get("is_uplink") == "1"
 	h.Checks = checks
 	if h.Name == "" || h.Address == "" {
-		s.flash(w, r, "Name und Adresse sind Pflicht.", "/hosts/"+h.ID)
+		s.flashErr(w, r, "Name und Adresse sind Pflicht.", "/hosts/"+h.ID)
 		return
 	}
 	if err := s.Engine.UpdateHost(ctx, h, actor(r)); err != nil {
-		s.flash(w, r, "Nicht gespeichert: "+err.Error(), "/hosts/"+h.ID)
+		s.flashErr(w, r, "Nicht gespeichert: "+err.Error(), "/hosts/"+h.ID)
 		return
 	}
 	s.flash(w, r, "Gespeichert.", "/hosts/"+h.ID)
@@ -592,12 +585,12 @@ func (s *Server) hostMaintenance(w http.ResponseWriter, r *http.Request) {
 	}
 	until, err := formTime(r.PostForm.Get("until"), s.Loc)
 	if err != nil {
-		s.flash(w, r, err.Error(), "/hosts/"+h.ID)
+		s.flashErr(w, r, err.Error(), "/hosts/"+h.ID)
 		return
 	}
 	m := store.Maintenance{TenantID: h.TenantID, SiteID: h.SiteID, Scope: "host", TargetID: h.ID, Until: until, Reason: strings.TrimSpace(r.PostForm.Get("reason"))}
 	if err := s.Engine.StartMaintenance(ctx, m, actor(r)); err != nil {
-		s.flash(w, r, "Wartung nicht gesetzt: "+err.Error(), "/hosts/"+h.ID)
+		s.flashErr(w, r, "Wartung nicht gesetzt: "+err.Error(), "/hosts/"+h.ID)
 		return
 	}
 	s.flash(w, r, "Wartung gesetzt bis "+until.In(s.Loc).Format("02.01.2006 15:04")+".", "/hosts/"+h.ID)
@@ -610,17 +603,14 @@ type boxesData struct {
 	Assigned   []boxRow
 }
 
-func (s *Server) boxesPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (s *Server) buildBoxes(ctx context.Context) (boxesData, error) {
 	boxes, err := s.Store.Boxes(ctx, "")
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return boxesData{}, err
 	}
 	tm, sm, err := s.lookups(ctx)
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return boxesData{}, err
 	}
 	var d boxesData
 	for _, b := range boxes {
@@ -634,7 +624,7 @@ func (s *Server) boxesPage(w http.ResponseWriter, r *http.Request) {
 			d.Unassigned = append(d.Unassigned, row)
 		}
 	}
-	s.render(w, r, "boxes", "Boxen", d)
+	return d, nil
 }
 
 type boxData struct {
@@ -647,45 +637,36 @@ type boxData struct {
 	Subnets     string
 }
 
-func (s *Server) boxPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	b, err := s.Store.Box(ctx, r.PathValue("id"))
+func (s *Server) buildBox(ctx context.Context, boxID string) (boxData, error) {
+	b, err := s.Store.Box(ctx, boxID)
 	if err != nil {
-		s.fail(w, r, err, http.StatusNotFound)
-		return
+		return boxData{}, err
 	}
 	tm, sm, err := s.lookups(ctx)
 	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return boxData{}, err
 	}
 	d := boxData{Row: s.boxRow(b, sm, tm), Fingerprint: s.CA.Fingerprint(), TenantNames: map[string]string{}, Subnets: strings.Join(b.DiscoverySubnets, "\n")}
 	for _, t := range tm {
 		d.TenantNames[t.ID] = t.Name
 	}
 	if d.Sites, err = s.Store.Sites(ctx, ""); err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return boxData{}, err
 	}
 	if d.Hosts, err = s.Store.Hosts(ctx, "", b.ID); err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return boxData{}, err
 	}
 	if nk, err := s.Store.NetbirdKey(ctx, b.ID); err == nil {
 		d.Netbird = &nk
 	}
-	title := b.Name
-	if title == "" {
-		title = b.ID
-	}
-	s.render(w, r, "box", title, d)
+	return d, nil
 }
 
 func (s *Server) boxAssign(w http.ResponseWriter, r *http.Request) {
 	boxID := r.PathValue("id")
 	siteID := strings.TrimSpace(r.PostForm.Get("site_id"))
 	if err := s.Engine.AssignBox(r.Context(), boxID, siteID, actor(r)); err != nil {
-		s.flash(w, r, "Zuordnung fehlgeschlagen: "+err.Error(), "/boxes/"+boxID)
+		s.flashErr(w, r, "Zuordnung fehlgeschlagen: "+err.Error(), "/boxes/"+boxID)
 		return
 	}
 	if siteID == "" {
@@ -717,13 +698,13 @@ func (s *Server) boxSettings(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if !strings.Contains(line, "/") {
-			s.flash(w, r, "Subnetze in CIDR-Schreibweise angeben, z. B. 192.168.10.0/24", "/boxes/"+boxID)
+			s.flashErr(w, r, "Subnetze in CIDR-Schreibweise angeben, z. B. 192.168.10.0/24", "/boxes/"+boxID)
 			return
 		}
 		subnets = append(subnets, line)
 	}
 	if len(subnets) > 8 {
-		s.flash(w, r, "Höchstens acht zusätzliche Subnetze.", "/boxes/"+boxID)
+		s.flashErr(w, r, "Höchstens acht zusätzliche Subnetze.", "/boxes/"+boxID)
 		return
 	}
 	if err := errors.Join(
@@ -757,7 +738,7 @@ func (s *Server) boxNetbird(w http.ResponseWriter, r *http.Request) {
 	u := strings.TrimSpace(r.PostForm.Get("management_url"))
 	k := strings.TrimSpace(r.PostForm.Get("setup_key"))
 	if !strings.HasPrefix(u, "https://") || k == "" {
-		s.flash(w, r, "Management-URL (https://…) und Setup-Key sind Pflicht.", "/boxes/"+boxID)
+		s.flashErr(w, r, "Management-URL (https://…) und Setup-Key sind Pflicht.", "/boxes/"+boxID)
 		return
 	}
 	if err := s.Store.SetNetbirdKey(ctx, store.NetbirdKey{BoxID: boxID, ManagementURL: u, SetupKey: k, CreatedAt: s.Now()}); err != nil {
@@ -847,11 +828,11 @@ func (s *Server) tenantCreate(w http.ResponseWriter, r *http.Request) {
 	tid, err := id.FromSlug("ten", r.PostForm.Get("slug"))
 	name := strings.TrimSpace(r.PostForm.Get("name"))
 	if err != nil || name == "" {
-		s.flash(w, r, "Kürzel (a-z, 0-9, Bindestrich) und Name sind Pflicht.", "/tenants")
+		s.flashErr(w, r, "Kürzel (a-z, 0-9, Bindestrich) und Name sind Pflicht.", "/tenants")
 		return
 	}
 	if err := s.Store.CreateTenant(ctx, store.Tenant{ID: tid, Name: name, CreatedAt: s.Now()}); err != nil {
-		s.flash(w, r, "Mandant nicht angelegt: "+err.Error(), "/tenants")
+		s.flashErr(w, r, "Mandant nicht angelegt: "+err.Error(), "/tenants")
 		return
 	}
 	_ = s.Store.Audit(ctx, s.Now(), actor(r), "tenant.create", tid, name)
@@ -868,11 +849,11 @@ func (s *Server) siteCreate(w http.ResponseWriter, r *http.Request) {
 	sid, err := id.FromSlug("site", r.PostForm.Get("slug"))
 	name := strings.TrimSpace(r.PostForm.Get("name"))
 	if err != nil || name == "" {
-		s.flash(w, r, "Kürzel (a-z, 0-9, Bindestrich) und Name sind Pflicht.", "/tenants")
+		s.flashErr(w, r, "Kürzel (a-z, 0-9, Bindestrich) und Name sind Pflicht.", "/tenants")
 		return
 	}
 	if err := s.Engine.CreateSite(ctx, store.Site{ID: sid, TenantID: tenantID, Name: name, CreatedAt: s.Now()}, actor(r)); err != nil {
-		s.flash(w, r, "Standort nicht angelegt: "+err.Error(), "/tenants")
+		s.flashErr(w, r, "Standort nicht angelegt: "+err.Error(), "/tenants")
 		return
 	}
 	s.flash(w, r, "Standort "+sid+" angelegt.", "/tenants")
@@ -908,13 +889,13 @@ func (s *Server) deviceMonitor(w http.ResponseWriter, r *http.Request) {
 	back := "/sites/" + dev.SiteID + "?tab=netz"
 	checks, err := checksFromForm(r)
 	if err != nil {
-		s.flash(w, r, err.Error(), back)
+		s.flashErr(w, r, err.Error(), back)
 		return
 	}
 	boxID := strings.TrimSpace(r.PostForm.Get("box_id"))
 	box, err := s.Store.Box(ctx, boxID)
 	if err != nil || box.SiteID != dev.SiteID || box.RevokedAt != nil {
-		s.flash(w, r, "Bitte eine Box dieses Standorts wählen.", back)
+		s.flashErr(w, r, "Bitte eine Box dieses Standorts wählen.", back)
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("name"))
@@ -924,18 +905,18 @@ func (s *Server) deviceMonitor(w http.ResponseWriter, r *http.Request) {
 	hostID := id.New("host")
 	if slug := strings.TrimSpace(r.PostForm.Get("slug")); slug != "" {
 		if hostID, err = id.FromSlug("host", slug); err != nil {
-			s.flash(w, r, err.Error(), back)
+			s.flashErr(w, r, err.Error(), back)
 			return
 		}
 	}
 	h := store.Host{ID: hostID, TenantID: dev.TenantID, SiteID: dev.SiteID, BoxID: box.ID, DeviceID: dev.ID, Name: name, Address: dev.IP,
 		MAC: dev.MAC, Vendor: dev.Vendor, IsUplink: r.PostForm.Get("is_uplink") == "1", Checks: checks, CreatedAt: s.Now()}
 	if h.Address == "" {
-		s.flash(w, r, "Gerät hat keine IP-Adresse; erst abwarten, bis eine gesehen wurde.", back)
+		s.flashErr(w, r, "Gerät hat keine IP-Adresse; erst abwarten, bis eine gesehen wurde.", back)
 		return
 	}
 	if err := s.Engine.CreateHost(ctx, h, actor(r)); err != nil {
-		s.flash(w, r, "Nicht angelegt: "+err.Error(), back)
+		s.flashErr(w, r, "Nicht angelegt: "+err.Error(), back)
 		return
 	}
 	s.flash(w, r, "Host wird überwacht.", "/hosts/"+h.ID)
@@ -971,21 +952,17 @@ type maintenanceData struct {
 	Hosts   []store.Host
 }
 
-func (s *Server) maintenancePage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (s *Server) buildMaintenance(ctx context.Context) (maintenanceData, error) {
 	var d maintenanceData
 	var err error
 	if d.Tenants, err = s.Store.Tenants(ctx); err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return maintenanceData{}, err
 	}
 	if d.Sites, err = s.Store.Sites(ctx, ""); err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return maintenanceData{}, err
 	}
 	if d.Hosts, err = s.Store.Hosts(ctx, "", ""); err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
+		return maintenanceData{}, err
 	}
 	names := map[string]string{}
 	for _, t := range d.Tenants {
@@ -1000,7 +977,7 @@ func (s *Server) maintenancePage(w http.ResponseWriter, r *http.Request) {
 	for _, wnd := range s.Engine.Maintenances() {
 		d.Windows = append(d.Windows, windowRow{Maintenance: wnd, TargetName: firstNonEmpty(names[wnd.TargetID], wnd.TargetID)})
 	}
-	s.render(w, r, "maintenance", "Wartung", d)
+	return d, nil
 }
 
 func (s *Server) maintenanceCreate(w http.ResponseWriter, r *http.Request) {
@@ -1008,37 +985,37 @@ func (s *Server) maintenanceCreate(w http.ResponseWriter, r *http.Request) {
 	scope, target := r.PostForm.Get("scope"), strings.TrimSpace(r.PostForm.Get("target_id"))
 	until, err := formTime(r.PostForm.Get("until"), s.Loc)
 	if err != nil {
-		s.flash(w, r, err.Error(), "/maintenance")
+		s.flashErr(w, r, err.Error(), "/maintenance")
 		return
 	}
 	m := store.Maintenance{Scope: scope, TargetID: target, Until: until, Reason: strings.TrimSpace(r.PostForm.Get("reason"))}
 	switch scope {
 	case "tenant":
 		if _, err := s.Store.Tenant(ctx, target); err != nil {
-			s.flash(w, r, "Mandant nicht gefunden.", "/maintenance")
+			s.flashErr(w, r, "Mandant nicht gefunden.", "/maintenance")
 			return
 		}
 		m.TenantID = target
 	case "site":
 		site, err := s.Store.Site(ctx, target)
 		if err != nil {
-			s.flash(w, r, "Standort nicht gefunden.", "/maintenance")
+			s.flashErr(w, r, "Standort nicht gefunden.", "/maintenance")
 			return
 		}
 		m.TenantID, m.SiteID = site.TenantID, site.ID
 	case "host":
 		h, err := s.Store.Host(ctx, target)
 		if err != nil {
-			s.flash(w, r, "Host nicht gefunden.", "/maintenance")
+			s.flashErr(w, r, "Host nicht gefunden.", "/maintenance")
 			return
 		}
 		m.TenantID, m.SiteID = h.TenantID, h.SiteID
 	default:
-		s.flash(w, r, "Bereich muss Mandant, Standort oder Host sein.", "/maintenance")
+		s.flashErr(w, r, "Bereich muss Mandant, Standort oder Host sein.", "/maintenance")
 		return
 	}
 	if err := s.Engine.StartMaintenance(ctx, m, actor(r)); err != nil {
-		s.flash(w, r, "Wartung nicht gesetzt: "+err.Error(), "/maintenance")
+		s.flashErr(w, r, "Wartung nicht gesetzt: "+err.Error(), "/maintenance")
 		return
 	}
 	s.flash(w, r, "Wartung gesetzt.", "/maintenance")
@@ -1121,7 +1098,7 @@ func (s *Server) webhookCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name, u, scope, err := validTargetForm(r)
 	if err != nil {
-		s.flash(w, r, err.Error(), "/webhooks")
+		s.flashErr(w, r, err.Error(), "/webhooks")
 		return
 	}
 	t := store.WebhookTarget{ID: id.New("tgt"), Name: name, URL: u, Secret: id.Secret(32), TenantScope: scope, Enabled: true, CreatedAt: s.Now()}
@@ -1148,7 +1125,7 @@ func (s *Server) webhookUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	name, u, scope, err := validTargetForm(r)
 	if err != nil {
-		s.flash(w, r, err.Error(), "/webhooks")
+		s.flashErr(w, r, err.Error(), "/webhooks")
 		return
 	}
 	t.Name, t.URL, t.TenantScope, t.Enabled, t.Secret = name, u, scope, r.PostForm.Get("enabled") == "1", ""
@@ -1198,12 +1175,12 @@ func (s *Server) webhookTest(w http.ResponseWriter, r *http.Request) {
 		tenantID = t.TenantScope
 	}
 	if tenantID == "" {
-		s.flash(w, r, "Für den Test einen Mandanten wählen.", "/webhooks")
+		s.flashErr(w, r, "Für den Test einen Mandanten wählen.", "/webhooks")
 		return
 	}
 	ev, err := s.Engine.TestPing(ctx, tenantID, t.ID, actor(r))
 	if err != nil {
-		s.flash(w, r, "Test nicht ausgelöst: "+err.Error(), "/webhooks")
+		s.flashErr(w, r, "Test nicht ausgelöst: "+err.Error(), "/webhooks")
 		return
 	}
 	s.flash(w, r, "test.ping "+ev.ID+" eingereiht — Zustellstatus erscheint unten, falls sie fehlschlägt.", "/webhooks")
@@ -1301,7 +1278,7 @@ func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name := strings.TrimSpace(r.PostForm.Get("name"))
 	if name == "" {
-		s.flash(w, r, "Name ist Pflicht.", "/tokens")
+		s.flashErr(w, r, "Name ist Pflicht.", "/tokens")
 		return
 	}
 	tenants := r.PostForm["tenants"]
@@ -1353,4 +1330,40 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request) {
 		d.Next = entries[len(entries)-1].ID
 	}
 	s.render(w, r, "audit", "Audit-Log", d)
+}
+
+func (s *Server) boxesPage(w http.ResponseWriter, r *http.Request) {
+	d, err := s.buildBoxes(r.Context())
+	if err != nil {
+		s.fail(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, "boxes", "Boxen", d)
+}
+
+func (s *Server) boxPage(w http.ResponseWriter, r *http.Request) {
+	d, err := s.buildBox(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.fail(w, r, err, statusFor(err))
+		return
+	}
+	s.render(w, r, "box", firstNonEmpty(d.Row.Name, d.Row.ID), d)
+}
+
+func (s *Server) hostPage(w http.ResponseWriter, r *http.Request) {
+	d, err := s.buildHost(r.Context(), r.PathValue("id"), r.URL.Query().Get("tab"))
+	if err != nil {
+		s.fail(w, r, err, statusFor(err))
+		return
+	}
+	s.render(w, r, "host", d.View.Name, d)
+}
+
+func (s *Server) maintenancePage(w http.ResponseWriter, r *http.Request) {
+	d, err := s.buildMaintenance(r.Context())
+	if err != nil {
+		s.fail(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, "maintenance", "Wartung", d)
 }

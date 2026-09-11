@@ -28,14 +28,18 @@ See [docs/adr](docs/adr/README.md) for the architecture decisions; they are bind
 
 ## Build
 
-Requires the Go version in `go.mod`.
+Requires the Go version in `go.mod` and, for the console, Node 22 with npm.
 
 ```
-make build        # bin/excubra for this machine
+make build        # bin/excubra for this machine (builds and embeds the console first)
 make release      # static Linux amd64 + arm64 in dist/
 make test         # unit tests
-make lint         # go vet + golangci-lint
+make lint         # go vet + golangci-lint + console type-check and lint
+make web          # only the console: web/ → internal/server/console/webdist
 ```
+
+`go build ./cmd/excubra` on its own still works without Node; the binary then serves a
+placeholder page under `/app/` instead of the console (ADR-0013).
 
 ## Licence
 

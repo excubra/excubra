@@ -35,6 +35,13 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.13
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: console type-check and lint
+        run: make web-check
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -51,13 +58,20 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: build console
+        run: make web
       - name: build static binary
         env:
           CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
         run: |
-          VERSION=$(git describe --tags --always --dirty)
+          VERSION=$(sh scripts/version.sh)
           go build -trimpath -mod=readonly \
             -ldflags "-s -w -X github.com/excubra/excubra/internal/version.Version=$VERSION -X github.com/excubra/excubra/internal/version.Commit=${GITHUB_SHA::7} -X github.com/excubra/excubra/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o dist/excubra_linux_${{ matrix.arch }} ./cmd/excubra

@@ -8,16 +8,24 @@ LDFLAGS := -s -w \
   -X $(MODULE)/internal/version.Date=$(DATE)
 GOFLAGS := -trimpath -mod=readonly
 
-.PHONY: all build release test lint integration fixtures tidy-check clean
+.PHONY: all build release test lint integration fixtures tidy-check clean web web-check
 
 all: build
 
-## build: host binary in bin/ (CGO off, like every shipped build)
-build:
+## web: build the single-page console into internal/server/console/webdist (Node 22 + npm)
+web:
+	sh scripts/web-build.sh
+
+## web-check: type-check and lint the console sources without building
+web-check:
+	sh scripts/web-build.sh --check
+
+## build: host binary in bin/ (CGO off, like every shipped build); embeds the console
+build: web
 	CGO_ENABLED=0 go build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o bin/excubra ./cmd/excubra
 
 ## release: static Linux binaries for amd64 and arm64 plus SHA256SUMS in dist/
-release:
+release: web
 	rm -rf dist && mkdir -p dist
 	for arch in amd64 arm64; do \
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build $(GOFLAGS) -ldflags '$(LDFLAGS)' \
@@ -33,6 +41,7 @@ test:
 lint:
 	go vet ./...
 	golangci-lint run
+	sh scripts/web-build.sh --check
 
 ## integration: end-to-end test through Docker (build tag integration)
 integration:

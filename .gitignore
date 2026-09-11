@@ -19,3 +19,8 @@ coverage.*
 .idea/
 .vscode/
 *.swp
+
+# console build — `make web` produces webdist/, go build embeds it
+/web/node_modules/
+/internal/server/console/webdist/*
+!/internal/server/console/webdist/unbuilt.html
