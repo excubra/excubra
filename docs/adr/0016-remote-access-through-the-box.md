@@ -12,12 +12,17 @@ opened at the customer.
 
 ## Decision
 
-1. **The box is a second peer, in the operator's own stack.** A second NetBird
-   daemon on the box (`netbird-operator.service`: own config, socket
-   `/var/run/netbird-operator.sock`, interface `wt1`, port 51821, installed by
-   `image/provision-box.sh`) joins the operator's stack and routes the LAN there.
-   The customer's stack, its users and its policies are untouched; the two overlays
-   share only the box.
+1. **The box is a second peer, in the operator's own stack, in its own network
+   namespace.** `netbird-operator.service` runs a second NetBird daemon inside the
+   namespace `operator`, which owns a macvlan interface on the LAN with an address
+   of its own from DHCP (`image/netbird-operator-netns.sh`). It has its own
+   WireGuard interface, its own firewall table and its own routes; the customer's
+   daemon in the root namespace never sees it. The socket
+   `/var/run/netbird-operator.sock` is what the agent talks to. Installed only with
+   `provision-box.sh --operator-peer`. *Why the namespace:* two NetBird daemons in
+   one namespace share one nftables table, and the second wipes the first's routing
+   rules on start — that cut the pilot customer's LAN on 12.09.2026 for a quarter of
+   an hour. A unit without the namespace is removed by the provisioning script.
 2. **EX0 wires the operator's stack through its API.** Settings on the server: the
    management URL and an API token of a dedicated admin user of *our* stack (this is
    our infrastructure, not a customer's; the token is revocable there). Switching a
@@ -50,8 +55,11 @@ opened at the customer.
 
 ## Consequences
 
-- Existing boxes need one provisioning run to get the second daemon; images built
-  from now on carry it.
+- Existing boxes get the operator peer only through an explicit
+  `provision-box.sh --operator-peer`, after the namespace setup was tried on our own
+  infrastructure first; images do not carry it by default.
+- The LAN must offer DHCP (or `OPERATOR_LAN_IF` and a static address later); the
+  host kernel must have macvlan.
 - The operator stack's token on the server can create networks and policies there;
   it belongs to a dedicated admin user, is audited on every use and can be revoked
   in the NetBird dashboard.
