@@ -55,6 +55,8 @@ func Main(args []string) error {
 		return selftestCmd(args)
 	case "update":
 		return updateCmd(args)
+	case "setting":
+		return settingCmd(args)
 	case "backup":
 		return backupCmd(args)
 	case "prune":
