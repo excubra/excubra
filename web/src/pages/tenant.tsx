@@ -30,6 +30,11 @@ export default function TenantPage() {
     onSuccess: (r) => { toast.success(r.message); setOpen(false); setSlug(""); setName(""); qc.invalidateQueries({ queryKey: ["tenant", id] }) },
     onError: (e) => toast.error(e.message),
   })
+  const aiSet = useMutation({
+    mutationFn: (scope: string) => post(`/api/tenants/${id}/ai`, { scope }),
+    onSuccess: (r) => { toast.success(r.message); qc.invalidateQueries({ queryKey: ["tenant", id] }) },
+    onError: (e) => toast.error(e.message),
+  })
   const d = q.data
   const cols: ColumnDef<SiteCard, unknown>[] = [
     { id: "site", header: "Standort", accessorFn: (r) => r.Site.Name, cell: ({ row }) => <div><div className="font-medium">{row.original.Site.Name}</div><div className="font-mono text-xs text-muted-foreground">{row.original.Site.ID}</div></div> },
@@ -64,6 +69,14 @@ export default function TenantPage() {
             </DialogContent>
           </Dialog>
         } />
+      <section className="flex flex-wrap items-center gap-3 rounded-md border bg-card px-4 py-3 text-sm">
+        <span className="font-medium">KI-Auswertung</span>
+        <span className="text-muted-foreground">Was das Modell von diesem Kunden sehen darf. Aus: nichts verlässt den Server. Facts: Inventar, Dienste, Findings, Ereignisse, Konnektor-Facts, keine Zugangsdaten, keine Logs. Voraussetzung: Auftragsverarbeitung mit dem Anbieter und Zustimmung des Kunden.</span>
+        <div className="ml-auto flex gap-2">
+          <Button size="sm" variant={d.tenant.AIScope === "facts" ? "default" : "outline"} onClick={() => aiSet.mutate("facts")} disabled={aiSet.isPending || d.tenant.AIScope === "facts"}>Facts</Button>
+          <Button size="sm" variant={d.tenant.AIScope !== "facts" ? "default" : "outline"} onClick={() => aiSet.mutate("off")} disabled={aiSet.isPending || d.tenant.AIScope !== "facts"}>Aus</Button>
+        </div>
+      </section>
       <section className="flex flex-col gap-3">
         <h2 className="text-base font-semibold">Standorte</h2>
         <DataTable columns={cols} data={d.sites ?? []} onRowClick={(r) => navigate(`/sites/${r.Site.ID}`)} rowClass={(r) => r.Down ? "border-l-2 border-l-destructive" : ""} emptyTitle="Noch kein Standort" emptyText="Oben rechts anlegen." />

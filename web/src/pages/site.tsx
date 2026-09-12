@@ -16,6 +16,7 @@ import { BoxTech } from "@/components/box-tech"
 import { TaskMenu } from "@/components/task-menu"
 import { RemoteAccessCard } from "@/components/remote-access"
 import { ScanCard } from "@/components/scan-card"
+import { AICard } from "@/components/ai-card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -108,8 +109,13 @@ export default function SitePage() {
           <TabsTrigger value="netz">Netz <Badge variant="secondary" className="ml-1">{d.Devices?.length ?? 0}</Badge></TabsTrigger>
           <TabsTrigger value="ueberwachung">Überwachung <Badge variant={d.Down ? "destructive" : "secondary"} className="ml-1">{d.Monitored}</Badge></TabsTrigger>
           <TabsTrigger value="ereignisse">Ereignisse <Badge variant="secondary" className="ml-1">{d.Events?.length ?? 0}</Badge></TabsTrigger>
+          <TabsTrigger value="ki">KI</TabsTrigger>
           <TabsTrigger value="technik">Box &amp; Technik</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="ki" className="mt-4">
+          <AICard siteId={id} tenantId={d.Tenant.ID} />
+        </TabsContent>
 
         <TabsContent value="netz" className="mt-4 flex flex-col gap-4">
           {!d.Box && <Alert><Radar /><AlertTitle>Keine Box an diesem Standort</AlertTitle><AlertDescription>Ohne Box kein Inventar und keine Prüfungen. <Link className="underline" to="/boxes">Zu den Boxen</Link></AlertDescription></Alert>}

@@ -61,6 +61,18 @@ func Slug(product string) string {
 	return slugs[strings.ToLower(strings.TrimSpace(product))]
 }
 
+// derive turns what a banner names into what the feed lists: an IIS version is a
+// Windows Server release line (IIS 8.0 only ships with Server 2012, and so on).
+func derive(product, version string) (slug, ver string) {
+	if strings.EqualFold(strings.TrimSpace(product), "Microsoft-IIS") {
+		if w, ok := map[string]string{"6.0": "2003", "7.0": "2008", "7.5": "2008-R2", "8.0": "2012", "8.5": "2012-R2"}[strings.TrimSpace(version)]; ok {
+			return "windows-server", w
+		}
+		return "", "" // IIS 10.0 runs on 2016 through 2025: nothing to say
+	}
+	return Slug(product), version
+}
+
 // Verdict is what the feed says about one version.
 type Verdict struct {
 	State   string // eol | eol_soon | outdated | current | unknown
@@ -288,14 +300,17 @@ func (s *Service) Run(ctx context.Context, every time.Duration) {
 func (s *Service) Findings(services []rules.Service, now time.Time) []rules.Finding {
 	var out []rules.Finding
 	for _, svc := range services {
-		slug := Slug(svc.Product)
-		if slug == "" || svc.Version == "" {
+		slug, version := derive(svc.Product, svc.Version)
+		if slug == "" || version == "" {
 			continue
 		}
-		v := Assess(s.Lookup(slug), svc.Version, now)
+		v := Assess(s.Lookup(slug), version, now)
 		key := fmt.Sprintf("%s/%d", firstNonEmpty(svc.Proto, "tcp"), svc.Port)
 		ev := map[string]any{"port": svc.Port, "product": svc.Product, "version": svc.Version, "cycle": v.Cycle, "latest": v.Latest, "eol": v.EOLDate}
 		name := svc.Product + " " + svc.Version
+		if slug == "windows-server" {
+			name = "Windows Server " + version + " (IIS " + svc.Version + ")"
+		}
 		switch v.State {
 		case "eol":
 			out = append(out, rules.Finding{Rule: "version.eol", Key: key, Severity: rules.High, Title: name + " hat kein Support mehr",

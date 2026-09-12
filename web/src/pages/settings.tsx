@@ -7,19 +7,55 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, post, type NetbirdSettings } from "@/lib/api"
+import { get, post, type AISettings, type NetbirdSettings } from "@/lib/api"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 // Server-side settings an operator edits rarely: today the technicians' NetBird stack.
 export default function SettingsPage() {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ["settings-netbird"], queryFn: () => get<{ available: boolean; settings?: NetbirdSettings }>("/api/settings/netbird") })
+  const qa = useQuery({ queryKey: ["settings-ai"], queryFn: () => get<{ available: boolean; settings?: AISettings }>("/api/settings/ai") })
   const d = q.data
-  if (!d) return <Skeleton className="h-64" />
+  const a = qa.data
+  if (!d || !a) return <Skeleton className="h-64" />
   return (
     <>
       <PageHeader crumbs={[{ label: "Einstellungen" }]} title="Einstellungen" sub="Was der Server über unsere eigene Infrastruktur wissen muss. Zugangsdaten von Kundengeräten stehen nicht hier, die liegen versiegelt bei den Boxen." />
-      {d.available && d.settings ? <NetbirdForm s={d.settings} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-netbird"] })} /> : <p className="text-sm text-muted-foreground">Fernzugriff ist auf diesem Server nicht aktiv.</p>}
+      <div className="flex flex-col gap-4">
+        {a.available && a.settings ? <AIForm s={a.settings} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-ai"] })} /> : null}
+        {d.available && d.settings ? <NetbirdForm s={d.settings} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-netbird"] })} /> : <p className="text-sm text-muted-foreground">Fernzugriff ist auf diesem Server nicht aktiv.</p>}
+      </div>
     </>
+  )
+}
+
+function AIForm({ s, onSaved }: { s: AISettings; onSaved: () => void }) {
+  const [provider, setProvider] = useState(s.provider || "off")
+  const [url, setUrl] = useState(s.url)
+  const [model, setModel] = useState(s.model)
+  const [key, setKey] = useState("")
+  const m = useMutation({
+    mutationFn: ({ path, form }: { path: string; form?: Record<string, string> }) => post(path, form),
+    onSuccess: (r) => { toast.success(r.message); setKey(""); onSaved() },
+    onError: (e) => toast.error(e.message),
+  })
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>KI-Auswertung</CardTitle>
+        <CardDescription>Das Modell, das die Lagebilder liest (ADR-0019). Anthropic über die Messages-API, oder alles, was die OpenAI-Chat-Schnittstelle spricht, zum Beispiel ein Ollama im Haus. Der Schlüssel wird nie wieder angezeigt.{s.hasKey ? " Ein Schlüssel ist hinterlegt." : " Noch kein Schlüssel hinterlegt."} Je Kunde entscheidet der Schalter auf der Kundenseite, ob überhaupt etwas an das Modell geht.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 @3xl/main:grid-cols-2">
+        <div className="grid gap-2"><Label>Anbieter</Label><Select value={provider} onValueChange={setProvider}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="anthropic">Anthropic</SelectItem><SelectItem value="openai">OpenAI-kompatibel (Ollama, OpenAI, …)</SelectItem><SelectItem value="off">aus</SelectItem></SelectContent></Select></div>
+        <div className="grid gap-2"><Label htmlFor="ai-model">Modell</Label><Input id="ai-model" value={model} onChange={(e) => setModel(e.target.value)} placeholder={provider === "anthropic" ? "claude-fable-5-1" : "gpt-oss:120b"} className="font-mono" /></div>
+        <div className="grid gap-2"><Label htmlFor="ai-url">Basis-URL (leer = Standard des Anbieters)</Label><Input id="ai-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={provider === "anthropic" ? "https://api.anthropic.com" : "http://127.0.0.1:11434"} className="font-mono" /></div>
+        <div className="grid gap-2"><Label htmlFor="ai-key">API-Schlüssel{s.hasKey ? " (leer lassen = unverändert)" : ""}</Label><Input id="ai-key" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} className="font-mono" /></div>
+        <div className="flex items-end gap-2">
+          <Button onClick={() => m.mutate({ path: "/api/settings/ai", form: { provider, url, model, key } })} disabled={m.isPending}>Speichern</Button>
+          <Button variant="outline" onClick={() => m.mutate({ path: "/api/settings/ai/test" })} disabled={m.isPending || provider === "off"}>Verbindung prüfen</Button>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

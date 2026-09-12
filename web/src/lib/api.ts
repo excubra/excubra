@@ -53,7 +53,7 @@ export interface BoxRow {
   SealKey?: string
   State: BoxState; SiteName: string; TenantName: string; Assigned: boolean
 }
-export interface Tenant { ID: string; Name: string; CreatedAt: string }
+export interface Tenant { ID: string; Name: string; CreatedAt: string; AIScope?: string }
 export interface Site { ID: string; TenantID: string; Name: string; CreatedAt: string; ScanEnabled?: boolean }
 export interface HostState { Observed: string; Reported: string; Failures: number; Successes: number; Since: string; LastBoxTime?: string }
 export interface HostRow {
@@ -145,3 +145,8 @@ export interface SamplePoint { at: string; value: number }
 export interface RemoteAccessRow { SiteID: string; TenantID: string; BoxID: string; CIDR: string; Enabled: boolean; State: "key" | "joining" | "wiring" | "active" | "off" | "error"; Detail: string; PeerID: string; PeerIP: string; NetworkID: string; ResourceID: string; RouterID: string; RequestedBy: string; CreatedAt: string; UpdatedAt: string }
 export interface SiteRemote { configured: boolean; access: RemoteAccessRow | null; suggested: string; boxOperator: string; boxOpIp: string; labels: Record<string, string> }
 export interface NetbirdSettings { url: string; hasToken: boolean; techGroup: string; lanGroup: string; boxGroup: string }
+export interface AISettings { provider: string; url: string; model: string; hasKey: boolean }
+export interface AIPriority { title: string; why: string; action: string; device_id?: string; severity: string }
+export interface AIResult { risk: string; summary: string; priorities: AIPriority[] | null; findings: { device_id: string; slug: string; severity: string; title: string; detail: string }[] | null }
+export interface AIBriefView { ID: string; SiteID: string; TenantID: string; At: string; Provider: string; Model: string; Risk: string; Summary: string; PromptBytes: number; ResponseBytes: number; DurationMS: number; RequestedBy: string; Result: AIResult }
+export interface SiteAI { available: boolean; scope: string; latest: AIBriefView | null; history: AIBriefView[]; busy: boolean; findings: number; provider: string; model: string }
