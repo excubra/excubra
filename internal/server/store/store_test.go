@@ -487,6 +487,11 @@ func TestSecretSettingsAreSealed(t *testing.T) {
 	if v, err := st.Setting(ctx, "netbird.operator.token"); err != nil || v != "nbp_plain_before_key" {
 		t.Fatalf("read back: %q %v", v, err)
 	}
+	for k, want := range map[string]bool{"vuln.nvd_key": true, "ai.api_key": true, "netbird.operator.token": true, "channel.stable": false, "netbird.operator.url": false, "remote.auto_lan": false} {
+		if SecretSetting(k) != want {
+			t.Fatalf("SecretSetting(%s) = %v", k, !want)
+		}
+	}
 	must(t, st.SetSetting(ctx, "ai.api_key", "sk-test"))
 	_ = st.main.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'ai.api_key'`).Scan(&raw)
 	if !secretbox.Sealed(raw) {
