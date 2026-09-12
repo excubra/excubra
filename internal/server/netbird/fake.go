@@ -99,6 +99,9 @@ func (f *Fake) Handler() http.Handler {
 			for i, res := range f.Res[parts[1]] {
 				if res.ID == parts[3] {
 					f.Res[parts[1]][i].Enabled = body["enabled"].(bool)
+					if n, ok := body["name"].(string); ok && n != "" {
+						f.Res[parts[1]][i].Name = n
+					}
 				}
 			}
 			w.WriteHeader(200)

@@ -396,13 +396,13 @@ func (s *Store) DeleteNetbirdKeyProfile(ctx context.Context, boxID, profile stri
 
 // ---- remote access (salt: Vollausbau B) ----------------------------------------------------
 
-const remoteCols = `site_id, tenant_id, box_id, cidr, enabled, state, detail, peer_id, peer_ip, network_id, resource_id, router_id, requested_by, created_at, updated_at`
+const remoteCols = `site_id, tenant_id, box_id, cidr, enabled, state, detail, peer_id, peer_ip, network_id, resource_id, router_id, resource_name, requested_by, created_at, updated_at`
 
 func scanRemote(sc interface{ Scan(...any) error }) (RemoteAccess, error) {
 	var r RemoteAccess
 	var enabled int
 	var created, updated string
-	err := sc.Scan(&r.SiteID, &r.TenantID, &r.BoxID, &r.CIDR, &enabled, &r.State, &r.Detail, &r.PeerID, &r.PeerIP, &r.NetworkID, &r.ResourceID, &r.RouterID, &r.RequestedBy, &created, &updated)
+	err := sc.Scan(&r.SiteID, &r.TenantID, &r.BoxID, &r.CIDR, &enabled, &r.State, &r.Detail, &r.PeerID, &r.PeerIP, &r.NetworkID, &r.ResourceID, &r.RouterID, &r.ResourceName, &r.RequestedBy, &created, &updated)
 	r.Enabled = enabled != 0
 	r.CreatedAt, r.UpdatedAt = parseTS(created), parseTS(updated)
 	return r, err
@@ -410,8 +410,8 @@ func scanRemote(sc interface{ Scan(...any) error }) (RemoteAccess, error) {
 
 // SetRemoteAccess inserts or replaces a site's remote-access row.
 func (s *Store) SetRemoteAccess(ctx context.Context, r RemoteAccess) error {
-	_, err := s.main.ExecContext(ctx, `INSERT OR REPLACE INTO remote_access (`+remoteCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.SiteID, r.TenantID, r.BoxID, r.CIDR, boolInt(r.Enabled), r.State, r.Detail, r.PeerID, r.PeerIP, r.NetworkID, r.ResourceID, r.RouterID, r.RequestedBy, ts(r.CreatedAt), ts(r.UpdatedAt))
+	_, err := s.main.ExecContext(ctx, `INSERT OR REPLACE INTO remote_access (`+remoteCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.SiteID, r.TenantID, r.BoxID, r.CIDR, boolInt(r.Enabled), r.State, r.Detail, r.PeerID, r.PeerIP, r.NetworkID, r.ResourceID, r.RouterID, r.ResourceName, r.RequestedBy, ts(r.CreatedAt), ts(r.UpdatedAt))
 	return wrap("set remote access", err)
 }
 

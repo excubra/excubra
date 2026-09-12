@@ -82,21 +82,23 @@ type NetbirdKey struct {
 
 // RemoteAccess is one site's LAN in the operator's overlay (salt: Vollausbau B).
 type RemoteAccess struct {
-	SiteID      string
-	TenantID    string
-	BoxID       string
-	CIDR        string
-	Enabled     bool
-	State       string // key | joining | wiring | active | off | error
-	Detail      string
-	PeerID      string
-	PeerIP      string
-	NetworkID   string
-	ResourceID  string
-	RouterID    string
-	RequestedBy string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	SiteID     string
+	TenantID   string
+	BoxID      string
+	CIDR       string
+	Enabled    bool
+	State      string // key | joining | wiring | active | off | error
+	Detail     string
+	PeerID     string
+	PeerIP     string
+	NetworkID  string
+	ResourceID string
+	RouterID   string
+	// the resource's label in the operator stack, "Kunde · Standort"; "" until named
+	ResourceName string
+	RequestedBy  string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // Remote access states.
