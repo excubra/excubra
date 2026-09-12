@@ -1248,6 +1248,21 @@ func (e *Engine) reassessServices(ctx context.Context, judge func(ctx context.Co
 		}
 		judge(ctx, dev.TenantID, dev.SiteID, dev.ID, byDevice[devID], now)
 	}
+	// versions a connector reported (the firewall's firmware) are judged the same way
+	if cons, err := e.Store.Connectors(ctx, ""); err == nil {
+		for _, c := range cons {
+			if c.Disabled || c.DeviceID == "" || len(c.Facts) == 0 {
+				continue
+			}
+			var facts struct {
+				Version string `json:"version"`
+			}
+			if json.Unmarshal(c.Facts, &facts) != nil || facts.Version == "" || c.Kind != "fortigate" {
+				continue
+			}
+			judge(ctx, c.TenantID, c.SiteID, c.DeviceID, []rules.Service{{Proto: "connector", Product: "FortiOS", Version: facts.Version, Name: c.Kind}}, now)
+		}
+	}
 }
 
 // SetSiteScan switches the service scan of a site; the box picks it up with its

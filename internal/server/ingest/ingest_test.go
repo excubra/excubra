@@ -699,6 +699,33 @@ func TestKnownVulnerabilitiesBecomeFindings(t *testing.T) {
 	}
 }
 
+// A firmware version a connector reported is judged like a scanned service, and
+// re-assessed when the databases answer, without waiting for the next reading.
+func TestConnectorVersionsAreReassessed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	boxID, _, _ := f.enroll(f.key.String())
+	must(t, f.eng.AssignBox(ctx, boxID, "site_a", "test"))
+	fw, _, _, err := f.st.UpsertSighting(ctx, "ten_a", "site_a", wire.Sighting{MAC: "00:09:0f:aa:bb:cc", IP: "192.168.1.1", Hostname: "fw-1", LastSeen: f.now}, f.now)
+	must(t, err)
+	must(t, f.st.CreateConnector(ctx, store.Connector{ID: "con_fw", TenantID: "ten_a", SiteID: "site_a", BoxID: boxID, DeviceID: fw.ID, Kind: "fortigate", URL: "https://192.168.1.1", Sealed: "x", CreatedAt: f.now}))
+	must(t, f.st.UpdateConnectorReading(ctx, boxID, wire.ConnectorReport{ID: "con_fw", DeviceID: fw.ID, Kind: "fortigate", OK: true, CollectedAt: f.now, Facts: json.RawMessage(`{"version":"v7.4.12"}`)}, f.now))
+	vs := vuln.New(nil, nil)
+	vs.Now = func() time.Time { return f.now }
+	f.eng.Vuln = vs
+	f.eng.ReassessVulns(ctx)
+	if _, err := f.st.OpenFinding(ctx, fw.ID, "vuln.known", "connector"); err == nil {
+		t.Fatal("finding without any data")
+	}
+	q, _ := vuln.Identify(rules.Service{Product: "FortiOS", Version: "v7.4.12"})
+	vs.Put(&vuln.Result{Key: q.Key(), Product: "FortiOS", Version: "7.4.12", FetchedAt: f.now, CVEs: []vuln.CVE{{ID: "CVE-2026-1", Score: 6.1, Summary: "something"}}})
+	f.eng.ReassessVulns(ctx) // what the loop does after a fetch
+	fd, err := f.st.OpenFinding(ctx, fw.ID, "vuln.known", "connector")
+	if err != nil || fd.Severity != "medium" || !strings.Contains(fd.Title, "FortiOS 7.4.12") {
+		t.Fatalf("firmware finding: %+v %v", fd, err)
+	}
+}
+
 // Live detection (ADR-0018 §7): the canary is on by default and off on request; a
 // signal becomes a finding on its source device and, when it opens, one
 // security.alert; the same signal again only grows the count; a quiet day
