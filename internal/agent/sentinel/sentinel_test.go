@@ -214,6 +214,15 @@ func TestDecoysListenAndCountWithoutTheWatcher(t *testing.T) {
 	if kinds(got) != "canary:127.0.0.1:3389:1" {
 		t.Fatalf("touch: %s", kinds(got))
 	}
+	// the same config again does not retry the port that failed (no log line every 30 s)
+	cfg, _ := ParseConfig(wire.CanaryConfig{Enabled: true})
+	s.Apply(cfg)
+	s.mu.Lock()
+	stillFailed := s.failed[23]
+	s.mu.Unlock()
+	if !stillFailed {
+		t.Fatal("an unchanged config forgot the failed port")
+	}
 	// switched off: the listeners close
 	s.Apply(Config{Enabled: false})
 	s.rebind(ctx)
