@@ -1,0 +1,17 @@
+# The operator peer for EX0 remote access (ADR-0016): a second NetBird client in its
+# own network namespace. Installed only with `provision-box.sh --operator-peer`.
+[Unit]
+Description=NetBird client for the operator overlay (EX0 remote access), own namespace
+After=network-online.target netbird.service
+Wants=network-online.target
+
+[Service]
+ExecStartPre=/opt/excubra/bin/netbird-operator-netns.sh up
+ExecStart=/usr/sbin/ip netns exec operator /usr/bin/netbird service run --config /var/lib/netbird-operator/config.json --daemon-addr unix:///var/run/netbird-operator.sock --log-file console
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 20); do [ -S /var/run/netbird-operator.sock ] && chgrp excubra-agent /var/run/netbird-operator.sock && chmod 0660 /var/run/netbird-operator.sock && exit 0; sleep 0.5; done; exit 0'
+ExecStopPost=/opt/excubra/bin/netbird-operator-netns.sh down
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

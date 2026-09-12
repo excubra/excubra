@@ -20,6 +20,7 @@ HOSTNAME_WANT=""
 NETBIRD_VERSION=""
 NETBIRD_SETUP_KEY=""
 NETBIRD_URL=""
+OPERATOR_PEER=0
 SSH_LAN=0
 STATE_DIR=/var/lib/excubra-agent
 BIN_DIR=/opt/excubra/bin
@@ -32,6 +33,7 @@ while [ $# -gt 0 ]; do
     --netbird-version) NETBIRD_VERSION="$2"; shift 2 ;;
     --netbird-setup-key) NETBIRD_SETUP_KEY="$2"; shift 2 ;;
     --netbird-url) NETBIRD_URL="$2"; shift 2 ;;
+    --operator-peer) OPERATOR_PEER=1; shift ;;
     --ssh-lan) SSH_LAN=1; shift ;;
     *) echo "provision-box: unknown flag $1" >&2; exit 2 ;;
   esac
@@ -167,16 +169,28 @@ EOF
   # takes effect at the next restart, until then the running daemon's socket is adjusted live
   if [ -S /var/run/netbird.sock ]; then chgrp excubra-agent /var/run/netbird.sock && chmod 0660 /var/run/netbird.sock; fi
 fi
-# NOTE (12.09.2026): a second NetBird daemon on the same host is NOT installed here any
-# more. Two daemons share one nftables table and the second wipes the routing rules of
-# the first (customer LAN went dark at the pilot). The operator peer will run in its own
-# network namespace or container; until then remote access stays off on existing boxes.
-if [ -f /etc/systemd/system/netbird-operator.service ]; then
-  echo "== removing the netbird operator daemon (conflicts with the customer daemon)"
+# The operator peer for EX0 remote access (ADR-0016) is opt-in (--operator-peer) and
+# runs in its own network namespace (image/netbird-operator-netns.sh). Two NetBird
+# daemons in ONE namespace share one nftables table and the second wipes the first's
+# routing rules (12.09.2026, customer LAN went dark) — a unit without the namespace is
+# removed here, whatever put it there.
+if [ -f /etc/systemd/system/netbird-operator.service ] && ! grep -q "ip netns exec operator" /etc/systemd/system/netbird-operator.service; then
+  echo "== removing a netbird operator daemon without its own namespace"
   systemctl disable --now netbird-operator >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/netbird-operator.service
   systemctl daemon-reload
   systemctl restart netbird || true
+fi
+if [ "$OPERATOR_PEER" = 1 ] && command -v netbird >/dev/null; then
+  echo "== netbird operator peer in its own namespace"
+  install -d -m 0700 /var/lib/netbird-operator
+  install -m 0755 "$(dirname "$0")/netbird-operator-netns.sh" /opt/excubra/bin/netbird-operator-netns.sh
+  install -m 0644 "$(dirname "$0")/netbird-operator.service" /etc/systemd/system/netbird-operator.service
+  command -v dhclient >/dev/null || command -v udhcpc >/dev/null || apt-get -y -qq install isc-dhcp-client >/dev/null 2>&1 || true
+  systemctl daemon-reload
+  systemctl enable --now netbird-operator >/dev/null 2>&1 || true
+  sleep 3
+  systemctl is-active netbird-operator && ip netns exec operator ip -4 -o addr show 2>/dev/null | grep -v " lo " || echo "   operator peer not up yet; journalctl -u netbird-operator"
 fi
 
 if [ -n "$NETBIRD_SETUP_KEY" ] && command -v netbird >/dev/null; then
