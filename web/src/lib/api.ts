@@ -48,7 +48,7 @@ export interface Me { user: string; csrf: string; version: string; now: string; 
 export interface BoxState { ID: string; Status: string; LastHeartbeat: string; SilentSince: string; AgentVersion: string }
 export interface BoxRow {
   ID: string; SiteID: string; Name: string; HWID: string; AgentVersion: string; OS: string; Arch: string; CertSerial: string; CertNotAfter: string
-  Channel: string; DiscoveryMode: string; DiscoverySubnets: string[] | null; NetbirdStatus: string; NetbirdIP: string; NetbirdOpStatus?: string; NetbirdOpIP?: string; LAN?: string[] | null; Canary?: number[] | null; LANIP?: string; DNS?: DNSReport | null
+  Channel: string; DiscoveryMode: string; DiscoverySubnets: string[] | null; NetbirdStatus: string; NetbirdIP: string; NetbirdOpStatus?: string; NetbirdOpIP?: string; LAN?: string[] | null; Canary?: number[] | null; LANIP?: string; DNS?: DNSReport | null; Caps?: string[] | null
   DiskTotalBytes: number; DiskFreeBytes: number; UptimeS: number; LastSeen: string; EnrolledAt: string; RevokedAt: string | null
   SealKey?: string
   State: BoxState; SiteName: string; TenantName: string; Assigned: boolean
@@ -105,7 +105,7 @@ export interface WanView { ip: string; deviceId: string; last: ScanRound | null;
 export interface DNSReport { listening?: string; error?: string; list_version?: string; list_size: number; upstream?: string; queries: number; blocked: number; nxdomain: number; failed: number; clients: number }
 export interface DNSDay { SiteID: string; Day: string; Queries: number; Blocked: number; NXDomain: number; Failed: number }
 export interface BlocklistStatus { version: string; domains: number; fetchedAt: string; sources: Record<string, number> }
-export interface SiteDNS { enabled: boolean; block: boolean; upstreams: string[]; hasBox: boolean; boxIp: string; report: DNSReport | null; reportAt: string | null; days: DNSDay[]; findings: number; list: BlocklistStatus; listOff: boolean }
+export interface SiteDNS { enabled: boolean; block: boolean; upstreams: string[]; hasBox: boolean; boxIp: string; report: DNSReport | null; reportAt: string | null; days: DNSDay[]; findings: number; list: BlocklistStatus; listOff: boolean; reinstall?: string; boxSsh?: string }
 export interface SiteScan { enabled: boolean; hasBox: boolean; canary: boolean; armed: number[] | null; signals: number; last: ScanRound | null; rounds: ScanRound[] | null; services: number; devices: number; findings: number; wan: WanView | null }
 export interface DeviceDetail { device: DeviceCard; tenant: Tenant; site: Site; host: HostCard | null; events: EventRow[] | null; services: ServiceRow[] | null; logsNote: string }
 export interface BoxesData { Unassigned: BoxRow[] | null; Assigned: BoxRow[] | null }

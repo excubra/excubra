@@ -99,6 +99,8 @@ type Box struct {
 	DNS *wire.DNSReport
 	// LANIP is the box's own address in the LAN, as it reports it.
 	LANIP string
+	// Caps are the capabilities the agent process reported (ADR-0006).
+	Caps []string
 }
 
 // BlockedDomain is one entry of the DNS blocklist.

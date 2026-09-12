@@ -54,7 +54,7 @@ echo "== EX0 box $TAG for $ARCH"
 cd "$W"
 for f in "excubra_linux_$ARCH" SHA256SUMS SHA256SUMS.sig; do curl -fsSL -o "$f" "$REL/$f"; done
 curl -fsSL -o release.pub "$RAW/internal/sig/release.pub"
-for f in provision-box.sh netbird-operator-netns.sh netbird-operator-netns.service netbird-operator.service netbird-operator-ssh.service; do curl -fsSL -o "$f" "$RAW/image/$f"; done
+for f in provision-box.sh netbird-operator-netns.sh netbird-operator-netns.service netbird-operator.service netbird-operator-ssh.service excubra-agent-unit.sh excubra-agent-unit.path excubra-agent-unit.service; do curl -fsSL -o "$f" "$RAW/image/$f"; done
 curl -fsSL -o excubra-agent.service "$RAW/deploy/systemd/excubra-agent.service"
 
 echo "== verifying the release signature"

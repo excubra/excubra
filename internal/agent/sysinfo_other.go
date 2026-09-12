@@ -28,6 +28,13 @@ func boxInfo(stateDir string) wire.BoxInfo {
 
 func uptimeSeconds() int64 { return int64(time.Since(processStart).Seconds()) }
 
+// capNames and the unit request are Linux matters; a development machine has neither.
+var capNames = map[uint]string{10: "CAP_NET_BIND_SERVICE", 13: "CAP_NET_RAW", 12: "CAP_NET_ADMIN"}
+
+func effectiveCaps() []string { return nil }
+
+func requestUnit(string) {}
+
 func bootID() string { return "" }
 
 func hardwareID() string {

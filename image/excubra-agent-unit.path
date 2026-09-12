@@ -1,0 +1,12 @@
+# EX0: watches the agent's request for capabilities and lets the root helper
+# apply it (excubra-agent-unit.service). Part of the box package.
+[Unit]
+Description=EX0 agent unit request watcher
+After=excubra-agent.service
+
+[Path]
+PathChanged=/var/lib/excubra-agent/unit.request
+Unit=excubra-agent-unit.service
+
+[Install]
+WantedBy=multi-user.target

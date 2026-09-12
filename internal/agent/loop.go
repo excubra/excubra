@@ -97,6 +97,7 @@ func Run(ctx context.Context, stateDir, enrollFile string, log *slog.Logger) err
 	if err != nil {
 		return err
 	}
+	requestUnit(st.Dir) // this release's capabilities, for the box package's root helper (ADR-0006)
 	log.Info("excubra agent starting", "version", version.Version, "state", st.Dir)
 	if err := waitForEnrollment(ctx, st, enrollFile, log); err != nil {
 		return err
@@ -374,6 +375,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	box := boxInfo(a.st.Dir)
 	box.LAN = lanPrefixes()
 	box.LANIP = lanAddress()
+	box.Caps = effectiveCaps()
 	box.Canary = a.sent.Armed()
 	hb := wire.Heartbeat{
 		SentAt:          a.now().UTC(),

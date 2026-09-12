@@ -67,6 +67,15 @@ keine lokale Firewall.
 - `--guest` forces guest mode (see below).
 
 Run the script again for a binary update or to change an option; it is idempotent.
+The console shows the same one-liner without a key ("Installer erneut ausführen")
+for a box whose installation predates a release's needs — the helper below makes
+that a one-time thing.
+
+**The unit follows the release.** `excubra-agent-unit.path` watches the agent's
+request for capabilities (`/var/lib/excubra-agent/unit.request`) and a root
+helper (`/usr/local/lib/excubra/excubra-agent-unit.sh`) grants what is on its
+allowlist (`CAP_NET_RAW`, `CAP_NET_BIND_SERVICE`) as a drop-in, restarting the
+agent once. A new release that needs one of them asks for it itself (ADR-0006).
 
 **Guest mode.** A machine that already ran NetBird before its first provisioning (a
 hand-built routing peer, an exit node) belongs to whoever built it: no firewall from
