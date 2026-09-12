@@ -227,7 +227,7 @@ func (s *Service) Disable(ctx context.Context, siteID, actor string) (store.Remo
 		if err != nil {
 			return ra, err
 		}
-		if err := c.SetResourceEnabled(ctx, ra.NetworkID, ra.ResourceID, resourceName(ra), ra.CIDR, []string{lan.ID}, false); err != nil {
+		if err := c.SetResourceEnabled(ctx, ra.NetworkID, ra.ResourceID, s.resourceLabel(ctx, ra), ra.CIDR, []string{lan.ID}, false); err != nil {
 			return s.failed(ctx, ra, "Ressource abschalten: "+err.Error())
 		}
 	}
@@ -485,6 +485,14 @@ func (s *Service) step(ctx context.Context, ra store.RemoteAccess) {
 			_, _ = s.failed(ctx, ra, "Box ist dem Techniker-Stack nicht beigetreten; läuft der Operator-Daemon auf der Box (provision-box.sh)?")
 		}
 	case store.RemoteActive:
+		if label := s.resourceLabel(ctx, ra); ra.ResourceName != label && ra.NetworkID != "" && ra.ResourceID != "" {
+			if lan, err := c.EnsureGroup(ctx, s.setting(ctx, SettingLANGroup, DefaultLANGroup)); err == nil {
+				if err := c.SetResourceEnabled(ctx, ra.NetworkID, ra.ResourceID, label, ra.CIDR, []string{lan.ID}, true); err == nil {
+					ra.ResourceName = label
+					_ = s.Store.SetRemoteAccess(ctx, ra)
+				}
+			}
+		}
 		peers, err := c.Peers(ctx)
 		if err != nil {
 			return
@@ -529,10 +537,9 @@ func (s *Service) wire(ctx context.Context, c *netbird.Client, ra store.RemoteAc
 	if err != nil {
 		return s.failed(ctx, ra, err.Error())
 	}
-	site, _ := s.Store.Site(ctx, ra.SiteID)
-	tenant, _ := s.Store.Tenant(ctx, ra.TenantID)
+	label := s.resourceLabel(ctx, ra)
 	if ra.NetworkID == "" {
-		n, err := c.CreateNetwork(ctx, firstNonEmpty(tenant.Name, ra.TenantID)+" · "+firstNonEmpty(site.Name, ra.SiteID), "EX0 remote access "+ra.SiteID)
+		n, err := c.CreateNetwork(ctx, label, "EX0 remote access "+ra.SiteID)
 		if err != nil {
 			return s.failed(ctx, ra, "Netzwerk: "+err.Error())
 		}
@@ -540,14 +547,16 @@ func (s *Service) wire(ctx context.Context, c *netbird.Client, ra store.RemoteAc
 		_ = s.Store.SetRemoteAccess(ctx, ra)
 	}
 	if ra.ResourceID == "" {
-		r, err := c.CreateResource(ctx, ra.NetworkID, resourceName(ra), ra.CIDR, []string{lan.ID}, true)
+		r, err := c.CreateResource(ctx, ra.NetworkID, label, ra.CIDR, []string{lan.ID}, true)
 		if err != nil {
 			return s.failed(ctx, ra, "Ressource: "+err.Error())
 		}
-		ra.ResourceID = r.ID
+		ra.ResourceID, ra.ResourceName = r.ID, label
 		_ = s.Store.SetRemoteAccess(ctx, ra)
-	} else if err := c.SetResourceEnabled(ctx, ra.NetworkID, ra.ResourceID, resourceName(ra), ra.CIDR, []string{lan.ID}, true); err != nil {
+	} else if err := c.SetResourceEnabled(ctx, ra.NetworkID, ra.ResourceID, label, ra.CIDR, []string{lan.ID}, true); err != nil {
 		return s.failed(ctx, ra, "Ressource einschalten: "+err.Error())
+	} else {
+		ra.ResourceName = label
 	}
 	if ra.RouterID == "" {
 		rt, err := c.CreateRouter(ctx, ra.NetworkID, peer.ID, true, 100)
@@ -610,7 +619,14 @@ func (s *Service) foreignRoute(ctx context.Context, c *netbird.Client, lan netip
 	return "", nil
 }
 
-func resourceName(ra store.RemoteAccess) string { return "LAN " + ra.CIDR }
+// resourceLabel names the site's network and resource in the operator stack the
+// way a technician's client lists them: "Kunde · Standort" (the client shows the
+// network itself on the line below).
+func (s *Service) resourceLabel(ctx context.Context, ra store.RemoteAccess) string {
+	site, _ := s.Store.Site(ctx, ra.SiteID)
+	tenant, _ := s.Store.Tenant(ctx, ra.TenantID)
+	return firstNonEmpty(tenant.Name, ra.TenantID) + " · " + firstNonEmpty(site.Name, ra.SiteID)
+}
 
 // parseLAN accepts a private IPv4 network in CIDR notation.
 func parseLAN(cidr string) (netip.Prefix, error) {

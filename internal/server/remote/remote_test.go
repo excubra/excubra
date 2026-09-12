@@ -139,8 +139,17 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 		t.Fatalf("network: %+v", w.fake.Networks)
 	}
 	res := w.fake.Res[ra.NetworkID]
-	if len(res) != 1 || res[0].Address != "192.168.10.0/24" || !res[0].Enabled {
-		t.Fatalf("resource: %+v", res)
+	if len(res) != 1 || res[0].Address != "192.168.10.0/24" || !res[0].Enabled || res[0].Name != "Muster GmbH · Werk" || ra.ResourceName != "Muster GmbH · Werk" {
+		t.Fatalf("resource: %+v row=%+v", res, ra)
+	}
+	// a row from before the label existed gets its resource renamed on the next tick
+	ra.ResourceName = ""
+	must(t, w.st.SetRemoteAccess(ctx, ra))
+	w.fake.Res[ra.NetworkID][0].Name = "LAN 192.168.10.0/24"
+	w.svc.Reconcile(ctx)
+	ra, _ = w.st.RemoteAccess(ctx, "site_a")
+	if ra.ResourceName != "Muster GmbH · Werk" || w.fake.Res[ra.NetworkID][0].Name != "Muster GmbH · Werk" || !w.fake.Res[ra.NetworkID][0].Enabled {
+		t.Fatalf("rename: row=%+v res=%+v", ra, w.fake.Res[ra.NetworkID])
 	}
 	if rt := w.fake.Routers[ra.NetworkID]; len(rt) != 1 || rt[0].Peer != "peer_box_a" || !rt[0].Masquerade {
 		t.Fatalf("router: %+v", rt)
