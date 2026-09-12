@@ -293,7 +293,7 @@ func (s *Scanner) targets(cfg Config) []Target {
 	seen := map[string]bool{}
 	for _, t := range list {
 		a, err := netip.ParseAddr(t.IP)
-		if err != nil || !a.Is4() || seen[t.IP] {
+		if err != nil || !a.Is4() || seen[t.IP] || a.IsLinkLocalUnicast() {
 			continue
 		}
 		if excluded(cfg.Exclude, a) {
