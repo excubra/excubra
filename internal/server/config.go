@@ -25,6 +25,7 @@ type Config struct {
 	ReleaseCatalog   string // GitHub-style releases URL the server imports release metadata from; "off" disables
 	Feeds            string // end-of-life feed base URL for the version rules (ADR-0018); "" = endoflife.date, "off" disables
 	Vulns            string // "off" disables the CVE matching against NVD, OSV and KEV (ADR-0018 §8)
+	Blocklist        string // "off" disables the DNS blocklist feeds (ADR-0020)
 	SelfUpdate       string // "on": the server installs signed releases of its channel itself (ADR-0006); "off" in containers
 	LogLevel         string
 	LogFormat        string
@@ -76,6 +77,7 @@ func LoadConfig(envFile string, getenv func(string) string) (Config, error) {
 		ReleaseCatalog:   get("EXCUBRA_RELEASE_CATALOG", "https://api.github.com/repos/excubra/excubra/releases"),
 		Feeds:            get("EXCUBRA_FEEDS", ""),
 		Vulns:            get("EXCUBRA_VULNS", ""),
+		Blocklist:        get("EXCUBRA_BLOCKLIST", ""),
 		SelfUpdate:       get("EXCUBRA_SELF_UPDATE", "on"),
 		LogLevel:         get("EXCUBRA_LOG_LEVEL", "info"),
 		LogFormat:        get("EXCUBRA_LOG_FORMAT", "text"),

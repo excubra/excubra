@@ -94,6 +94,21 @@ func EvaluateSignal(sg Signal) (Finding, bool) {
 		ev["attack"], ev["ips_severity"], ev["action"] = attack, ipsSev, action
 		return Finding{Rule: "signal.fgt_ips", Key: attack, Severity: sev, Title: fmt.Sprintf("IPS: %s von %s (%s)", attack, sg.IP, verdict),
 			Detail: fmt.Sprintf("Die FortiGate hat die Signatur „%s“ %s erkannt, Quelle %s%s, Einstufung %s, Aktion: %s. Geblockt heißt: der Versuch war da; nicht geblockt heißt: er ist durch, das Ziel prüfen.", attack, plural(sg.Count, "Mal", "Mal"), sg.IP, origin(sg.IP), firstNonEmptyStr(ipsSev, "unbekannt"), firstNonEmptyStr(action, "unbekannt")), Evidence: ev}, true
+	case "dns_block":
+		listed, name, verdict := splitIPS(sg.Detail)
+		v := "nur gemeldet, nicht geblockt"
+		if verdict == "blocked" {
+			v = "von der Box mit NXDOMAIN beantwortet"
+		}
+		return Finding{Rule: "signal.dns_block", Key: listed, Severity: High, Title: "Gerät fragt bekannte Schad-Domain an: " + listed,
+			Detail: fmt.Sprintf("Das Gerät hat %s angefragt (%s, zuletzt %s). Die Domain steht auf der Liste bekannter Malware- und Steuerserver-Domains (abuse.ch URLhaus/ThreatFox). Das Gerät ist mit hoher Wahrscheinlichkeit infiziert, oder jemand hat einen Phishing-Link geöffnet: vom Netz trennen, prüfen, Passwörter des Nutzers ändern. Anfrage %s.",
+				listed, plural(sg.Count, "Anfrage", "Anfragen"), name, v), Evidence: ev}, true
+	case "dns_dga":
+		return Finding{Rule: "signal.dns_dga", Severity: High, Title: "Gerät erzeugt zufällige Domainnamen (DGA)",
+			Detail: fmt.Sprintf("Das Gerät hat in fünf Minuten nach %d zufällig wirkenden Namen gefragt, die es nicht gibt (z. B. %s). So sucht Malware ihren Steuerserver, wenn die fest eingebauten Adressen gesperrt sind. Gerät vom Netz trennen und prüfen.", sg.Count, sg.Detail), Evidence: ev}, true
+	case "dns_tunnel":
+		return Finding{Rule: "signal.dns_tunnel", Key: sg.Detail, Severity: High, Title: "DNS-Tunnel-Verdacht: " + sg.Detail,
+			Detail: fmt.Sprintf("Das Gerät hat in fünf Minuten %d lange oder TXT-Anfragen an %s gesendet. So fließen Daten oder Befehle durch DNS, an der Firewall vorbei. Ein Virenscanner oder ein Sicherheitsprodukt kann das ebenfalls tun (Reputationsabfragen); dann ist es bekannt und wird einmal quittiert.", sg.Count, sg.Detail), Evidence: ev}, true
 	case "arp_spoof":
 		macs := sg.Detail
 		if i := strings.IndexByte(macs, ' '); i > 0 {

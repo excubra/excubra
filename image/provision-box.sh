@@ -137,6 +137,9 @@ elif ufw --force reset >/dev/null 2>&1; then
   # the decoy ports of the live detection (ADR-0018 §7): they must look open; the agent
   # behind them accepts, waits and closes — no service, no answer
   for p in 445 3389 23 1433 5900; do ufw allow "$p/tcp" comment 'EX0 decoy port' >/dev/null; done
+  # the DNS sensor (ADR-0020): only answers once a site switches it on and the router points here
+  ufw allow 53/udp comment 'EX0 DNS sensor' >/dev/null
+  ufw allow 53/tcp comment 'EX0 DNS sensor' >/dev/null
   ufw --force enable >/dev/null || echo "   (ufw konnte nicht aktiviert werden — Container ohne Netfilter-Rechte; die Box hat ohnehin keinen offenen Port)"
 else
   echo "   (ufw nicht verfügbar — Container; die Box hat ohnehin keinen offenen Port)"

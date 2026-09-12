@@ -44,7 +44,8 @@ Reports — das ist Phase 2 und darf durch das Design nur nicht verbaut werden.
   Enrollment-Keys einmalig; Zuordnung nur serverseitig in der Konsole.
 - Discovery-Modi: `passive`, `sweep`. Der Dienst-Scan (ADR-0018, E20) ist je Standort
   geschaltet, gedrosselt, liest nur; nie Exploits, nie Zugangsdaten. Die Live-Erkennung
-  (ADR-0018 §7) öffnet Köder-Ports, antwortet nichts und sendet nichts.
+  (ADR-0018 §7) öffnet Köder-Ports, antwortet nichts und sendet nichts. Der DNS-Sensor
+  (ADR-0020) ist je Standort aus, bis der Router auf die Box zeigt; er loggt keine Anfragen.
 - Agent unprivilegiert (CAP_NET_RAW, CAP_NET_BIND_SERVICE), darf nie schaden: Ringpuffer Drop-Oldest, blockiert
   nie eine Anwendung, keine lokale Config-Datei (nur Key/Zertifikat + State-Verzeichnis).
 - Updates nur signiert (Public Key einkompiliert); der Server kann nicht signieren.

@@ -82,6 +82,22 @@ type Heartbeat struct {
 	Connectors      []ConnectorReport `json:"connectors,omitempty"`   // latest reading of every connector (ADR-0015)
 	Scan            *ScanReport       `json:"scan,omitempty"`         // a chunk of the last service scan round (ADR-0018)
 	Signals         []Signal          `json:"signals,omitempty"`      // live signs of an attack in the LAN since the last acknowledged heartbeat (ADR-0018 §7)
+	DNS             *DNSReport        `json:"dns,omitempty"`          // the DNS sensor's state and counters (ADR-0020)
+}
+
+// DNSReport is the DNS sensor's state and its counters since the last
+// acknowledged heartbeat (ADR-0020).
+type DNSReport struct {
+	Listening   string `json:"listening,omitempty"`    // "192.168.1.9:53", or "" when it does not
+	Error       string `json:"error,omitempty"`        // why it does not listen
+	ListVersion string `json:"list_version,omitempty"` // the blocklist the box uses
+	ListSize    int    `json:"list_size"`
+	Upstream    string `json:"upstream,omitempty"` // the resolver the box forwards to
+	Queries     int    `json:"queries"`
+	Blocked     int    `json:"blocked"`
+	NXDomain    int    `json:"nxdomain"`
+	Failed      int    `json:"failed"`  // no upstream answered
+	Clients     int    `json:"clients"` // distinct sources in the interval
 }
 
 // AgentInfo describes the running agent.
@@ -107,6 +123,9 @@ type BoxInfo struct {
 	LAN []string `json:"lan,omitempty"`
 	// Canary lists the decoy ports the box currently listens on (ADR-0018 §7).
 	Canary []int `json:"canary,omitempty"`
+	// LANIP is the box's own address in the LAN: what a router points at for the
+	// DNS sensor (ADR-0020).
+	LANIP string `json:"lan_ip,omitempty"`
 }
 
 // NetbirdInfo reports the state of the NetBird client on the box.
@@ -180,6 +199,10 @@ const (
 	SignalFGTAdminFail = "fgt_admin_fail" // failed admin logins
 	SignalFGTVPNFail   = "fgt_vpn_fail"   // failed SSL-VPN logins
 	SignalFGTIPS       = "fgt_ips"        // an IPS signature matched
+	// From the DNS sensor on the box (ADR-0020):
+	SignalDNSBlock  = "dns_block"  // a client asked for a domain on the blocklist
+	SignalDNSDGA    = "dns_dga"    // a client asks for random-looking names that do not exist
+	SignalDNSTunnel = "dns_tunnel" // a client sends long or TXT queries to one domain in numbers
 )
 
 // MaxSignals bounds Heartbeat.Signals.
@@ -231,6 +254,18 @@ type Config struct {
 	Connectors             []ConnectorConfig `json:"connectors,omitempty"` // devices to read through their API (ADR-0015)
 	Scan                   ScanConfig        `json:"scan"`                 // the service scan of the site's LAN (ADR-0018)
 	Canary                 CanaryConfig      `json:"canary"`               // decoy ports and the live signals of the LAN (ADR-0018 §7)
+	DNS                    DNSConfig         `json:"dns"`                  // the DNS sensor (ADR-0020)
+}
+
+// DNSConfig switches the box's DNS sensor on: a forwarding resolver on the LAN
+// address that the router hands out, watching what the devices ask for. Block
+// answers listed domains with NXDOMAIN instead of only reporting them. The box
+// fetches the blocklist from the server when ListVersion changes.
+type DNSConfig struct {
+	Enabled     bool     `json:"enabled"`
+	Block       bool     `json:"block"`
+	Upstreams   []string `json:"upstreams,omitempty"` // resolvers to forward to; empty: the box's own
+	ListVersion string   `json:"list_version,omitempty"`
 }
 
 // CanaryConfig switches the box's live detection on: decoy ports that look like the

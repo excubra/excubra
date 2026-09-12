@@ -25,6 +25,7 @@ import (
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/api"
+	"github.com/excubra/excubra/internal/server/blocklist"
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/console"
 	"github.com/excubra/excubra/internal/server/core"
@@ -131,6 +132,13 @@ func run(envFile string) error {
 	eng, err := core.Load(ctx, st, deliverer, log)
 	if err != nil {
 		return err
+	}
+	// the DNS sensors' blocklist (ADR-0020): abuse.ch plus the operator's own domains, daily
+	var bl *blocklist.Service
+	if cfg.Blocklist != "off" {
+		bl = blocklist.New(st, log)
+		eng.Blocklist = bl
+		go bl.Run(ctx, time.Hour)
 	}
 
 	ingestSrv := &http.Server{
@@ -250,6 +258,7 @@ func run(envFile string) error {
 		con.Vuln = vs
 		go vs.Run(ctx, 5*time.Minute)
 	}
+	con.Blocklist = bl
 	// a restarted server takes a first look at what it already knows, so the feeds
 	// learn what to fetch without waiting for the next scan round
 	go func() {

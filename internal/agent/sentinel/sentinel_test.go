@@ -258,3 +258,17 @@ func TestPendingIsBounded(t *testing.T) {
 		t.Fatalf("bound: %d first %s", len(got), got[0].IP)
 	}
 }
+
+// Signals other sensors hand in merge by their kind's nature: events add up, sizes
+// take the latest value.
+func TestRecordedSignalsMergeByKind(t *testing.T) {
+	s, _ := newTest(t)
+	s.Record([]wire.Signal{{Kind: wire.SignalDNSBlock, IP: "192.168.1.50", Count: 1, Detail: "evil.test|a.evil.test|blocked"}})
+	s.Record([]wire.Signal{{Kind: wire.SignalDNSBlock, IP: "192.168.1.50", Count: 2, Detail: "evil.test|a.evil.test|blocked"}})
+	s.Record([]wire.Signal{{Kind: wire.SignalDNSDGA, IP: "192.168.1.50", Count: 20, Detail: "x.nx"}})
+	s.Record([]wire.Signal{{Kind: wire.SignalDNSDGA, IP: "192.168.1.50", Count: 21, Detail: "x.nx, y.nx"}})
+	got := s.Drain()
+	if kinds(got) != "dns_block:192.168.1.50:0:3 dns_dga:192.168.1.50:0:21" || got[1].Detail != "x.nx, y.nx" {
+		t.Fatalf("merged: %s %+v", kinds(got), got)
+	}
+}

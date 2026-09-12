@@ -24,6 +24,9 @@ func TestEvaluateSignal(t *testing.T) {
 		{Signal{Kind: "fgt_admin_fail", IP: "203.0.113.9", Count: 2, Detail: "admin, root"}, "signal.fgt_admin_fail", "203.0.113.9", "Admin-Login", true},
 		{Signal{Kind: "fgt_vpn_fail", IP: "198.51.100.7", Count: 40, Detail: "j.doe"}, "signal.fgt_vpn_fail", "198.51.100.7", "durchprobiert", true},
 		{Signal{Kind: "fgt_ips", IP: "198.51.100.7", Count: 3, Detail: "Apache.Log4j.Error.Log.Remote.Code.Execution|critical|dropped"}, "signal.fgt_ips", "Apache.Log4j.Error.Log.Remote.Code.Execution", "geblockt", true},
+		{Signal{Kind: "dns_block", IP: "192.168.1.50", Count: 3, Detail: "evil.test|www.evil.test|blocked"}, "signal.dns_block", "evil.test", "Schad-Domain", true},
+		{Signal{Kind: "dns_dga", IP: "192.168.1.50", Count: 40, Detail: "xkqzj.nx, qwrtz.nx"}, "signal.dns_dga", "", "zufällige", true},
+		{Signal{Kind: "dns_tunnel", IP: "192.168.1.50", Count: 30, Detail: "tunnel.test"}, "signal.dns_tunnel", "tunnel.test", "Tunnel", true},
 		{Signal{Kind: "something_new", IP: "192.168.1.50"}, "", "", "", false},
 	}
 	for _, c := range cases {

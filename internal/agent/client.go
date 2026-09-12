@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/excubra/excubra/internal/pki"
@@ -108,6 +109,36 @@ func (c *Client) Config(ctx context.Context, etag string) (cfg wire.Config, notM
 		return wire.Config{}, true, nil
 	}
 	return cfg, false, err
+}
+
+// Blocklist fetches the DNS blocklist (ADR-0020): the body and its version, or
+// not-modified when the server still has the version the box names.
+func (c *Client) Blocklist(ctx context.Context, have string) ([]byte, string, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+c.server+"/v1/blocklist", nil)
+	if err != nil {
+		return nil, "", false, err
+	}
+	req.Header.Set(wire.HeaderAgentVersion, version.Version)
+	req.Header.Set("User-Agent", "excubra-agent/"+version.Version)
+	if have != "" {
+		req.Header.Set("If-None-Match", `"`+have+`"`)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch {
+	case resp.StatusCode == http.StatusNotModified:
+		return nil, have, true, nil
+	case resp.StatusCode != http.StatusOK:
+		return nil, "", false, fmt.Errorf("blocklist: HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, "", false, err
+	}
+	return body, strings.Trim(resp.Header.Get("ETag"), `"`), false, nil
 }
 
 // ClaimNetbird fetches the NetBird setup key exactly once. A missing key is not an

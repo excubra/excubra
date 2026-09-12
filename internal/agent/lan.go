@@ -99,6 +99,43 @@ func skipLAN(name string) bool {
 	return false
 }
 
+// lanAddress is the box's own private IPv4 address on the LAN interface (the
+// default route's, else the first that counts as LAN), "" without one.
+func lanAddress() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	first := defaultRouteInterface()
+	best := ""
+	for _, ifi := range ifaces {
+		if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagLoopback != 0 || skipLAN(ifi.Name) {
+			continue
+		}
+		addrs, err := ifi.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok || ipn.IP.To4() == nil {
+				continue
+			}
+			addr, _ := netip.AddrFromSlice(ipn.IP.To4())
+			if !addr.IsPrivate() {
+				continue
+			}
+			if ifi.Name == first {
+				return addr.String()
+			}
+			if best == "" {
+				best = addr.String()
+			}
+		}
+	}
+	return best
+}
+
 // defaultRouteInterface names the interface of the IPv4 default route on Linux
 // (/proc/net/route); "" elsewhere or without one.
 func defaultRouteInterface() string {

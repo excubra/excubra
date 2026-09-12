@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, post, type AISettings, type NetbirdSettings } from "@/lib/api"
+import { get, post, type AISettings, type BlocklistStatus, type NetbirdSettings } from "@/lib/api"
+import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 // Server-side settings an operator edits rarely: today the technicians' NetBird stack.
@@ -16,16 +17,19 @@ export default function SettingsPage() {
   const q = useQuery({ queryKey: ["settings-netbird"], queryFn: () => get<{ available: boolean; settings?: NetbirdSettings }>("/api/settings/netbird") })
   const qa = useQuery({ queryKey: ["settings-ai"], queryFn: () => get<{ available: boolean; settings?: AISettings }>("/api/settings/ai") })
   const qv = useQuery({ queryKey: ["settings-vuln"], queryFn: () => get<{ available: boolean; hasKey?: boolean }>("/api/settings/vuln") })
+  const qd = useQuery({ queryKey: ["settings-dns"], queryFn: () => get<{ available: boolean; status?: BlocklistStatus; extra?: string }>("/api/settings/dns") })
   const d = q.data
   const a = qa.data
   const v = qv.data
-  if (!d || !a || !v) return <Skeleton className="h-64" />
+  const dn = qd.data
+  if (!d || !a || !v || !dn) return <Skeleton className="h-64" />
   return (
     <>
       <PageHeader crumbs={[{ label: "Einstellungen" }]} title="Einstellungen" sub="Was der Server über unsere eigene Infrastruktur wissen muss. Zugangsdaten von Kundengeräten stehen nicht hier, die liegen versiegelt bei den Boxen." />
       <div className="flex flex-col gap-4">
         {a.available && a.settings ? <AIForm s={a.settings} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-ai"] })} /> : null}
         {v.available ? <VulnForm hasKey={!!v.hasKey} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-vuln"] })} /> : null}
+        {dn.available && dn.status ? <DNSForm status={dn.status} extra={dn.extra ?? ""} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-dns"] })} /> : null}
         {d.available && d.settings ? <NetbirdForm s={d.settings} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-netbird"] })} /> : <p className="text-sm text-muted-foreground">Fernzugriff ist auf diesem Server nicht aktiv.</p>}
       </div>
     </>
@@ -57,6 +61,28 @@ function AIForm({ s, onSaved }: { s: AISettings; onSaved: () => void }) {
           <Button onClick={() => m.mutate({ path: "/api/settings/ai", form: { provider, url, model, key } })} disabled={m.isPending}>Speichern</Button>
           <Button variant="outline" onClick={() => m.mutate({ path: "/api/settings/ai/test" })} disabled={m.isPending || provider === "off"}>Verbindung prüfen</Button>
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function DNSForm({ status, extra, onSaved }: { status: BlocklistStatus; extra: string; onSaved: () => void }) {
+  const [own, setOwn] = useState(extra)
+  const m = useMutation({
+    mutationFn: (form: Record<string, string>) => post("/api/settings/dns", form),
+    onSuccess: (r) => { toast.success(r.message); onSaved() },
+    onError: (e) => toast.error(e.message),
+  })
+  const sources = Object.entries(status.sources).map(([k, n]) => `${k} ${n}`).join(", ")
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>DNS-Blockliste</CardTitle>
+        <CardDescription>Was die DNS-Sensoren der Boxen melden oder blocken (ADR-0020): Malware- und Steuerserver-Domains von abuse.ch (URLhaus, ThreatFox), täglich frisch, plus eigene Domains. {status.domains > 0 ? <>Stand: {status.domains} Domains ({sources}), Version <span className="font-mono">{status.version}</span>.</> : "Noch keine Liste geladen."} Eine eigene Testdomain hier eintragen und am Standort anfragen ist der einfachste Funktionstest.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <div className="grid gap-2"><Label htmlFor="dns-extra">Eigene Domains (eine je Zeile; Unterdomains zählen mit)</Label><Textarea id="dns-extra" rows={4} value={own} onChange={(e) => setOwn(e.target.value)} placeholder="ex0-test.example&#10;bekannter-schaedling.example" className="font-mono" /></div>
+        <div><Button onClick={() => m.mutate({ extra: own })} disabled={m.isPending}>Speichern</Button></div>
       </CardContent>
     </Card>
   )
