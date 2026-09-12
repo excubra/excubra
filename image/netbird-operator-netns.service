@@ -1,0 +1,19 @@
+# The network namespace of the operator peer (EX0 remote access, ADR-0016). The two
+# services that live in it are bound to this one: stop it and they stop, start it and
+# they come along.
+[Unit]
+Description=Network namespace for the operator peer (EX0 remote access)
+After=network-online.target
+Wants=network-online.target netbird-operator.service netbird-operator-ssh.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/default/netbird-operator
+ExecStart=/opt/excubra/bin/netbird-operator-netns.sh up
+ExecStop=/opt/excubra/bin/netbird-operator-netns.sh down
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

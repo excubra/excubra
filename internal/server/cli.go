@@ -806,6 +806,19 @@ func remoteCmd(args []string) error {
 		}
 		fmt.Printf("%s\t%s\tstate=%s\n", ra.SiteID, ra.CIDR, ra.State)
 		return nil
+	case len(rest) == 1 && rest[0] == "peers":
+		ps, err := svc.PeerStates(ctx)
+		if err != nil {
+			return err
+		}
+		if len(ps) == 0 {
+			fmt.Println("(no assigned box)")
+			return nil
+		}
+		for _, p := range ps {
+			fmt.Printf("%s\t%s\tsite=%s\toperator=%s\tip=%s\tkey=%s\n", p.BoxID, orDash(p.BoxName), p.SiteID, p.Status, orDash(p.IP), p.Key)
+		}
+		return nil
 	case len(rest) == 1 && rest[0] == "reconcile":
 		svc.Reconcile(ctx)
 		fallthrough
@@ -823,5 +836,5 @@ func remoteCmd(args []string) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("usage: excubra server remote test | status | reconcile | enable <site_id> <cidr> | disable <site_id>")
+	return fmt.Errorf("usage: excubra server remote test | status | peers | reconcile | enable <site_id> <cidr> | disable <site_id>")
 }

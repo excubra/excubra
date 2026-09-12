@@ -51,6 +51,17 @@ func must(t *testing.T, err error) {
 	}
 }
 
+// the box reports its operator daemon in the heartbeat; that is all the server sees of it
+func (w *world) report(t *testing.T, boxID, status, ip string) {
+	t.Helper()
+	must(t, w.st.UpdateBoxHeartbeat(context.Background(), boxID, wire.Heartbeat{Agent: wire.AgentInfo{Version: "0.2.7"}, NetbirdOperator: &wire.NetbirdInfo{Status: status, IP: ip}}, w.now))
+}
+
+func (w *world) operatorKey(t *testing.T, boxID string) (store.NetbirdKey, error) {
+	t.Helper()
+	return w.st.NetbirdKeyProfile(context.Background(), boxID, wire.NetbirdProfileOperator)
+}
+
 func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
@@ -83,18 +94,28 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 	w.fake.Networks = nil
 	delete(w.fake.Res, "net_bridge")
 
-	// enable: key minted in the box group, handed to the box, state key
+	// enable before the box ever reported an operator daemon: the row waits, no key is minted
 	ra, err := w.svc.Enable(ctx, "site_a", "192.168.10.0/24", "jeremia")
 	must(t, err)
-	if ra.State != store.RemoteKey || ra.CIDR != "192.168.10.0/24" || len(w.fake.Keys) != 1 {
+	if ra.State != store.RemoteKey || ra.CIDR != "192.168.10.0/24" || len(w.fake.Keys) != 0 || !strings.Contains(ra.Detail, "Operator-Daemon") {
 		t.Fatalf("after enable: %+v keys=%d", ra, len(w.fake.Keys))
-	}
-	k, err := w.st.NetbirdKeyProfile(ctx, "box_a", wire.NetbirdProfileOperator)
-	if err != nil || k.SetupKey != w.fake.Keys[0].Key || k.ManagementURL != w.srv.URL || k.ClaimedAt != nil {
-		t.Fatalf("operator key: %+v %v", k, err)
 	}
 	if _, err := w.svc.Enable(ctx, "site_b", "192.168.10.128/25", "jeremia"); !errors.Is(err, ErrOverlap) {
 		t.Fatalf("overlap not refused: %v", err)
+	}
+
+	// the box reports an idle operator daemon: the next reconcile mints its key, the other box gets none
+	w.report(t, "box_a", wire.NetbirdNotConfigured, "")
+	w.svc.Reconcile(ctx)
+	k, err := w.operatorKey(t, "box_a")
+	if err != nil || len(w.fake.Keys) != 1 || k.SetupKey != w.fake.Keys[0].Key || k.ManagementURL != w.srv.URL || k.ClaimedAt != nil {
+		t.Fatalf("operator key: %+v %v keys=%d", k, err, len(w.fake.Keys))
+	}
+	if _, err := w.operatorKey(t, "box_b"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a box without the daemon got a key: %v", err)
+	}
+	if !strings.Contains(w.fake.Keys[0].Name, "Muster GmbH · Werk · muster-box") {
+		t.Fatalf("key name %q", w.fake.Keys[0].Name)
 	}
 
 	// the box claims the key: joining
@@ -107,7 +128,7 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 	}
 
 	// the box reports its operator peer; the API knows the peer: network, resource, router
-	must(t, w.st.UpdateBoxHeartbeat(ctx, "box_a", wire.Heartbeat{Agent: wire.AgentInfo{Version: "0.2.3"}, NetbirdOperator: &wire.NetbirdInfo{Status: wire.NetbirdConnected, IP: "100.90.0.7"}}, w.now))
+	w.report(t, "box_a", wire.NetbirdConnected, "100.90.0.7")
 	w.fake.Peers = []netbird.Peer{{ID: "peer_box_a", Hostname: "muster-box", IP: "100.90.0.7", Connected: true}}
 	w.svc.Reconcile(ctx)
 	ra, _ = w.st.RemoteAccess(ctx, "site_a")
@@ -124,14 +145,14 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 	if rt := w.fake.Routers[ra.NetworkID]; len(rt) != 1 || rt[0].Peer != "peer_box_a" || !rt[0].Masquerade {
 		t.Fatalf("router: %+v", rt)
 	}
-	if len(w.fake.Policies) != 1 || w.fake.Policies[0].Name != PolicyName {
-		t.Fatalf("policy: %+v", w.fake.Policies)
+	if len(w.fake.Policies) != 2 || w.fake.Policies[0].Name != PolicyName || w.fake.Policies[1].Name != PolicyBoxName {
+		t.Fatalf("policies: %+v", w.fake.Policies)
 	}
 	var names []string
 	for _, g := range w.fake.Groups {
 		names = append(names, g.Name)
 	}
-	if got := strings.Join(names, " "); got != "viico kunden-box kunden-lan" {
+	if got := strings.Join(names, " "); got != "viico kunden-lan kunden-box" {
 		t.Fatalf("groups: %q", got)
 	}
 
@@ -139,7 +160,7 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 	w.fake.Peers[0].Connected = false
 	w.svc.Reconcile(ctx)
 	ra, _ = w.st.RemoteAccess(ctx, "site_a")
-	if ra.State != store.RemoteActive || !strings.Contains(ra.Detail, "nicht verbunden") || len(w.fake.Networks) != 1 {
+	if ra.State != store.RemoteActive || !strings.Contains(ra.Detail, "nicht verbunden") || len(w.fake.Networks) != 1 || len(w.fake.Policies) != 2 {
 		t.Fatalf("refresh: %+v networks=%d", ra, len(w.fake.Networks))
 	}
 
@@ -156,7 +177,7 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 		t.Fatalf("re-enable: %+v keys=%d", ra, len(w.fake.Keys))
 	}
 
-	// remove deletes the network and the row
+	// remove deletes the network and the row; the box stays a peer, its key record stays
 	must(t, w.svc.Remove(ctx, "site_a", "jeremia"))
 	if _, err := w.st.RemoteAccess(ctx, "site_a"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal("row survived remove")
@@ -164,14 +185,91 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 	if len(w.fake.Networks) != 0 {
 		t.Fatal("network survived remove")
 	}
+	if _, err := w.operatorKey(t, "box_a"); err != nil {
+		t.Fatalf("remove took the box out of the stack: %v", err)
+	}
+}
+
+// The box image is one package: a box that reports its operator daemon becomes a
+// peer in our stack without anyone switching a LAN on, and keys that go nowhere are
+// replaced — but not while the daemon is connecting on its own.
+func TestBoxesBecomePeersOnTheirOwn(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	must(t, w.svc.SaveSettings(ctx, w.srv.URL, "tok", "", "", ""))
+	keys := func(n int, what string) {
+		t.Helper()
+		if len(w.fake.Keys) != n {
+			t.Fatalf("%s: %d keys, want %d", what, len(w.fake.Keys), n)
+		}
+	}
+
+	w.svc.Reconcile(ctx)
+	keys(0, "nothing reported")
+
+	w.report(t, "box_a", wire.NetbirdNotConfigured, "")
+	w.svc.Reconcile(ctx)
+	keys(1, "idle daemon reported")
+	w.svc.Reconcile(ctx)
+	keys(1, "key still waiting")
+
+	// nobody fetched it within its lifetime: replaced, and the record carries the new one
+	w.now = w.now.Add(keyTTL + time.Minute)
+	w.svc.Reconcile(ctx)
+	keys(2, "expired unfetched")
+	if k, _ := w.operatorKey(t, "box_a"); k.SetupKey != w.fake.Keys[1].Key || k.ClaimedAt != nil {
+		t.Fatalf("record not renewed: %+v", k)
+	}
+
+	// fetched, daemon still idle: patience for two hours, then a new key
+	_, err := w.st.ClaimNetbirdKeyProfile(ctx, "box_a", wire.NetbirdProfileOperator, w.now)
+	must(t, err)
+	w.now = w.now.Add(time.Hour)
+	w.svc.Reconcile(ctx)
+	keys(2, "fetched an hour ago")
+	w.now = w.now.Add(2 * time.Hour)
+	w.svc.Reconcile(ctx)
+	keys(3, "fetched, still unconfigured after the timeout")
+
+	// fetched and the daemon has its config (disconnected while it connects): left alone
+	_, err = w.st.ClaimNetbirdKeyProfile(ctx, "box_a", wire.NetbirdProfileOperator, w.now)
+	must(t, err)
+	w.report(t, "box_a", wire.NetbirdDisconnected, "")
+	w.now = w.now.Add(5 * time.Hour)
+	w.svc.Reconcile(ctx)
+	keys(3, "connecting on its own")
+
+	w.report(t, "box_a", wire.NetbirdConnected, "100.90.0.7")
+	w.svc.Reconcile(ctx)
+	keys(3, "connected")
+
+	// a box that never reports a daemon never gets one; the listing says so
+	if _, err := w.operatorKey(t, "box_b"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("box_b: %v", err)
+	}
+	ps, err := w.svc.PeerStates(ctx)
+	must(t, err)
+	if len(ps) != 2 || ps[0].BoxID != "box_a" || ps[0].Status != wire.NetbirdConnected || ps[0].IP != "100.90.0.7" || !strings.HasPrefix(ps[0].Key, "fetched") {
+		t.Fatalf("peer states: %+v", ps)
+	}
+	if ps[1].BoxID != "box_b" || ps[1].Status != "no operator daemon" || ps[1].Key != "none" {
+		t.Fatalf("peer states: %+v", ps)
+	}
+	if len(w.fake.Policies) != 2 {
+		t.Fatalf("policies: %+v", w.fake.Policies)
+	}
 }
 
 func TestKeyNobodyFetchesExpires(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
 	must(t, w.svc.SaveSettings(ctx, w.srv.URL, "tok", "", "", ""))
+	w.report(t, "box_a", wire.NetbirdNotConfigured, "")
 	_, err := w.svc.Enable(ctx, "site_a", "10.1.0.0/16", "jeremia")
 	must(t, err)
+	if len(w.fake.Keys) != 1 {
+		t.Fatalf("enable did not mint the key right away: %d", len(w.fake.Keys))
+	}
 	w.now = w.now.Add(3 * time.Hour)
 	w.svc.Reconcile(ctx)
 	ra, _ := w.st.RemoteAccess(ctx, "site_a")

@@ -28,8 +28,8 @@ R=/root/excubra-box
 echo "== copying to $PVE, then into container $CTID"
 ssh -o BatchMode=yes "$PVE" "rm -rf $R && mkdir -p $R"
 scp -q "dist/excubra_linux_$ARCH" "$PVE:$R/excubra"
-scp -q image/provision-box.sh image/netbird-operator-netns.sh image/netbird-operator.service deploy/systemd/excubra-agent.service "$PVE:$R/"
-ssh -o BatchMode=yes "$PVE" "pct exec $CTID -- mkdir -p $R && for f in excubra provision-box.sh netbird-operator-netns.sh netbird-operator.service excubra-agent.service; do pct push $CTID $R/\$f $R/\$f; done"
+scp -q image/provision-box.sh image/netbird-operator-netns.sh image/netbird-operator-netns.service image/netbird-operator.service image/netbird-operator-ssh.service deploy/systemd/excubra-agent.service "$PVE:$R/"
+ssh -o BatchMode=yes "$PVE" "pct exec $CTID -- mkdir -p $R && for f in excubra provision-box.sh netbird-operator-netns.sh netbird-operator-netns.service netbird-operator.service netbird-operator-ssh.service excubra-agent.service; do pct push $CTID $R/\$f $R/\$f; done"
 echo "== provisioning"
 # shellcheck disable=SC2145  # the flags are re-quoted for the remote shell on purpose
 # pct push does not carry the executable bit

@@ -26,7 +26,7 @@ type remoteView struct {
 }
 
 var remoteLabels = map[string]string{
-	store.RemoteKey: "Schlüssel erzeugt, Box holt ihn", store.RemoteJoining: "Box tritt dem Techniker-Stack bei", store.RemoteWiring: "Netzwerk wird angelegt",
+	store.RemoteKey: "wartet auf die Box im Techniker-Stack", store.RemoteJoining: "Box tritt dem Techniker-Stack bei", store.RemoteWiring: "Netzwerk wird angelegt",
 	store.RemoteActive: "aktiv", store.RemoteOff: "abgeschaltet", store.RemoteError: "Fehler",
 }
 
@@ -100,7 +100,7 @@ func (s *Server) remoteEnable(w http.ResponseWriter, r *http.Request) {
 	case ra.State == store.RemoteActive:
 		s.flash(w, r, "Fernzugriff aktiv: "+ra.CIDR+" ist im Techniker-Stack erreichbar.", back)
 	default:
-		s.flash(w, r, "Fernzugriff wird eingeschaltet. Die Box holt den Schlüssel mit dem nächsten Heartbeat, tritt dem Techniker-Stack bei, dann legt EX0 das Netzwerk an. Dauert zwei bis drei Minuten.", back)
+		s.flash(w, r, "Fernzugriff wird eingeschaltet. Sobald die Box im Techniker-Stack ist, legt EX0 das Netzwerk an; ihren Schlüssel holt die Box mit dem nächsten Heartbeat. Dauert zwei bis drei Minuten.", back)
 	}
 }
 

@@ -15,7 +15,7 @@ import (
 const usage = `excubra — EX0 (Excubra Zero)
 
 usage:
-  excubra agent  [enroll|run|selftest] [flags]   the box-side agent
+  excubra agent  [enroll|run|selftest|forward] [flags]   the box-side agent
   excubra server [run|user|key|backup|prune]     the central server
   excubra version
 `

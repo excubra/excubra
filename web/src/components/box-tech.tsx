@@ -44,7 +44,8 @@ export function BoxTech({ box, site, sites, tenantNames, fingerprint, netbird, s
         <CardContent className="flex flex-col gap-3">
           <Row k="Zustand"><Badge variant="outline" className={online ? "border-primary/40 text-primary" : "border-destructive/40 text-destructive"}>{online ? "online" : "schweigt"}</Badge> <span className="text-muted-foreground">Heartbeat <Ago t={box.State.LastHeartbeat} /></span></Row>
           <Row k="Agent">{box.AgentVersion || "–"} · Kanal {box.Channel} · {box.OS}/{box.Arch}</Row>
-          <Row k="NetBird">{box.NetbirdStatus === "connected" ? <>verbunden <span className="font-mono text-xs">{box.NetbirdIP}</span></> : box.NetbirdStatus || "nicht gemeldet"}</Row>
+          <Row k="Techniker-Stack">{box.NetbirdOpStatus === "connected" ? <>verbunden <span className="font-mono text-xs">{box.NetbirdOpIP}</span> <span className="text-muted-foreground">· ssh root@{box.NetbirdOpIP}</span></> : box.NetbirdOpStatus === "not_configured" ? "Operator-Daemon bereit, wartet auf den Schlüssel von EX0" : box.NetbirdOpStatus || <span className="text-muted-foreground">kein Operator-Daemon gemeldet (Box-Image ohne netbird-operator)</span>}</Row>
+          <Row k="Kunden-NetBird">{box.NetbirdStatus === "connected" ? <>verbunden <span className="font-mono text-xs">{box.NetbirdIP}</span></> : box.NetbirdStatus === "not_configured" ? <span className="text-muted-foreground">bereit, kein Kunden-VPN (Opt-in: Schlüssel unten hinterlegen)</span> : box.NetbirdStatus || "nicht gemeldet"}</Row>
           <Row k="Platte">{box.DiskTotalBytes ? `${gb(box.DiskFreeBytes)} von ${gb(box.DiskTotalBytes)} GB frei · Uptime ${humanDur(box.UptimeS * 1000)}` : "–"}</Row>
           <Row k="Enrollt">{fmtDateTime(box.EnrolledAt)}</Row>
           <Row k="Hardware" mono>{box.HWID}</Row>
@@ -65,10 +66,10 @@ export function BoxTech({ box, site, sites, tenantNames, fingerprint, netbird, s
           </div>
           <Separator />
           <div className="grid gap-2">
-            <Label>NetBird-Übergabe</Label>
+            <Label>Kunden-NetBird (Opt-in)</Label>
             {netbird ? (
               <p className="text-sm text-muted-foreground">Hinterlegt für <span className="font-mono">{netbird.ManagementURL}</span>{netbird.ClaimedAt ? `, abgeholt ${fmtDateTime(netbird.ClaimedAt)}` : ", wird beim nächsten Config-Pull einmalig abgeholt"}. <Button variant="link" size="sm" className="h-auto p-0" onClick={() => m.mutate({ path: `/api/boxes/${box.ID}/netbird`, form: { action: "clear" } })}>Entfernen</Button></p>
-            ) : <p className="text-sm text-muted-foreground">{box.NetbirdStatus === "connected" ? "Nicht nötig: Die Box ist bereits im Kunden-Stack verbunden." : "Kein Schlüssel hinterlegt. Die Box holt ihn genau einmal ab und setzt sich damit in den Kunden-Stack."}</p>}
+            ) : <p className="text-sm text-muted-foreground">{box.NetbirdStatus === "connected" ? "Nicht nötig: Die Box ist bereits im Kunden-Stack verbunden." : "Kein Schlüssel hinterlegt. Bekommt der Kunde einen eigenen NetBird-Stack, hier Management-URL und Setup-Key eintragen: Die Box holt ihn genau einmal ab und setzt ihren vorbereiteten Kunden-Peer damit in Betrieb."}</p>}
             <div className="grid gap-2 @xl/main:grid-cols-[1fr_1fr_auto]">
               <Input value={mgmt} onChange={(e) => setMgmt(e.target.value)} placeholder="https://kunde.vpn.example.test" />
               <Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="Setup-Key" autoComplete="off" />
