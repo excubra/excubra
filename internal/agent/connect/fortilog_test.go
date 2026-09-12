@@ -50,7 +50,7 @@ func TestFortiGateLogSignals(t *testing.T) {
 		{"eventtime": at(-time.Minute), "attack": "SSH.Connection.Brute.Force", "severity": "medium", "action": "detected", "srcip": "198.51.100.7"},
 		{"eventtime": at(-time.Minute), "attack": "", "srcip": "198.51.100.7"},
 	}
-	if got = fortigateLogSignals("utm/ips", ips, state, now); len(got) != 1 || got[0].Kind != wire.SignalFGTIPS || got[0].Count != 2 || got[0].Detail != "SSH.Connection.Brute.Force|medium|detected" {
+	if got = fortigateLogSignals("ips", ips, state, now); len(got) != 1 || got[0].Kind != wire.SignalFGTIPS || got[0].Count != 2 || got[0].Detail != "SSH.Connection.Brute.Force|medium|detected" {
 		t.Fatalf("ips: %+v", got)
 	}
 }

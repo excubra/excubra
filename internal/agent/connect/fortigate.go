@@ -305,21 +305,49 @@ func (fortigate) Read(ctx context.Context, t Target) (Reading, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	for _, kind := range []string{"event/system", "event/vpn", "utm/ips"} {
+	for _, lg := range fortigateLogs {
 		var page struct {
 			Results []map[string]any `json:"results"`
 		}
-		if err := get("/api/v2/log/"+source+"/"+kind+"?rows=300", &page); err != nil {
-			optional("log "+kind, err)
+		// the path of a log differs between releases; the one that answered is remembered
+		paths := lg.paths
+		if p := t.State["log_path:"+lg.kind]; p != "" {
+			paths = append([]string{p}, paths...)
+		}
+		var err error
+		found := false
+		for _, path := range paths {
+			if err = get("/api/v2/log/"+source+"/"+path+"?rows=300", &page); err == nil {
+				t.State["log_path:"+lg.kind] = path
+				found = true
+				break
+			}
+			if !strings.Contains(err.Error(), "HTTP 404") {
+				break
+			}
+		}
+		if !found {
+			optional("log "+lg.kind, err)
 			continue
 		}
-		reading.Signals = append(reading.Signals, fortigateLogSignals(kind, page.Results, t.State, now)...)
+		reading.Signals = append(reading.Signals, fortigateLogSignals(lg.kind, page.Results, t.State, now)...)
 	}
 	if len(problems) > 0 {
 		facts["problems"] = problems
 	}
 	reading.Facts, reading.Metrics = facts, metrics
 	return reading, nil
+}
+
+// fortigateLogs names the logs read and the REST paths they may have; the first
+// that answers wins and is remembered per connector.
+var fortigateLogs = []struct {
+	kind  string
+	paths []string
+}{
+	{"event/system", []string{"event/system"}},
+	{"event/vpn", []string{"event/vpn"}},
+	{"ips", []string{"ips/signature", "utm/ips", "ips"}},
 }
 
 // logLookback bounds the first read of a log: without a cursor (agent start),
@@ -364,7 +392,7 @@ func fortigateLogSignals(kind string, rows []map[string]any, state map[string]st
 				continue
 			}
 			sig = wire.Signal{Kind: wire.SignalFGTVPNFail, IP: src, Count: 1}
-		case "utm/ips":
+		case "ips":
 			attack := str(row["attack"])
 			if attack == "" {
 				continue
@@ -391,7 +419,7 @@ func fortigateLogSignals(kind string, rows []map[string]any, state map[string]st
 				a.sig.FirstAt = at
 			}
 		}
-		if u := str(row["user"]); u != "" && kind != "utm/ips" {
+		if u := str(row["user"]); u != "" && kind != "ips" {
 			a.users[u] = true
 		}
 	}
