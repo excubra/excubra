@@ -505,6 +505,95 @@ func TestScanReportBecomesServicesAndFindings(t *testing.T) {
 	}
 }
 
+// The outside view (ADR-0018): the server learns a site's public address from the
+// box's heartbeat, an outpost gets it as a target, and what the outpost sees hangs
+// on the device that stands for the address, judged by the stricter rules.
+func TestOutpostScansTheSitesPublicAddress(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	boxID, boxClient, _ := f.enroll(f.key.String())
+	must(t, f.eng.AssignBox(ctx, boxID, "site_a", "test"))
+	must(t, f.eng.SetSiteScan(ctx, "site_a", true, "test"))
+	// the customer box heartbeats: its source address becomes the site's public address
+	f.now = f.now.Add(time.Minute)
+	if status, _ := f.do(boxClient, "POST", "/v1/heartbeat", wire.Heartbeat{SentAt: f.now, Agent: wire.AgentInfo{Version: "0.3.2", OS: "linux", Arch: "amd64"}}, nil); status != 200 {
+		t.Fatalf("heartbeat: %d", status)
+	}
+	b, _ := f.st.Box(ctx, boxID)
+	if b.PublicIP != "127.0.0.1" || b.Role != store.RoleBox {
+		t.Fatalf("box after heartbeat: public=%q role=%q", b.PublicIP, b.Role)
+	}
+
+	// the outpost: a second box in a site of our own, made an outpost
+	k2, _ := pki.NewEnrollmentKey(f.host, 443, f.ca.Fingerprint())
+	must(t, f.st.CreateEnrollmentKey(ctx, store.EnrollmentKey{ID: "key_out", SecretHash: k2.SecretHash(), SiteID: "site_b", CreatedAt: f.now, ExpiresAt: f.now.Add(24 * time.Hour)}))
+	must(t, f.eng.CreateSite(ctx, store.Site{ID: "site_b", TenantID: "ten_a", Name: "Außenposten", CreatedAt: f.now}, "test"))
+	outID, outClient, status := f.enroll(k2.String())
+	if status != 200 {
+		t.Fatalf("outpost enroll: %d", status)
+	}
+	must(t, f.st.SetBoxRole(ctx, outID, store.RoleOutpost))
+	_, body := f.do(outClient, "GET", "/v1/config", nil, nil)
+	var cfg wire.Config
+	_ = json.Unmarshal(body, &cfg)
+	if !cfg.Scan.Enabled || len(cfg.Scan.External) != 1 || cfg.Scan.External[0].SiteID != "site_a" || cfg.Scan.External[0].IP != "127.0.0.1" || cfg.Scan.IntervalS != 3600 || cfg.Discovery.Mode != wire.DiscoveryPassive || len(cfg.Hosts) != 0 {
+		t.Fatalf("outpost config: %+v discovery=%+v hosts=%d", cfg.Scan, cfg.Discovery, len(cfg.Hosts))
+	}
+
+	// the outpost reports: RDP and a FortiGate login page on the site's address
+	f.now = f.now.Add(time.Minute)
+	rep := &wire.ScanReport{Round: "scan_out_1", StartedAt: f.now, Final: true, Scanned: 1, Hosts: []wire.ScanHost{{IP: "127.0.0.1", SiteID: "site_a", Services: []wire.ScanService{
+		{Port: 3389, Proto: "tcp", Name: "rdp"},
+		{Port: 443, Proto: "tcp", Name: "https", Title: "FortiGate", TLS: &wire.TLSInfo{Subject: "CN=FGT", Issuer: "CN=FGT", SelfSigned: true, NotAfter: f.now.Add(300 * 24 * time.Hour), Version: "1.2"}},
+	}}}}
+	if status, body := f.do(outClient, "POST", "/v1/heartbeat", wire.Heartbeat{SentAt: f.now, Agent: wire.AgentInfo{Version: "0.3.2", OS: "linux", Arch: "amd64"}, Scan: rep}, nil); status != 200 {
+		t.Fatalf("outpost heartbeat: %d %s", status, body)
+	}
+	ext, err := f.st.ExternalDevice(ctx, "site_a")
+	must(t, err)
+	if !ext.External || ext.IP != "127.0.0.1" || ext.SiteID != "site_a" {
+		t.Fatalf("external device: %+v", ext)
+	}
+	svcs, _ := f.st.ServicesForDevice(ctx, ext.ID)
+	if len(svcs) != 2 {
+		t.Fatalf("outside services: %+v", svcs)
+	}
+	open, _ := f.st.OpenFindings(ctx, "ten_a")
+	got := map[string]string{}
+	for _, fd := range open {
+		if fd.DeviceID == ext.ID && fd.ConnectorID == "wan" {
+			got[fd.Rule] = fd.Severity
+		}
+	}
+	if got["wan.rdp"] != "high" || got["wan.admin_ui"] != "high" || got["wan.cert_selfsigned"] != "medium" || len(got) != 3 {
+		t.Fatalf("outside findings: %v", got)
+	}
+	// the inventory does not list the address as a LAN device; the round is marked external
+	devs, _ := f.st.Devices(ctx, "ten_a", "site_a", time.Time{})
+	for _, d := range devs {
+		if d.External {
+			t.Fatalf("external device in the LAN inventory: %+v", d)
+		}
+	}
+	rounds, _ := f.st.ScanRounds(ctx, "site_a", 5)
+	if len(rounds) != 1 || !rounds[0].External || rounds[0].BoxID != outID || rounds[0].Services != 2 {
+		t.Fatalf("rounds: %+v", rounds)
+	}
+	// a report for an address the site never had is ignored
+	f.now = f.now.Add(time.Minute)
+	rep2 := &wire.ScanReport{Round: "scan_out_2", StartedAt: f.now, Final: true, Scanned: 1, Hosts: []wire.ScanHost{{IP: "203.0.113.9", SiteID: "site_a", Services: []wire.ScanService{{Port: 23, Proto: "tcp", Name: "telnet"}}}}}
+	_, _ = f.do(outClient, "POST", "/v1/heartbeat", wire.Heartbeat{SentAt: f.now, Agent: wire.AgentInfo{Version: "0.3.2", OS: "linux", Arch: "amd64"}, Scan: rep2}, nil)
+	if rounds, _ := f.st.ScanRounds(ctx, "site_a", 5); len(rounds) != 1 {
+		t.Fatalf("unknown address accepted: %+v", rounds)
+	}
+	// a plain box may not report an outside view
+	rep3 := &wire.ScanReport{Round: "scan_fake", StartedAt: f.now, Final: true, Scanned: 1, Hosts: []wire.ScanHost{{IP: "127.0.0.1", SiteID: "site_a", Services: []wire.ScanService{{Port: 23, Proto: "tcp", Name: "telnet"}}}}}
+	_, _ = f.do(boxClient, "POST", "/v1/heartbeat", wire.Heartbeat{SentAt: f.now, Agent: wire.AgentInfo{Version: "0.3.2", OS: "linux", Arch: "amd64"}, Scan: rep3}, nil)
+	if svcs, _ := f.st.ServicesForDevice(ctx, ext.ID); len(svcs) != 2 {
+		t.Fatalf("a box reported an outside view: %+v", svcs)
+	}
+}
+
 func TestVersionWindowAndRateLimit(t *testing.T) {
 	f := newFixture(t)
 	_, boxClient, _ := f.enroll(f.key.String())

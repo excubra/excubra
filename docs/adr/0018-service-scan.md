@@ -38,10 +38,20 @@ wants. The tool is now the product: open, announced, with the customer's consent
    Webmin, expired or expiring certificates, self-signed certificates, TLS below
    1.2. Findings sync per device under the source `scan`, so they open, stay and
    resolve like connector findings and share the acknowledgement flow.
-5. **Outside comes next**: an outpost in our own infrastructure (a box role in the
-   operator overlay) scans each customer's public address, which the server knows
-   from the box's heartbeat. Version and end-of-life matching against a feed the
-   server keeps, and the AI's evaluation (E21), build on the same tables.
+5. **The outside view comes from an outpost.** The server learns each site's
+   public address from where its box's heartbeats arrive (`boxes.public_ip`). A
+   box with `role = outpost` — the agent on our own server, enrolled like any box,
+   made an outpost on the CLI — gets those addresses as its targets (every site
+   with the scan switched on), scans them hourly with the external port list, and
+   leaves the network it stands in alone (no hosts, no sweep). The server accepts
+   an outside report only from an outpost and only for an address the site's own
+   box reported. What it sees hangs on one device per site that stands for the
+   public address (`devices.external`), kept out of the LAN inventory, judged by
+   the stricter external rules (`rules.EvaluateExternal`: outside, every open door
+   is a finding, remote control and file sharing are urgent, admin login pages are
+   urgent, self-signed certificates one grade worse than inside). Version and
+   end-of-life matching against a feed the server keeps, and the AI's evaluation
+   (E21), build on the same tables.
 
 ## Rejected
 

@@ -56,6 +56,11 @@ type Box struct {
 	NetbirdOpIP     string
 	// the box's own networks as it reports them, default-route interface first
 	LAN []string
+	// PublicIP is where the box's heartbeats come from: the site's public address.
+	PublicIP string
+	// Role is "box" (in a customer LAN) or "outpost" (in our infrastructure, scans
+	// the sites' public addresses; ADR-0018)
+	Role string
 }
 
 // EnrollmentKey is a one-time key; only the hash of the secret is stored.
@@ -125,6 +130,20 @@ type Device struct {
 	LastSeen  time.Time
 	GoneAt    *time.Time
 	Ignored   bool
+	External  bool // stands for the site's public address, not a device in the LAN
+}
+
+// Box roles.
+const (
+	RoleBox     = "box"
+	RoleOutpost = "outpost"
+)
+
+// ScanTarget is a site's public address an outpost scans.
+type ScanTarget struct {
+	SiteID   string
+	TenantID string
+	IP       string
 }
 
 // Service is one listening service the scan found on a device (ADR-0018).
@@ -153,6 +172,7 @@ type ScanRound struct {
 	Hosts      int
 	Services   int
 	Errors     int
+	External   bool // an outpost's look at the site's public address
 }
 
 // Host is a monitored system, checked by its box.

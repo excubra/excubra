@@ -43,7 +43,8 @@ func (s *Server) deviceServices(ctx context.Context, deviceID string) []serviceV
 	return out
 }
 
-// scanView is a site's scan as the app shows it.
+// scanView is a site's scan as the app shows it: the inside (the box in the LAN)
+// and the outside (an outpost at the site's public address).
 type scanView struct {
 	Enabled  bool              `json:"enabled"`
 	HasBox   bool              `json:"hasBox"`
@@ -52,6 +53,16 @@ type scanView struct {
 	Services int               `json:"services"` // open services on the site's devices
 	Devices  int               `json:"devices"`  // devices with at least one service
 	Findings int               `json:"findings"` // open findings from the scan
+	WAN      *wanView          `json:"wan"`      // nil until an outpost looked
+}
+
+type wanView struct {
+	IP       string           `json:"ip"`
+	DeviceID string           `json:"deviceId"`
+	Last     *store.ScanRound `json:"last"`
+	Services int              `json:"services"`
+	Findings int              `json:"findings"`
+	Outpost  bool             `json:"outpost"` // an outpost exists that will look
 }
 
 func (s *Server) apiSiteScan(w http.ResponseWriter, r *http.Request) {
@@ -66,23 +77,65 @@ func (s *Server) apiSiteScan(w http.ResponseWriter, r *http.Request) {
 	if box, err := s.siteBox(ctx, siteID); err == nil && box != nil {
 		v.HasBox = true
 	}
-	if rounds, err := s.Store.ScanRounds(ctx, siteID, 5); err == nil && len(rounds) > 0 {
-		v.Rounds = rounds
-		v.Last = &rounds[0]
+	wan := &wanView{}
+	if boxes, err := s.Store.Boxes(ctx, siteID); err == nil {
+		for _, b := range boxes {
+			if b.RevokedAt == nil && b.PublicIP != "" {
+				wan.IP = b.PublicIP
+			}
+		}
+	}
+	if all, err := s.Store.Boxes(ctx, ""); err == nil {
+		for _, b := range all {
+			if b.RevokedAt == nil && b.Role == store.RoleOutpost {
+				wan.Outpost = true
+			}
+		}
+	}
+	if rounds, err := s.Store.ScanRounds(ctx, siteID, 10); err == nil {
+		for i := range rounds {
+			switch {
+			case rounds[i].External && wan.Last == nil:
+				wan.Last = &rounds[i]
+			case !rounds[i].External:
+				v.Rounds = append(v.Rounds, rounds[i])
+				if v.Last == nil {
+					v.Last = &rounds[i]
+				}
+			}
+		}
+	}
+	ext, extErr := s.Store.ExternalDevice(ctx, siteID)
+	if extErr == nil {
+		wan.DeviceID = ext.ID
 	}
 	if svcs, err := s.Store.OpenServicesForSite(ctx, siteID); err == nil {
 		devs := map[string]bool{}
 		for _, sv := range svcs {
+			if extErr == nil && sv.DeviceID == ext.ID {
+				wan.Services++
+				continue
+			}
 			devs[sv.DeviceID] = true
+			v.Services++
 		}
-		v.Services, v.Devices = len(svcs), len(devs)
+		v.Devices = len(devs)
 	}
 	if open, err := s.Store.OpenFindings(ctx, site.TenantID); err == nil {
 		for _, f := range open {
-			if f.SiteID == siteID && f.ConnectorID == "scan" {
+			if f.SiteID != siteID {
+				continue
+			}
+			switch f.ConnectorID {
+			case "scan":
 				v.Findings++
+			case "wan":
+				wan.Findings++
 			}
 		}
+	}
+	if wan.IP != "" || wan.Last != nil {
+		v.WAN = wan
 	}
 	writeJSON(w, http.StatusOK, v)
 }

@@ -100,8 +100,9 @@ export interface SiteData {
 }
 export interface TLSInfo { subject: string; issuer: string; not_after: string; self_signed: boolean; version: string; dns_names?: string[] }
 export interface ServiceRow { DeviceID: string; Port: number; Proto: string; Name: string; Product: string; Version: string; Banner: string; Title: string; TLSInfo: TLSInfo | null; FirstSeen: string; LastSeen: string; GoneAt: string | null; New: boolean }
-export interface ScanRound { ID: string; BoxID: string; SiteID: string; StartedAt: string; FinishedAt: string | null; Hosts: number; Services: number; Errors: number }
-export interface SiteScan { enabled: boolean; hasBox: boolean; last: ScanRound | null; rounds: ScanRound[] | null; services: number; devices: number; findings: number }
+export interface ScanRound { ID: string; BoxID: string; SiteID: string; StartedAt: string; FinishedAt: string | null; Hosts: number; Services: number; Errors: number; External: boolean }
+export interface WanView { ip: string; deviceId: string; last: ScanRound | null; services: number; findings: number; outpost: boolean }
+export interface SiteScan { enabled: boolean; hasBox: boolean; last: ScanRound | null; rounds: ScanRound[] | null; services: number; devices: number; findings: number; wan: WanView | null }
 export interface DeviceDetail { device: DeviceCard; tenant: Tenant; site: Site; host: HostCard | null; events: EventRow[] | null; services: ServiceRow[] | null; logsNote: string }
 export interface BoxesData { Unassigned: BoxRow[] | null; Assigned: BoxRow[] | null }
 export interface BoxTask { ID: string; BoxID: string; Kind: string; IssuedAt: string; IssuedBy: string; ExpiresAt: string; DoneAt: string | null; OK: boolean | null; Detail: string }

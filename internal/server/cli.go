@@ -157,13 +157,14 @@ func keyCmd(args []string) error {
 	envFile := fs.String("env-file", "", "server env file")
 	count := fs.Int("count", 1, "how many keys to create")
 	note := fs.String("note", "", "note stored with the keys (e.g. batch name)")
+	site := fs.String("site", "", "the site the box lands at on enrollment (ADR-0017)")
 	days := fs.Int("expires-days", 30, "validity in days")
 	rest, flags := cliArgs(args)
 	if err := fs.Parse(flags); err != nil {
 		return err
 	}
 	if len(rest) != 1 || rest[0] != "new" {
-		return fmt.Errorf("usage: excubra server key new [--count N] [--note text] [--expires-days D]")
+		return fmt.Errorf("usage: excubra server key new [--count N] [--note text] [--expires-days D] [--site <site_id>]")
 	}
 	if *count < 1 || *count > 500 {
 		return fmt.Errorf("count must be 1..500")
@@ -186,7 +187,7 @@ func keyCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		rec := store.EnrollmentKey{ID: id.New("key"), SecretHash: k.SecretHash(), Note: *note, CreatedAt: now, ExpiresAt: now.Add(time.Duration(*days) * 24 * time.Hour)}
+		rec := store.EnrollmentKey{ID: id.New("key"), SecretHash: k.SecretHash(), Note: *note, SiteID: *site, CreatedAt: now, ExpiresAt: now.Add(time.Duration(*days) * 24 * time.Hour)}
 		if err := st.CreateEnrollmentKey(ctx, rec); err != nil {
 			return err
 		}
@@ -427,6 +428,17 @@ func boxCmd(args []string) error {
 		fmt.Printf("%s unassigned\n", rest[1])
 		fmt.Println("restart the server to apply: systemctl restart excubra-server")
 		return nil
+	case len(rest) == 3 && rest[0] == "role" && (rest[2] == store.RoleBox || rest[2] == store.RoleOutpost):
+		// an outpost scans the sites' public addresses from our infrastructure (ADR-0018)
+		if _, err := st.Box(ctx, rest[1]); err != nil {
+			return err
+		}
+		if err := st.SetBoxRole(ctx, rest[1], rest[2]); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "box.role", rest[1], rest[2])
+		fmt.Printf("%s is now a %s; it picks its new config up with the next pull\n", rest[1], rest[2])
+		return nil
 	case len(rest) == 3 && rest[0] == "task":
 		// the same closed list the console offers (ADR-0014), for an operator on the server
 		kind := rest[2]
@@ -459,7 +471,7 @@ func boxCmd(args []string) error {
 		fmt.Printf("%s queued for %s (%s); the box picks it up with its next config pull\n", kind, box.ID, t.ID)
 		return nil
 	}
-	return fmt.Errorf("usage: excubra server box list | assign <box_id> <site_id> | unassign <box_id> | task <box_id> <sweep|recheck|update|restart>")
+	return fmt.Errorf("usage: excubra server box list | assign <box_id> <site_id> | unassign <box_id> | task <box_id> <sweep|recheck|update|restart> | role <box_id> box|outpost")
 }
 
 // backupCmd: excubra server backup <dir>

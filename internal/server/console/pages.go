@@ -80,7 +80,7 @@ type devKind struct{ Key, Label string }
 
 var devKinds = []devKind{
 	{"fw", "Firewall"}, {"rt", "Netzwerk"}, {"srv", "Server"}, {"vm", "VM"}, {"tel", "Telefonie"},
-	{"prn", "Drucker"}, {"lap", "Client"}, {"mob", "Mobil"}, {"box", "EX0-Box"}, {"q", "Unbekannt"},
+	{"prn", "Drucker"}, {"lap", "Client"}, {"mob", "Mobil"}, {"box", "EX0-Box"}, {"wan", "Internet-Adresse"}, {"q", "Unbekannt"},
 }
 
 func kindLabel(key string) string {
@@ -162,6 +162,9 @@ func vendorShort(v string) string {
 // deviceName is what a device is called before a person names it: what it announces,
 // else its maker, else its address.
 func deviceName(dev store.Device) string {
+	if dev.External {
+		return "Internet-Adresse " + dev.IP
+	}
 	return firstNonEmpty(cleanHostname(dev.Hostname), vendorShort(dev.Vendor), dev.IP, "nur IPv6")
 }
 
@@ -334,6 +337,9 @@ func (s *Server) buildSite(ctx context.Context, siteID, tab, rng string) (siteDa
 	for _, dev := range devices {
 		c := deviceCard{Device: dev}
 		c.Kind = classifyDevice(dev.Vendor, dev.Hostname, boxNames)
+		if dev.External {
+			c.Kind = "wan"
+		}
 		c.KindLabel = kindLabel(c.Kind)
 		c.IsBox = c.Kind == "box"
 		c.Name = deviceName(dev)
