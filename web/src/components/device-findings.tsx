@@ -16,7 +16,7 @@ export function DeviceFindings({ deviceId }: { deviceId: string }) {
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <CardHeader><CardTitle>Findings</CardTitle><CardDescription>Regeln über die letzte Lesung des Konnektors, bei jeder Lesung neu geprüft. Offen, bis die Ursache weg ist.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Findings</CardTitle><CardDescription>Regeln über den Scan, die Außenansicht, den Versionsabgleich und die letzte Lesung des Konnektors, bei jeder Runde neu geprüft. Offen, bis die Ursache weg ist.</CardDescription></CardHeader>
         <CardContent><FindingsList items={d.open} onChanged={refresh} showDevice={false} emptyText="Die Regeln haben an diesem Gerät nichts zu beanstanden." /></CardContent>
       </Card>
       {(d.resolved?.length ?? 0) > 0 && (

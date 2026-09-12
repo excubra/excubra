@@ -136,7 +136,7 @@ export interface KindMode { id: string; label: string; hint: string; fields: str
 export interface KindOption { kind: string; label: string; fields: string[]; modes?: KindMode[] }
 export interface DeviceConnectors { box: BoxRow | null; sealKey: string; fingerprint: string; online: boolean; kinds: KindOption[]; connectors: ConnectorView[] }
 export interface FindingView {
-  id: string; tenantId: string; tenant: string; siteId: string; site: string; deviceId: string; device: string; connectorId: string
+  id: string; tenantId: string; tenant: string; siteId: string; site: string; deviceId: string; device: string; connectorId: string; source: string
   rule: string; key: string; severity: "high" | "medium" | "low"; title: string; detail: string; evidence: Record<string, unknown>
   firstSeen: string; lastSeen: string; resolvedAt: string | null; ack?: AckView
 }

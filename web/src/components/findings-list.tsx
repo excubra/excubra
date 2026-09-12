@@ -43,7 +43,7 @@ export function FindingsList({ items, onChanged, showDevice = true, emptyText = 
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{f.title}</div>
                 <div className="text-xs text-muted-foreground">
-                  {showDevice && <><Link to={`/devices/${f.deviceId}?tab=praevention`} className="hover:underline">{f.device || f.deviceId}</Link> · {f.tenant}{f.site ? ` · ${f.site}` : ""} · </>}
+                  {showDevice && <><Link to={`/devices/${f.deviceId}?tab=praevention`} className="hover:underline">{f.device || f.deviceId}</Link> · {f.tenant}{f.site ? ` · ${f.site}` : ""} · </>}{f.source ? <>{f.source} · </> : null}
                   {f.resolvedAt ? <>behoben {fmtDateTime(f.resolvedAt)}, bestand seit {fmtDateTime(f.firstSeen)}</> : <>seit <Ago t={f.firstSeen} /> · zuletzt bestätigt <Ago t={f.lastSeen} /></>}
                   {f.ack && <> · quittiert von {f.ack.actor} <Ago t={f.ack.at} />{f.ack.note ? ` · „${f.ack.note}“` : ""}</>}
                 </div>

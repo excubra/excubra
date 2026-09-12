@@ -21,11 +21,11 @@ export default function FindingsPage() {
   const unacked = open.filter((f) => !f.ack)
   return (
     <>
-      <PageHeader crumbs={[{ label: "Prävention" }]} title="Prävention" sub="Regeln über das, was die Konnektoren lesen: Verwaltung von außen, Lizenzen, Tunnel, Ressourcen. Ein Finding bleibt offen, bis die Ursache weg ist." />
+      <PageHeader crumbs={[{ label: "Prävention" }]} title="Prävention" sub="Regeln über das, was Scan und Konnektoren sehen: offene Türen von außen, Klartext-Dienste und Zertifikate im LAN, Versionen ohne Support, Verwaltung von außen, Lizenzen, Tunnel. Ein Finding bleibt offen, bis die Ursache weg ist." />
       {d ? (
         <StatGrid>
           <StatCard label="Hoch" value={d.counts.high ?? 0} tone={(d.counts.high ?? 0) > 0 ? "bad" : "ok"} line1={(d.counts.high ?? 0) ? "Jetzt ansehen" : "Nichts Dringendes"} line2="Verwaltung von außen, abgelaufene Lizenzen, HA ohne Partner" />
-          <StatCard label="Mittel" value={d.counts.medium ?? 0} line1="Bei Gelegenheit beheben" line2="Tunnel unten, Klartext-Verwaltung, Lizenz läuft ab, Ressourcen" />
+          <StatCard label="Mittel" value={d.counts.medium ?? 0} line1="Bei Gelegenheit beheben" line2="Klartext-Dienste, Zertifikate, Webdienste von außen, Support endet bald" />
           <StatCard label="Niedrig" value={d.counts.low ?? 0} line1="Hygiene" line2="Zertifikat nicht festgenagelt, lange Timeouts" />
           <StatCard label="Quittiert" value={open.length - unacked.length} line1={`${unacked.length} offen und unquittiert`} line2="Quittiert = gesehen, bleibt sichtbar bis behoben" />
         </StatGrid>
@@ -37,7 +37,7 @@ export default function FindingsPage() {
         </ToggleGroup>
         {d && <span className="text-sm text-muted-foreground">{items.length} von {open.length}</span>}
       </div>
-      {d ? <FindingsList items={items} onChanged={refresh} emptyText={open.length ? "Kein Finding passt zum Filter." : "Die Regeln haben auf keinem Gerät etwas zu beanstanden. Sobald ein Konnektor liest, prüfen sie jede Lesung."} /> : <Skeleton className="h-48" />}
+      {d ? <FindingsList items={items} onChanged={refresh} emptyText={open.length ? "Kein Finding passt zum Filter." : "Die Regeln haben auf keinem Gerät etwas zu beanstanden. Scan und Konnektoren liefern laufend Neues, die Regeln prüfen jede Lesung."} /> : <Skeleton className="h-48" />}
     </>
   )
 }

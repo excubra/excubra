@@ -18,6 +18,7 @@ import (
 
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/id"
+	"github.com/excubra/excubra/internal/server/feed"
 	"github.com/excubra/excubra/internal/server/rules"
 	"github.com/excubra/excubra/internal/server/state"
 	"github.com/excubra/excubra/internal/server/store"
@@ -39,6 +40,7 @@ type Engine struct {
 	Pub   Publisher
 	Log   *slog.Logger
 	Now   func() time.Time
+	Feed  *feed.Service // end-of-life data for the version rules (ADR-0018); nil means no version findings
 
 	mu      sync.Mutex
 	m       *state.Machine
@@ -876,6 +878,9 @@ func (e *Engine) evaluateRules(ctx context.Context, connectorID string, metrics 
 		_ = json.Unmarshal(c.Facts, &facts)
 	}
 	found := rules.Evaluate(rules.Input{Kind: c.Kind, Facts: facts, Metrics: metrics, Pinned: c.TLSFingerprint != "", Now: now})
+	if v, _ := facts["version"].(string); v != "" && c.Kind == "fortigate" && c.DeviceID != "" {
+		e.versionFindings(ctx, c.TenantID, c.SiteID, c.DeviceID, []rules.Service{{Proto: "connector", Product: "FortiOS", Version: v, Name: c.Kind}}, now)
+	}
 	current := make([]store.Finding, 0, len(found))
 	for _, f := range found {
 		ev, _ := json.Marshal(f.Evidence)
@@ -938,6 +943,7 @@ func (e *Engine) absorbScan(ctx context.Context, site store.Site, box store.Box,
 		for _, fid := range resolved {
 			_ = e.Store.DeleteAck(ctx, "finding", fid)
 		}
+		e.versionFindings(ctx, site.TenantID, site.ID, dev.ID, facts, now)
 	}
 	if rep.Final {
 		fin := now
@@ -1019,9 +1025,63 @@ func (e *Engine) absorbExternal(ctx context.Context, outpost store.Box, rep *wir
 	for _, fid := range resolved {
 		_ = e.Store.DeleteAck(ctx, "finding", fid)
 	}
+	e.versionFindings(ctx, target.TenantID, target.ID, dev.ID, facts, now)
 	fin := now
 	if err := e.Store.SetScanRound(ctx, store.ScanRound{ID: rep.Round + ":" + h.SiteID, BoxID: outpost.ID, SiteID: h.SiteID, StartedAt: rep.StartedAt, FinishedAt: &fin, Hosts: 1, Services: len(svcs), External: true}); err != nil {
 		e.Log.Error("scan: outside round", "site", h.SiteID, "err", err)
+	}
+}
+
+// versionFindings lets the feed judge the versions the scan or a connector saw and
+// syncs them under the source "version".
+func (e *Engine) versionFindings(ctx context.Context, tenantID, siteID, deviceID string, facts []rules.Service, now time.Time) {
+	if e.Feed == nil {
+		return
+	}
+	found := e.Feed.Findings(facts, now)
+	current := make([]store.Finding, 0, len(found))
+	for _, f := range found {
+		ev, _ := json.Marshal(f.Evidence)
+		current = append(current, store.Finding{ID: id.New("fnd"), TenantID: tenantID, SiteID: siteID, DeviceID: deviceID, ConnectorID: "version",
+			Rule: f.Rule, Key: f.Key, Severity: f.Severity, Title: f.Title, Detail: f.Detail, Evidence: ev})
+	}
+	resolved, err := e.Store.SyncDeviceFindings(ctx, deviceID, "version", current, now)
+	if err != nil {
+		e.Log.Error("version findings", "device", deviceID, "err", err)
+	}
+	for _, fid := range resolved {
+		_ = e.Store.DeleteAck(ctx, "finding", fid)
+	}
+}
+
+// ReassessVersions takes a fresh look at every device's services after the feed
+// changed: a line that just reached its end becomes a finding without waiting for
+// the next scan round.
+func (e *Engine) ReassessVersions(ctx context.Context) {
+	if e.Feed == nil {
+		return
+	}
+	svcs, err := e.Store.OpenServices(ctx)
+	if err != nil {
+		return
+	}
+	byDevice := map[string][]rules.Service{}
+	var order []string
+	for _, sv := range svcs {
+		if _, ok := byDevice[sv.DeviceID]; !ok {
+			order = append(order, sv.DeviceID)
+		}
+		byDevice[sv.DeviceID] = append(byDevice[sv.DeviceID], rules.Service{Port: sv.Port, Proto: sv.Proto, Name: sv.Name, Product: sv.Product, Version: sv.Version})
+	}
+	now := e.Now()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, devID := range order {
+		dev, err := e.Store.Device(ctx, devID)
+		if err != nil {
+			continue
+		}
+		e.versionFindings(ctx, dev.TenantID, dev.SiteID, dev.ID, byDevice[devID], now)
 	}
 }
 

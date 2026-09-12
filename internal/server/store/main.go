@@ -1863,3 +1863,44 @@ func (s *Store) EnsureExternalDevice(ctx context.Context, tenantID, siteID, ip s
 	d.IP, d.LastSeen, d.GoneAt = ip, now, nil
 	return d, wrap("external device", err)
 }
+
+// ---- feeds (ADR-0018, version rules) ------------------------------------------------------
+
+// Feed is one product's cached end-of-life data.
+type Feed struct {
+	Slug      string
+	FetchedAt time.Time
+	Body      []byte
+}
+
+// SetFeed stores a product's data.
+func (s *Store) SetFeed(ctx context.Context, slug string, body []byte, at time.Time) error {
+	_, err := s.main.ExecContext(ctx, `INSERT INTO feeds (slug, fetched_at, body) VALUES (?, ?, ?) ON CONFLICT (slug) DO UPDATE SET fetched_at = excluded.fetched_at, body = excluded.body`, slug, ts(at), string(body))
+	return wrap("set feed", err)
+}
+
+// Feeds returns every cached product.
+func (s *Store) Feeds(ctx context.Context) ([]Feed, error) {
+	rows, err := s.main.QueryContext(ctx, `SELECT slug, fetched_at, body FROM feeds ORDER BY slug`)
+	if err != nil {
+		return nil, wrap("feeds", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Feed
+	for rows.Next() {
+		var f Feed
+		var at, body string
+		if err := rows.Scan(&f.Slug, &at, &body); err != nil {
+			return nil, wrap("feeds", err)
+		}
+		f.FetchedAt, f.Body = parseTS(at), []byte(body)
+		out = append(out, f)
+	}
+	return out, wrap("feeds", rows.Err())
+}
+
+// OpenServices lists every open service of every device, for a fresh look at
+// versions when the feed changed.
+func (s *Store) OpenServices(ctx context.Context) ([]Service, error) {
+	return s.services(ctx, `SELECT `+serviceCols+` FROM services WHERE gone_at IS NULL ORDER BY device_id, port`)
+}
