@@ -52,6 +52,40 @@ func boxInfo(stateDir string) wire.BoxInfo {
 	return b
 }
 
+// NeededCaps are the capabilities this release wants: raw sockets for ARP, ICMP
+// and the SYN watcher, low ports for the decoys and the DNS sensor. The agent
+// asks for them through unit.request; the root helper of the box package grants
+// them from its allowlist (ADR-0006).
+const NeededCaps = "CAP_NET_RAW CAP_NET_BIND_SERVICE"
+
+// capNames maps the capability bits the agent cares about to their names.
+var capNames = map[uint]string{10: "CAP_NET_BIND_SERVICE", 13: "CAP_NET_RAW", 12: "CAP_NET_ADMIN"}
+
+// effectiveCaps reads the process's effective capabilities from /proc/self/status.
+func effectiveCaps() []string {
+	b, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return nil
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(line, "CapEff:"); ok {
+			return parseCaps(strings.TrimSpace(v))
+		}
+	}
+	return nil
+}
+
+// requestUnit tells the box package which capabilities this release needs, once
+// per change: the root helper applies the request and restarts the agent when
+// the unit gained something.
+func requestUnit(stateDir string) {
+	path := stateDir + "/unit.request"
+	if cur, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(cur)) == NeededCaps {
+		return
+	}
+	_ = os.WriteFile(path, []byte(NeededCaps+"\n"), 0o600)
+}
+
 // uptimeSeconds is the box uptime, not the process uptime.
 func uptimeSeconds() int64 {
 	data, err := os.ReadFile("/proc/uptime")

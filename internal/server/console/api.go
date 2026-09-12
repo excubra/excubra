@@ -494,6 +494,18 @@ func installerBase() (base, ver string) {
 	return "https://raw.githubusercontent.com/excubra/excubra/" + ref + "/image", ver
 }
 
+// reinstallCommand brings an enrolled box's installation up to the current
+// release (units, helper, firewall rules) without touching its identity: the
+// installer without a key, run once on the box.
+func reinstallCommand() string {
+	base, ver := installerBase()
+	cmd := "curl -fsSL " + base + "/ex0-box.sh | bash -s --"
+	if ver != "" {
+		cmd += " --version " + ver
+	}
+	return cmd
+}
+
 // installerCommands are the two ways a box comes to life with this key: on a
 // machine (mini PC, Pi, VM) and as a container on a Proxmox host.
 func installerCommands(key, hostname string) []installerCommand {

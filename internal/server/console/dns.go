@@ -26,6 +26,10 @@ type dnsView struct {
 	Findings  int              `json:"findings"` // open findings of the DNS kinds
 	List      blocklist.Status `json:"list"`
 	ListOff   bool             `json:"listOff"`
+	// Reinstall is set when the box's installation cannot open port 53: the
+	// installer one-liner that brings it up to date, to run once on the box.
+	Reinstall string `json:"reinstall,omitempty"`
+	BoxSSH    string `json:"boxSsh,omitempty"`
 }
 
 func (s *Server) apiSiteDNS(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +51,12 @@ func (s *Server) apiSiteDNS(w http.ResponseWriter, r *http.Request) {
 		if box.DNS != nil {
 			at := box.LastSeen
 			v.ReportAt = &at
+		}
+		if len(box.Caps) > 0 && !hasCap(box.Caps, "CAP_NET_BIND_SERVICE") {
+			v.Reinstall = reinstallCommand()
+			if box.NetbirdOpIP != "" {
+				v.BoxSSH = "ssh root@" + box.NetbirdOpIP
+			}
 		}
 	}
 	if days, err := s.Store.DNSDays(ctx, siteID, 14); err == nil && days != nil {
@@ -131,4 +141,13 @@ func (s *Server) dnsSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.Store.Audit(r.Context(), s.Now(), actor(r), "settings.dns", "block_extra", map[bool]string{true: "changed", false: "unchanged"}[changed])
 	s.flash(w, r, "Eigene Domains gespeichert; die Boxen holen die neue Liste mit dem nächsten Config-Pull.", "/settings")
+}
+
+func hasCap(caps []string, want string) bool {
+	for _, c := range caps {
+		if c == want {
+			return true
+		}
+	}
+	return false
 }

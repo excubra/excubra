@@ -118,16 +118,17 @@ func (s *Store) RenameSite(ctx context.Context, siteID, name string) error {
 // ---- boxes -----------------------------------------------------------------------
 
 const boxCols = `id, site_id, name, hw_id, agent_version, os, arch, cert_serial, cert_not_after, channel, discovery_mode, discovery_subnets,
-	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip, lan, public_ip, role, canary, dns, lan_ip`
+	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip, lan, public_ip, role, canary, dns, lan_ip, caps`
 
 func scanBox(sc interface{ Scan(...any) error }) (Box, error) {
 	var b Box
 	var site, revoked sql.NullString
-	var notAfter, enrolled, subnets, lastSeen, lan, canary, dns string
+	var notAfter, enrolled, subnets, lastSeen, lan, canary, dns, caps string
 	err := sc.Scan(&b.ID, &site, &b.Name, &b.HWID, &b.AgentVersion, &b.OS, &b.Arch, &b.CertSerial, &notAfter, &b.Channel, &b.DiscoveryMode, &subnets,
-		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP, &lan, &b.PublicIP, &b.Role, &canary, &dns, &b.LANIP)
+		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP, &lan, &b.PublicIP, &b.Role, &canary, &dns, &b.LANIP, &caps)
 	_ = json.Unmarshal([]byte(lan), &b.LAN)
 	_ = json.Unmarshal([]byte(canary), &b.Canary)
+	_ = json.Unmarshal([]byte(caps), &b.Caps)
 	if dns != "" {
 		var r wire.DNSReport
 		if json.Unmarshal([]byte(dns), &r) == nil {
@@ -156,7 +157,7 @@ func (s *Store) CreateBox(ctx context.Context, b Box) error {
 		b.Role = RoleBox
 	}
 	lanJSON, _ := json.Marshal(nonNil(b.LAN))
-	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '', '')`,
+	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '', '', '[]')`,
 		b.ID, nullIfEmpty(b.SiteID), b.Name, b.HWID, b.AgentVersion, b.OS, b.Arch, b.CertSerial, ts(b.CertNotAfter), b.Channel, b.DiscoveryMode, string(subnets),
 		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey, b.NetbirdOpStatus, b.NetbirdOpIP, string(lanJSON), b.PublicIP, b.Role)
 	return wrap("create box", err)
@@ -174,15 +175,16 @@ func (s *Store) UpdateBoxHeartbeat(ctx context.Context, boxID string, hb wire.He
 		canary = []int{}
 	}
 	canaryJSON, _ := json.Marshal(canary)
+	capsJSON, _ := json.Marshal(nonNil(hb.Box.Caps))
 	if hb.DNS != nil {
 		dnsJSON, _ := json.Marshal(hb.DNS)
 		return s.exec1(ctx, "update box heartbeat", `UPDATE boxes SET agent_version = ?, os = ?, arch = ?, netbird_status = ?, netbird_ip = ?,
-			disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ?, canary = ?, lan_ip = ?, dns = ? WHERE id = ?`,
-			hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), string(canaryJSON), hb.Box.LANIP, string(dnsJSON), boxID)
+			disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ?, canary = ?, lan_ip = ?, caps = ?, dns = ? WHERE id = ?`,
+			hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), string(canaryJSON), hb.Box.LANIP, string(capsJSON), string(dnsJSON), boxID)
 	}
 	return s.exec1(ctx, "update box heartbeat", `UPDATE boxes SET agent_version = ?, os = ?, arch = ?, netbird_status = ?, netbird_ip = ?,
-		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ?, canary = ?, lan_ip = ? WHERE id = ?`,
-		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), string(canaryJSON), hb.Box.LANIP, boxID)
+		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ?, canary = ?, lan_ip = ?, caps = ? WHERE id = ?`,
+		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), string(canaryJSON), hb.Box.LANIP, string(capsJSON), boxID)
 }
 
 // SetBoxDiscovery sets the discovery mode and the additional subnets to sweep.

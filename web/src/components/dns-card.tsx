@@ -43,6 +43,13 @@ export function DNSCard({ siteId }: { siteId: string }) {
         </CardAction>
       </CardHeader>
       <CardContent className="grid gap-2 text-sm">
+        {d.reinstall && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
+            <div className="font-medium">Installation der Box ist älter als diese Funktion</div>
+            <p className="mt-1 text-muted-foreground">Der Agent hat sich aktualisiert, aber die Installation auf der Box darf Port 53 noch nicht öffnen (und auch die Köder 445 und 23 nicht). Einmalig auf der Box ausführen{d.boxSsh ? <> (per <span className="font-mono">{d.boxSsh}</span>)</> : null}; danach kommen solche Rechte mit jedem Update von selbst:</p>
+            <pre className="mt-2 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">{d.reinstall}</pre>
+          </div>
+        )}
         <div className="grid grid-cols-[140px_1fr] gap-3"><span className="text-muted-foreground">Im Router eintragen</span><span>{d.boxIp ? <>DNS-Server <span className="font-mono">{d.boxIp}</span> <span className="text-muted-foreground">(FRITZ!Box: Heimnetz → Netzwerk → Netzwerkeinstellungen → IPv4 → lokaler DNS-Server; FortiGate: DHCP-Server → DNS-Server)</span></> : <span className="text-muted-foreground">Adresse der Box noch nicht gemeldet</span>}</span></div>
         <div className="grid grid-cols-[140px_1fr] gap-3"><span className="text-muted-foreground">Box</span><span>{r ? <>{r.listening ? <>hört auf <span className="font-mono">{r.listening}</span></> : r.error ? <span className="text-destructive">{r.error}</span> : "nicht aktiv"}{r.upstream ? <> · fragt <span className="font-mono">{r.upstream}</span></> : null} · Liste {r.list_size} Domains{r.list_version && d.list.version && r.list_version !== d.list.version ? <span className="text-muted-foreground"> (Server hat eine neuere)</span> : null}{d.reportAt ? <span className="text-muted-foreground"> · <Ago t={d.reportAt} /></span> : null}</> : <span className="text-muted-foreground">noch kein Bericht{d.enabled ? "; die Box holt die Einstellung mit dem nächsten Heartbeat (Agent ab 0.7)" : ""}</span>}</span></div>
         <div className="grid grid-cols-[140px_1fr] gap-3"><span className="text-muted-foreground">Heute</span><span>{today ? <>{today.Queries} Anfragen · {today.Blocked} geblockt · {today.NXDomain} unbekannte Namen{today.Failed ? <span className="text-destructive"> · {today.Failed} ohne Antwort vom Upstream</span> : null}</> : "–"}</span></div>

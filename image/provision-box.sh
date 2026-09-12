@@ -269,8 +269,14 @@ fi
 
 echo "== systemd unit"
 install -m 0644 "$HERE/excubra-agent.service" /etc/systemd/system/excubra-agent.service
+# the root helper that lets a release ask for a capability from the allowlist (ADR-0006)
+install -d -m 0755 /usr/local/lib/excubra
+install -m 0755 -o root -g root "$HERE/excubra-agent-unit.sh" /usr/local/lib/excubra/excubra-agent-unit.sh
+install -m 0644 "$HERE/excubra-agent-unit.path" /etc/systemd/system/excubra-agent-unit.path
+install -m 0644 "$HERE/excubra-agent-unit.service" /etc/systemd/system/excubra-agent-unit.service
 systemctl daemon-reload
-systemctl enable excubra-agent >/dev/null
+systemctl enable excubra-agent excubra-agent-unit.path excubra-agent-unit.service >/dev/null 2>&1 || systemctl enable excubra-agent >/dev/null
+systemctl start excubra-agent-unit.path 2>/dev/null || true
 systemctl restart excubra-agent
 sleep 5
 systemctl --no-pager --lines=0 status excubra-agent | sed -n '1,3p'

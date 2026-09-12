@@ -107,3 +107,28 @@ listeners are bound, otherwise the next start rolls back and audits it. The bina
 lives in `/opt/excubra/bin` (owned by the service user, in `ReadWritePaths`), with
 `/usr/local/bin/excubra` as a symlink for people. `EXCUBRA_SELF_UPDATE=off` in
 containers, where the image is the update.
+
+## Amendment 2026-09-12: the unit follows the release
+
+A self-update swaps the binary and nothing else: the agent runs without root
+and cannot touch its own systemd unit, so a release that needs a capability the
+unit does not grant (port 53 for the DNS sensor, the decoy ports below 1024)
+was stuck with the rights of the day the box was installed — the pilot box
+showed exactly that. The box package now carries a small root helper:
+
+- The agent writes the capabilities this release needs into
+  `/var/lib/excubra-agent/unit.request` at start (`agent.NeededCaps`), and
+  reports the ones it actually has in every heartbeat (`BoxInfo.Caps`, from
+  `/proc/self/status`).
+- `excubra-agent-unit.path` watches that file; `excubra-agent-unit.service`
+  runs `/usr/local/lib/excubra/excubra-agent-unit.sh` as root (root-owned, not
+  in the agent's binary directory), which turns the request into a drop-in
+  (`50-agent-request.conf`) and restarts the agent — only when something
+  changed, and only for capabilities on its allowlist (`CAP_NET_RAW`,
+  `CAP_NET_BIND_SERVICE`). Nothing else of the unit can be changed this way:
+  a compromised agent gains at most the right to bind low ports, which the
+  package grants anyway.
+- The console shows the reported capabilities on the box and, where a box's
+  installation predates the helper, the installer one-liner without a key
+  (`ex0-box.sh --version …`) that brings the installation up to date once;
+  from then on, rights ride along with updates.

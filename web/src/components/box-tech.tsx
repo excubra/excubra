@@ -54,6 +54,7 @@ export function BoxTech({ box, site, sites, tenantNames, fingerprint, netbird, s
           <Row k="Siegelschlüssel"><SealFingerprint sealKey={box.SealKey ?? ""} className="text-[13px]" /><div className="text-xs text-muted-foreground">Zugangsdaten für Geräte-APIs werden im Browser für diesen Schlüssel versiegelt.</div></Row>
           <Row k="LAN der Box">{box.LAN?.length ? <span className="font-mono text-[13px]">{box.LAN.join(", ")}{box.LANIP ? ` · Adresse ${box.LANIP}` : ""}</span> : <span className="text-muted-foreground">noch nicht gemeldet</span>}</Row>
           <Row k="Discovery">{box.DiscoveryMode === "sweep" ? "passiv + ARP-Sweep alle 15 min im eigenen Netz" : "nur passiv"}{box.DiscoverySubnets?.length ? ` · ICMP-Sweep: ${box.DiscoverySubnets.join(", ")}` : ""}</Row>
+          <Row k="Rechte des Agenten">{box.Caps?.length ? <><span className="font-mono text-[13px]">{box.Caps.join(", ")}</span>{!box.Caps.includes("CAP_NET_BIND_SERVICE") ? <span className="text-destructive"> · Installation älter als 0.5: Port 53 und Köder 445/23 nicht möglich, Installer einmal erneut ausführen (Standort → Technik → DNS-Sensor zeigt den Befehl)</span> : null}</> : <span className="text-muted-foreground">nicht gemeldet (Agent vor 0.7.3)</span>}</Row>
           <Row k="Köder-Ports">{box.Canary?.length ? <span className="font-mono text-[13px]">{box.Canary.join(", ")}</span> : <span className="text-muted-foreground">keine offen (Live-Erkennung aus, oder Agent vor 0.5)</span>}</Row>
           <Separator />
           <div className="grid gap-2">

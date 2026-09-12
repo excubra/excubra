@@ -126,6 +126,10 @@ type BoxInfo struct {
 	// LANIP is the box's own address in the LAN: what a router points at for the
 	// DNS sensor (ADR-0020).
 	LANIP string `json:"lan_ip,omitempty"`
+	// Caps lists the capabilities the agent process actually has (CAP_NET_RAW,
+	// CAP_NET_BIND_SERVICE): an installation from before a release that needs
+	// more shows up here, and the console says what to do (ADR-0006).
+	Caps []string `json:"caps,omitempty"`
 }
 
 // NetbirdInfo reports the state of the NetBird client on the box.

@@ -1,0 +1,13 @@
+# EX0: applies the agent's request for capabilities from an allowlist, as root,
+# and restarts the agent when something changed. Runs at boot and whenever the
+# request changes (excubra-agent-unit.path).
+[Unit]
+Description=EX0 agent unit request (capabilities from the allowlist)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/excubra/excubra-agent-unit.sh
+
+[Install]
+WantedBy=multi-user.target
