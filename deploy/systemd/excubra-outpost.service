@@ -1,0 +1,44 @@
+# The outpost (ADR-0018, outside view): the EX0 agent in our own infrastructure,
+# enrolled like a box and made an outpost in the console. It scans the customers'
+# public addresses on the schedule its config sets and leaves the LAN it stands in
+# alone. Own user, own state, own binary — it updates itself independently of the
+# server that may share the host.
+[Unit]
+Description=EX0 outpost (excubra agent, outside view)
+Documentation=https://github.com/excubra/excubra
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=excubra-outpost
+Group=excubra-outpost
+ExecStart=/opt/excubra-outpost/bin/excubra agent run --state-dir /var/lib/excubra-outpost
+Restart=always
+RestartSec=5
+SuccessExitStatus=75
+StateDirectory=excubra-outpost
+StateDirectoryMode=0700
+
+# plain TCP connections only: no raw sockets, no capabilities
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+CPUQuota=30%
+MemoryMax=256M
+TasksMax=128
+
+ProtectSystem=strict
+ReadWritePaths=/var/lib/excubra-outpost /opt/excubra-outpost/bin
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

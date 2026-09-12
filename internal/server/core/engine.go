@@ -545,8 +545,17 @@ func (e *Engine) config(ctx context.Context, box store.Box) (wire.Config, error)
 	if _, ok := e.sites[box.SiteID]; ok && box.RevokedAt == nil {
 		cfg.Assigned = true
 		// the scan switch is read fresh: the CLI flips it in the store, not in this cache
-		if site, err := e.Store.Site(ctx, box.SiteID); err == nil && site.ScanEnabled {
+		if site, err := e.Store.Site(ctx, box.SiteID); err == nil && site.ScanEnabled && box.Role != store.RoleOutpost {
 			cfg.Scan = wire.ScanConfig{Enabled: true, IntervalS: 24 * 3600, MaxPPS: 20}
+		}
+		if box.Role == store.RoleOutpost {
+			// an outpost looks at the sites' public addresses every hour
+			if targets, err := e.Store.ScanTargets(ctx); err == nil {
+				cfg.Scan = wire.ScanConfig{Enabled: len(targets) > 0, IntervalS: 3600, MaxPPS: 20}
+				for _, t := range targets {
+					cfg.Scan.External = append(cfg.Scan.External, wire.ScanTarget{SiteID: t.SiteID, IP: t.IP})
+				}
+			}
 		}
 		hosts, err := e.Store.Hosts(ctx, "", box.ID)
 		if err != nil {
@@ -598,6 +607,10 @@ func (e *Engine) config(ctx context.Context, box store.Box) (wire.Config, error)
 					IntervalS: c.IntervalS, TLSFingerprint: c.TLSFingerprint, Version: c.Version()})
 			}
 		}
+	}
+	if box.Role == store.RoleOutpost {
+		// and leaves the network it stands in alone: no hosts, no sweep
+		cfg.Hosts, cfg.Discovery.Mode, cfg.Discovery.Subnets = []wire.HostConfig{}, wire.DiscoveryPassive, nil
 	}
 	cfg.Version = configVersion(cfg)
 	return cfg, nil
@@ -892,25 +905,15 @@ func (e *Engine) absorbScan(ctx context.Context, site store.Site, box store.Box,
 		round = store.ScanRound{ID: rep.Round, BoxID: box.ID, SiteID: site.ID, StartedAt: rep.StartedAt}
 	}
 	for _, h := range rep.Hosts {
+		if h.SiteID != "" {
+			e.absorbExternal(ctx, box, rep, h, now)
+			continue
+		}
 		dev, err := e.Store.DeviceByAddress(ctx, site.ID, h.MAC, h.IP)
 		if err != nil {
 			continue // the scan knows a device the inventory does not have yet; the next round will
 		}
-		svcs := make([]store.Service, 0, len(h.Services))
-		facts := make([]rules.Service, 0, len(h.Services))
-		for i, sv := range h.Services {
-			if i >= wire.MaxScanServices {
-				break
-			}
-			var tlsJSON json.RawMessage
-			var rt *rules.TLS
-			if sv.TLS != nil {
-				tlsJSON, _ = json.Marshal(sv.TLS)
-				rt = &rules.TLS{Subject: sv.TLS.Subject, Issuer: sv.TLS.Issuer, NotAfter: sv.TLS.NotAfter, SelfSigned: sv.TLS.SelfSigned, Version: sv.TLS.Version}
-			}
-			svcs = append(svcs, store.Service{DeviceID: dev.ID, Port: sv.Port, Proto: sv.Proto, Name: sv.Name, Product: sv.Product, Version: sv.Version, Banner: sv.Banner, Title: sv.Title, TLS: tlsJSON})
-			facts = append(facts, rules.Service{Port: sv.Port, Proto: sv.Proto, Name: sv.Name, Product: sv.Product, Version: sv.Version, Banner: sv.Banner, Title: sv.Title, TLS: rt})
-		}
+		svcs, facts := scanServices(dev.ID, h.Services)
 		added, gone, err := e.Store.UpsertServices(ctx, dev.ID, svcs, now)
 		if err != nil {
 			e.Log.Error("scan: services", "device", dev.ID, "err", err)
@@ -942,6 +945,83 @@ func (e *Engine) absorbScan(ctx context.Context, site store.Site, box store.Box,
 	}
 	if err := e.Store.SetScanRound(ctx, round); err != nil {
 		e.Log.Error("scan: round", "round", rep.Round, "err", err)
+	}
+}
+
+// scanServices converts a report's services for the store and for the rules.
+func scanServices(deviceID string, in []wire.ScanService) ([]store.Service, []rules.Service) {
+	svcs := make([]store.Service, 0, len(in))
+	facts := make([]rules.Service, 0, len(in))
+	for i, sv := range in {
+		if i >= wire.MaxScanServices {
+			break
+		}
+		var tlsJSON json.RawMessage
+		var rt *rules.TLS
+		if sv.TLS != nil {
+			tlsJSON, _ = json.Marshal(sv.TLS)
+			rt = &rules.TLS{Subject: sv.TLS.Subject, Issuer: sv.TLS.Issuer, NotAfter: sv.TLS.NotAfter, SelfSigned: sv.TLS.SelfSigned, Version: sv.TLS.Version}
+		}
+		svcs = append(svcs, store.Service{DeviceID: deviceID, Port: sv.Port, Proto: sv.Proto, Name: sv.Name, Product: sv.Product, Version: sv.Version, Banner: sv.Banner, Title: sv.Title, TLS: tlsJSON})
+		facts = append(facts, rules.Service{Port: sv.Port, Proto: sv.Proto, Name: sv.Name, Product: sv.Product, Version: sv.Version, Banner: sv.Banner, Title: sv.Title, TLS: rt})
+	}
+	return svcs, facts
+}
+
+// absorbExternal stores what an outpost saw on a site's public address: the
+// outside view. Only an outpost may report it, only for an address the site's own
+// box reported, and it hangs on the device that stands for the site's public
+// address. The stricter external rules apply.
+func (e *Engine) absorbExternal(ctx context.Context, outpost store.Box, rep *wire.ScanReport, h wire.ScanHost, now time.Time) {
+	if outpost.Role != store.RoleOutpost {
+		return
+	}
+	target, ok := e.sites[h.SiteID]
+	if !ok {
+		return
+	}
+	known := false
+	if boxes, err := e.Store.Boxes(ctx, h.SiteID); err == nil {
+		for _, b := range boxes {
+			if b.RevokedAt == nil && b.PublicIP == h.IP {
+				known = true
+			}
+		}
+	}
+	if !known {
+		return
+	}
+	dev, err := e.Store.EnsureExternalDevice(ctx, target.TenantID, target.ID, h.IP, now)
+	if err != nil {
+		e.Log.Error("scan: outside view device", "site", h.SiteID, "err", err)
+		return
+	}
+	svcs, facts := scanServices(dev.ID, h.Services)
+	added, gone, err := e.Store.UpsertServices(ctx, dev.ID, svcs, now)
+	if err != nil {
+		e.Log.Error("scan: outside services", "site", h.SiteID, "err", err)
+		return
+	}
+	if len(added) > 0 || len(gone) > 0 {
+		e.Log.Info("scan: outside view changed", "site", h.SiteID, "ip", h.IP, "appeared", len(added), "gone", len(gone))
+	}
+	found := rules.EvaluateExternal(rules.ScanInput{Services: facts, Now: now})
+	current := make([]store.Finding, 0, len(found))
+	for _, f := range found {
+		ev, _ := json.Marshal(f.Evidence)
+		current = append(current, store.Finding{ID: id.New("fnd"), TenantID: target.TenantID, SiteID: target.ID, DeviceID: dev.ID, ConnectorID: "wan",
+			Rule: f.Rule, Key: f.Key, Severity: f.Severity, Title: f.Title, Detail: f.Detail, Evidence: ev})
+	}
+	resolved, err := e.Store.SyncDeviceFindings(ctx, dev.ID, "wan", current, now)
+	if err != nil {
+		e.Log.Error("scan: outside findings", "site", h.SiteID, "err", err)
+	}
+	for _, fid := range resolved {
+		_ = e.Store.DeleteAck(ctx, "finding", fid)
+	}
+	fin := now
+	if err := e.Store.SetScanRound(ctx, store.ScanRound{ID: rep.Round + ":" + h.SiteID, BoxID: outpost.ID, SiteID: h.SiteID, StartedAt: rep.StartedAt, FinishedAt: &fin, Hosts: 1, Services: len(svcs), External: true}); err != nil {
+		e.Log.Error("scan: outside round", "site", h.SiteID, "err", err)
 	}
 }
 

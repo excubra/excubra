@@ -164,3 +164,15 @@ func TestParseBanner(t *testing.T) {
 		}
 	}
 }
+
+func TestExternalTargetsReplaceTheLAN(t *testing.T) {
+	cfg, errs := ParseConfig(wire.ScanConfig{Enabled: true, External: []wire.ScanTarget{{SiteID: "site_a", IP: "203.0.113.5"}, {SiteID: "site_b", IP: "192.168.1.1"}, {SiteID: "", IP: "198.51.100.7"}}})
+	if len(cfg.External) != 1 || cfg.External[0].SiteID != "site_a" || len(errs) != 2 || len(cfg.Ports) != len(DefaultExternalPorts) {
+		t.Fatalf("cfg %+v errs %v", cfg, errs)
+	}
+	s := New(nil, func() []Target { return []Target{{IP: "10.0.0.5", MAC: "aa:bb:cc:dd:ee:01"}} })
+	got := s.targets(cfg)
+	if len(got) != 1 || got[0].IP != "203.0.113.5" || got[0].SiteID != "site_a" {
+		t.Fatalf("targets: %+v", got)
+	}
+}

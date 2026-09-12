@@ -231,6 +231,12 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 			hb.Hosts[i].Rounds = hb.Hosts[i].Rounds[len(hb.Hosts[i].Rounds)-wire.MaxRoundsPerHost:]
 		}
 	}
+	// where the heartbeat comes from is the site's public address (ADR-0018, outside view)
+	if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && ip != b.PublicIP && b.Role != store.RoleOutpost {
+		if err := s.Store.SetBoxPublicIP(r.Context(), b.ID, ip); err == nil {
+			b.PublicIP = ip
+		}
+	}
 	resp, err := s.Engine.Heartbeat(r.Context(), b, hb)
 	if err != nil {
 		s.Log.Error("heartbeat", "box", b.ID, "err", err)

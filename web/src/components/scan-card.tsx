@@ -1,6 +1,6 @@
 import { Link } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Radar } from "lucide-react"
+import { Globe, Radar } from "lucide-react"
 import { toast } from "sonner"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -26,7 +26,7 @@ export function ScanCard({ siteId }: { siteId: string }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Radar className="size-4" />Schwachstellen-Scan<Badge variant="outline" className={d.enabled ? "border-primary/40 text-primary" : "text-muted-foreground"}>{d.enabled ? "an" : "aus"}</Badge></CardTitle>
-        <CardDescription>Die Box tastet die Geräte dieses Standorts täglich ab: welche Dienste laufen, welche Version, welches Zertifikat. Gedrosselt, nach Zeitplan, sie nutzt nichts aus und probiert keine Zugangsdaten. Was auffällt, steht unter Prävention.</CardDescription>
+        <CardDescription>Die Box tastet die Geräte dieses Standorts täglich ab, der Außenposten die öffentliche Adresse stündlich: welche Dienste laufen, welche Version, welches Zertifikat. Gedrosselt, nach Zeitplan, nichts wird ausgenutzt, keine Zugangsdaten probiert. Was auffällt, steht unter Prävention.</CardDescription>
         <CardAction>
           <label className="flex items-center gap-2 text-sm"><span className="text-muted-foreground">{d.hasBox ? "Scan" : "keine Box"}</span><Switch checked={d.enabled} disabled={!d.hasBox || m.isPending} onCheckedChange={(on) => m.mutate(on)} /></label>
         </CardAction>
@@ -35,6 +35,13 @@ export function ScanCard({ siteId }: { siteId: string }) {
         <div className="grid grid-cols-[140px_1fr] gap-3"><span className="text-muted-foreground">Letzte Runde</span><span>{last ? <>{last.FinishedAt ? <>abgeschlossen <Ago t={last.FinishedAt} /></> : <>läuft, begonnen <Ago t={last.StartedAt} /></>} · {last.Hosts} Geräte, {last.Services} Dienste{last.Errors ? `, ${last.Errors} Fehler` : ""}</> : d.enabled ? "noch keine; die erste beginnt wenige Minuten nach dem Einschalten" : "–"}</span></div>
         <div className="grid grid-cols-[140px_1fr] gap-3"><span className="text-muted-foreground">Dienste</span><span>{d.services} offen auf {d.devices} Geräten</span></div>
         <div className="grid grid-cols-[140px_1fr] gap-3"><span className="text-muted-foreground">Findings</span><span>{d.findings > 0 ? <Link className="underline" to="/findings">{d.findings} offen aus dem Scan</Link> : "keine offenen aus dem Scan"}</span></div>
+        {d.wan && (
+          <div className="mt-3 border-t pt-3">
+            <div className="mb-1 flex items-center gap-2 font-medium"><Globe className="size-4" />Außenansicht<span className="font-mono text-xs text-muted-foreground">{d.wan.ip || "Adresse noch unbekannt"}</span></div>
+            <div className="grid grid-cols-[140px_1fr] gap-3"><span className="text-muted-foreground">Zuletzt geprüft</span><span>{d.wan.last ? <><Ago t={d.wan.last.StartedAt} /> vom Außenposten, {d.wan.last.Services} offene Ports</> : d.wan.outpost ? (d.enabled ? "noch nicht; der Außenposten schaut stündlich" : "erst, wenn der Scan an ist") : "kein Außenposten eingerichtet"}</span></div>
+            <div className="grid grid-cols-[140px_1fr] gap-3"><span className="text-muted-foreground">Von außen offen</span><span>{d.wan.deviceId ? <Link className="underline" to={`/devices/${d.wan.deviceId}?tab=dienste`}>{d.wan.services} Dienste</Link> : `${d.wan.services} Dienste`}{d.wan.findings > 0 ? <> · <Link className="underline text-destructive" to="/findings">{d.wan.findings} Findings</Link></> : ""}</span></div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

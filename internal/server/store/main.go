@@ -114,14 +114,14 @@ func (s *Store) RenameSite(ctx context.Context, siteID, name string) error {
 // ---- boxes -----------------------------------------------------------------------
 
 const boxCols = `id, site_id, name, hw_id, agent_version, os, arch, cert_serial, cert_not_after, channel, discovery_mode, discovery_subnets,
-	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip, lan`
+	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip, lan, public_ip, role`
 
 func scanBox(sc interface{ Scan(...any) error }) (Box, error) {
 	var b Box
 	var site, revoked sql.NullString
 	var notAfter, enrolled, subnets, lastSeen, lan string
 	err := sc.Scan(&b.ID, &site, &b.Name, &b.HWID, &b.AgentVersion, &b.OS, &b.Arch, &b.CertSerial, &notAfter, &b.Channel, &b.DiscoveryMode, &subnets,
-		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP, &lan)
+		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP, &lan, &b.PublicIP, &b.Role)
 	_ = json.Unmarshal([]byte(lan), &b.LAN)
 	b.SiteID = site.String
 	b.CertNotAfter = parseTS(notAfter)
@@ -141,10 +141,13 @@ func (s *Store) CreateBox(ctx context.Context, b Box) error {
 		b.DiscoveryMode = wire.DiscoverySweep
 	}
 	subnets, _ := json.Marshal(nonNil(b.DiscoverySubnets))
+	if b.Role == "" {
+		b.Role = RoleBox
+	}
 	lanJSON, _ := json.Marshal(nonNil(b.LAN))
-	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ID, nullIfEmpty(b.SiteID), b.Name, b.HWID, b.AgentVersion, b.OS, b.Arch, b.CertSerial, ts(b.CertNotAfter), b.Channel, b.DiscoveryMode, string(subnets),
-		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey, b.NetbirdOpStatus, b.NetbirdOpIP, string(lanJSON))
+		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey, b.NetbirdOpStatus, b.NetbirdOpIP, string(lanJSON), b.PublicIP, b.Role)
 	return wrap("create box", err)
 }
 
@@ -450,15 +453,15 @@ func (s *Store) DeleteRemoteAccess(ctx context.Context, siteID string) error {
 
 // ---- devices ---------------------------------------------------------------------
 
-const deviceCols = `id, tenant_id, site_id, mac, ip, vendor, hostname, first_seen, last_seen, gone_at, ignored`
+const deviceCols = `id, tenant_id, site_id, mac, ip, vendor, hostname, first_seen, last_seen, gone_at, ignored, external`
 
 func scanDevice(sc interface{ Scan(...any) error }) (Device, error) {
 	var d Device
 	var first, last string
 	var gone sql.NullString
-	var ignored int
-	err := sc.Scan(&d.ID, &d.TenantID, &d.SiteID, &d.MAC, &d.IP, &d.Vendor, &d.Hostname, &first, &last, &gone, &ignored)
-	d.FirstSeen, d.LastSeen, d.GoneAt, d.Ignored = parseTS(first), parseTS(last), parseTSP(gone), ignored != 0
+	var ignored, external int
+	err := sc.Scan(&d.ID, &d.TenantID, &d.SiteID, &d.MAC, &d.IP, &d.Vendor, &d.Hostname, &first, &last, &gone, &ignored, &external)
+	d.FirstSeen, d.LastSeen, d.GoneAt, d.Ignored, d.External = parseTS(first), parseTS(last), parseTSP(gone), ignored != 0, external != 0
 	return d, err
 }
 
@@ -487,7 +490,7 @@ func (s *Store) UpsertSighting(ctx context.Context, tenantID, siteID string, sg 
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		d = Device{ID: id.New("dev"), TenantID: tenantID, SiteID: siteID, MAC: mac, IP: ip, Vendor: sg.Vendor, Hostname: sg.Hostname, FirstSeen: seenAt, LastSeen: seenAt}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO devices (`+deviceCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)`,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO devices (`+deviceCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0)`,
 			d.ID, d.TenantID, d.SiteID, d.MAC, d.IP, d.Vendor, d.Hostname, ts(d.FirstSeen), ts(d.LastSeen)); err != nil {
 			return Device{}, false, false, wrap("sighting", err)
 		}
@@ -525,7 +528,7 @@ func (s *Store) Device(ctx context.Context, deviceID string) (Device, error) {
 // Devices returns the devices of a tenant seen since `since` (zero = all), or of
 // one site when siteID is set. Newest sighting first.
 func (s *Store) Devices(ctx context.Context, tenantID, siteID string, since time.Time) ([]Device, error) {
-	q := `SELECT ` + deviceCols + ` FROM devices WHERE tenant_id = ?`
+	q := `SELECT ` + deviceCols + ` FROM devices WHERE tenant_id = ? AND external = 0`
 	args := []any{tenantID}
 	if siteID != "" {
 		q += ` AND site_id = ?`
@@ -1711,9 +1714,9 @@ func (s *Store) services(ctx context.Context, q string, args ...any) ([]Service,
 
 // SetScanRound inserts or updates a round.
 func (s *Store) SetScanRound(ctx context.Context, r ScanRound) error {
-	_, err := s.main.ExecContext(ctx, `INSERT INTO scan_rounds (id, box_id, site_id, started_at, finished_at, hosts, services, errors) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := s.main.ExecContext(ctx, `INSERT INTO scan_rounds (id, box_id, site_id, started_at, finished_at, hosts, services, errors, external) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET finished_at = excluded.finished_at, hosts = excluded.hosts, services = excluded.services, errors = excluded.errors`,
-		r.ID, r.BoxID, r.SiteID, ts(r.StartedAt), tsp(r.FinishedAt), r.Hosts, r.Services, r.Errors)
+		r.ID, r.BoxID, r.SiteID, ts(r.StartedAt), tsp(r.FinishedAt), r.Hosts, r.Services, r.Errors, boolInt(r.External))
 	return wrap("set scan round", err)
 }
 
@@ -1722,8 +1725,10 @@ func (s *Store) ScanRound(ctx context.Context, id string) (ScanRound, error) {
 	var r ScanRound
 	var started string
 	var finished sql.NullString
-	err := s.main.QueryRowContext(ctx, `SELECT id, box_id, site_id, started_at, finished_at, hosts, services, errors FROM scan_rounds WHERE id = ?`, id).
-		Scan(&r.ID, &r.BoxID, &r.SiteID, &started, &finished, &r.Hosts, &r.Services, &r.Errors)
+	var external int
+	err := s.main.QueryRowContext(ctx, `SELECT id, box_id, site_id, started_at, finished_at, hosts, services, errors, external FROM scan_rounds WHERE id = ?`, id).
+		Scan(&r.ID, &r.BoxID, &r.SiteID, &started, &finished, &r.Hosts, &r.Services, &r.Errors, &external)
+	r.External = external != 0
 	r.StartedAt, r.FinishedAt = parseTS(started), parseTSP(finished)
 	return r, wrap("scan round", err)
 }
@@ -1733,7 +1738,7 @@ func (s *Store) ScanRounds(ctx context.Context, siteID string, limit int) ([]Sca
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := s.main.QueryContext(ctx, `SELECT id, box_id, site_id, started_at, finished_at, hosts, services, errors FROM scan_rounds WHERE site_id = ? ORDER BY started_at DESC LIMIT ?`, siteID, limit)
+	rows, err := s.main.QueryContext(ctx, `SELECT id, box_id, site_id, started_at, finished_at, hosts, services, errors, external FROM scan_rounds WHERE site_id = ? ORDER BY started_at DESC LIMIT ?`, siteID, limit)
 	if err != nil {
 		return nil, wrap("scan rounds", err)
 	}
@@ -1743,10 +1748,11 @@ func (s *Store) ScanRounds(ctx context.Context, siteID string, limit int) ([]Sca
 		var r ScanRound
 		var started string
 		var finished sql.NullString
-		if err := rows.Scan(&r.ID, &r.BoxID, &r.SiteID, &started, &finished, &r.Hosts, &r.Services, &r.Errors); err != nil {
+		var external int
+		if err := rows.Scan(&r.ID, &r.BoxID, &r.SiteID, &started, &finished, &r.Hosts, &r.Services, &r.Errors, &external); err != nil {
 			return nil, wrap("scan rounds", err)
 		}
-		r.StartedAt, r.FinishedAt = parseTS(started), parseTSP(finished)
+		r.StartedAt, r.FinishedAt, r.External = parseTS(started), parseTSP(finished), external != 0
 		out = append(out, r)
 	}
 	return out, wrap("scan rounds", rows.Err())
@@ -1797,4 +1803,63 @@ func (s *Store) SyncDeviceFindings(ctx context.Context, deviceID, source string,
 		return nil, wrap("sync device findings", err)
 	}
 	return resolved, wrap("sync device findings", tx.Commit())
+}
+
+// ---- the outside view (ADR-0018) ---------------------------------------------------------
+
+// SetBoxPublicIP records where the box's heartbeats come from.
+func (s *Store) SetBoxPublicIP(ctx context.Context, boxID, ip string) error {
+	return s.exec1(ctx, "set box public ip", `UPDATE boxes SET public_ip = ? WHERE id = ?`, ip, boxID)
+}
+
+// SetBoxRole makes a box an outpost, or a box again.
+func (s *Store) SetBoxRole(ctx context.Context, boxID, role string) error {
+	if role != RoleBox && role != RoleOutpost {
+		return errors.New("store: role must be box or outpost")
+	}
+	return s.exec1(ctx, "set box role", `UPDATE boxes SET role = ? WHERE id = ?`, role, boxID)
+}
+
+// ScanTargets lists the public addresses the outposts scan: every site with the
+// scan switched on whose box reported one.
+func (s *Store) ScanTargets(ctx context.Context) ([]ScanTarget, error) {
+	rows, err := s.main.QueryContext(ctx, `SELECT DISTINCT s.id, s.tenant_id, b.public_ip FROM sites s JOIN boxes b ON b.site_id = s.id
+		WHERE s.scan_enabled = 1 AND b.revoked_at IS NULL AND b.public_ip <> '' AND b.role = ? ORDER BY s.id, b.public_ip`, RoleBox)
+	if err != nil {
+		return nil, wrap("scan targets", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ScanTarget
+	for rows.Next() {
+		var t ScanTarget
+		if err := rows.Scan(&t.SiteID, &t.TenantID, &t.IP); err != nil {
+			return nil, wrap("scan targets", err)
+		}
+		out = append(out, t)
+	}
+	return out, wrap("scan targets", rows.Err())
+}
+
+// ExternalDevice returns the device that stands for a site's public address.
+func (s *Store) ExternalDevice(ctx context.Context, siteID string) (Device, error) {
+	d, err := scanDevice(s.main.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE site_id = ? AND external = 1`, siteID))
+	return d, wrap("external device", err)
+}
+
+// EnsureExternalDevice returns that device, creating it or moving it to the
+// current address.
+func (s *Store) EnsureExternalDevice(ctx context.Context, tenantID, siteID, ip string, now time.Time) (Device, error) {
+	d, err := s.ExternalDevice(ctx, siteID)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		d = Device{ID: id.New("dev"), TenantID: tenantID, SiteID: siteID, IP: ip, Hostname: "", FirstSeen: now, LastSeen: now, External: true}
+		_, err := s.main.ExecContext(ctx, `INSERT INTO devices (`+deviceCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 1)`,
+			d.ID, d.TenantID, d.SiteID, "", d.IP, "", "", ts(now), ts(now))
+		return d, wrap("external device", err)
+	case err != nil:
+		return Device{}, err
+	}
+	_, err = s.main.ExecContext(ctx, `UPDATE devices SET ip = ?, last_seen = ?, gone_at = NULL WHERE id = ?`, ip, ts(now), d.ID)
+	d.IP, d.LastSeen, d.GoneAt = ip, now, nil
+	return d, wrap("external device", err)
 }

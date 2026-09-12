@@ -207,6 +207,16 @@ type ScanConfig struct {
 	MaxPPS    int      `json:"max_pps,omitempty"`    // connection attempts per second; default 20, at most 50
 	Ports     []int    `json:"ports,omitempty"`      // empty: the built-in list
 	Exclude   []string `json:"exclude,omitempty"`    // addresses or networks never touched
+	// External is the outpost's list (ADR-0018, outside view): public addresses of
+	// customer sites to scan from our own infrastructure. A box with this list scans
+	// these instead of its LAN, with the external port list.
+	External []ScanTarget `json:"external,omitempty"`
+}
+
+// ScanTarget is one public address to scan from outside, for one site.
+type ScanTarget struct {
+	SiteID string `json:"site_id"`
+	IP     string `json:"ip"`
 }
 
 // Limits of a scan report chunk.
@@ -228,10 +238,12 @@ type ScanReport struct {
 	Errors    int        `json:"errors,omitempty"`
 }
 
-// ScanHost is one scanned device.
+// ScanHost is one scanned device. SiteID is set by an outpost: the host is the
+// public address of that site, not a device in the box's own LAN.
 type ScanHost struct {
 	IP       string        `json:"ip"`
 	MAC      string        `json:"mac,omitempty"`
+	SiteID   string        `json:"site_id,omitempty"`
 	Services []ScanService `json:"services"`
 }
 

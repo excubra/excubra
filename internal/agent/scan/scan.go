@@ -41,6 +41,13 @@ var DefaultPorts = []int{
 	8000, 8006, 8080, 8081, 8443, 8888, 9000, 9090, 9100, 9200, 9443, 10000, 27017, 62078,
 }
 
+// DefaultExternalPorts is what an outpost asks a customer's public address: the
+// doors an attacker tries first.
+var DefaultExternalPorts = []int{
+	21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 389, 443, 445, 465, 587, 631, 636, 873, 993, 995, 1194, 1433, 1521, 1723, 2049, 2375,
+	3306, 3389, 4443, 5000, 5060, 5061, 5432, 5900, 5985, 5986, 6379, 8000, 8006, 8080, 8081, 8443, 8888, 9000, 9090, 9100, 9200, 9443, 10000, 27017,
+}
+
 // Config is the effective scan configuration.
 type Config struct {
 	Enabled  bool
@@ -48,6 +55,7 @@ type Config struct {
 	MaxPPS   int
 	Ports    []int
 	Exclude  []netip.Prefix
+	External []Target // set: scan these public addresses instead of the LAN
 }
 
 // ParseConfig validates the pulled configuration and returns what the box will do
@@ -87,6 +95,21 @@ func ParseConfig(c wire.ScanConfig) (Config, []string) {
 			cfg.Ports = ports
 		}
 	}
+	for _, t := range c.External {
+		a, err := netip.ParseAddr(strings.TrimSpace(t.IP))
+		if err != nil || !a.Is4() || a.IsPrivate() || a.IsLoopback() || t.SiteID == "" {
+			errs = append(errs, fmt.Sprintf("scan: external target %q for %q is not a public IPv4 address", t.IP, t.SiteID))
+			continue
+		}
+		cfg.External = append(cfg.External, Target{IP: a.String(), SiteID: t.SiteID})
+		if len(cfg.External) >= MaxTargets {
+			errs = append(errs, fmt.Sprintf("scan: more than %d external targets, ignoring the rest", MaxTargets))
+			break
+		}
+	}
+	if len(cfg.External) > 0 && len(c.Ports) == 0 {
+		cfg.Ports = DefaultExternalPorts
+	}
 	for _, x := range c.Exclude {
 		x = strings.TrimSpace(x)
 		if p, err := netip.ParsePrefix(x); err == nil {
@@ -100,10 +123,12 @@ func ParseConfig(c wire.ScanConfig) (Config, []string) {
 	return cfg, errs
 }
 
-// Target is a device to scan, as the discovery knows it.
+// Target is a device to scan: from the discovery (IP and MAC), or a site's public
+// address (IP and SiteID) when the box is an outpost.
 type Target struct {
-	IP  string
-	MAC string
+	IP     string
+	MAC    string
+	SiteID string
 }
 
 // Scanner runs rounds and hands the results to the heartbeat in chunks.
@@ -207,7 +232,7 @@ func (s *Scanner) Round(ctx context.Context, cfg Config) {
 	results := make(map[string]*wire.ScanHost, len(targets))
 	var errs int
 	for _, t := range targets {
-		results[t.IP] = &wire.ScanHost{IP: t.IP, MAC: t.MAC, Services: []wire.ScanService{}}
+		results[t.IP] = &wire.ScanHost{IP: t.IP, MAC: t.MAC, SiteID: t.SiteID, Services: []wire.ScanService{}}
 	}
 	for _, t := range targets {
 		for _, port := range cfg.Ports {
@@ -254,14 +279,19 @@ func (s *Scanner) Round(ctx context.Context, cfg Config) {
 	s.Log.Info("scan: round done", "hosts", len(hosts), "services", found, "errors", errs, "took", s.Now().Sub(started).Round(time.Second))
 }
 
-// targets filters the discovery's devices: IPv4 only, nothing excluded, capped.
+// targets is the outpost's list when there is one, else the discovery's devices:
+// IPv4 only, nothing excluded, capped.
 func (s *Scanner) targets(cfg Config) []Target {
-	if s.Targets == nil {
-		return nil
+	var list []Target
+	switch {
+	case len(cfg.External) > 0:
+		list = cfg.External
+	case s.Targets != nil:
+		list = s.Targets()
 	}
 	var out []Target
 	seen := map[string]bool{}
-	for _, t := range s.Targets() {
+	for _, t := range list {
 		a, err := netip.ParseAddr(t.IP)
 		if err != nil || !a.Is4() || seen[t.IP] {
 			continue
