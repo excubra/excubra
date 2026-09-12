@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -154,12 +155,15 @@ func (s *Sentinel) Apply(c Config) {
 		return
 	}
 	s.mu.Lock()
+	changed := c.Enabled != s.cfg.Enabled || !slices.Equal(c.Ports, s.cfg.Ports)
 	s.cfg = c
 	s.decoys = map[int]bool{}
 	for _, p := range c.Ports {
 		s.decoys[p] = true
 	}
-	s.failed = map[int]bool{}
+	if changed {
+		s.failed = map[int]bool{} // a port that failed to bind gets another try (and another log line) only when the config changed
+	}
 	s.mu.Unlock()
 }
 
