@@ -347,10 +347,12 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	for _, r := range reports {
 		queued += len(r.Rounds)
 	}
+	box := boxInfo(a.st.Dir)
+	box.LAN = lanPrefixes()
 	hb := wire.Heartbeat{
 		SentAt:          a.now().UTC(),
 		Agent:           wire.AgentInfo{Version: version.Version, UptimeS: uptimeSeconds(), BootID: bootID(), OS: runtime.GOOS, Arch: runtime.GOARCH, SealKey: a.sealPublic()},
-		Box:             boxInfo(a.st.Dir),
+		Box:             box,
 		Netbird:         a.netbird.Status(ctx),
 		NetbirdOperator: a.operatorStatus(ctx),
 		ConfigVersion:   cfgVersion,

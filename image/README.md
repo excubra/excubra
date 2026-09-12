@@ -12,29 +12,39 @@ A box is a Debian machine with one package on it, always the same three parts
    idle. The opt-in: if the customer gets an overlay of their own, put management
    URL and setup key in under Box → *Kunden-NetBird*; the box joins once.
 
-`provision-box.sh` makes this out of a fresh Debian: a mini PC, Raspberry Pi OS
-Lite, a VM, or an LXC container on the customer's Proxmox. Ten boxes on the shelf
-are provisioned the same way and differ in nothing but their enrollment key.
+Nobody touches a box after it is plugged in (ADR-0017): the key is made for a
+site, the box assigns itself, joins the operator stack, reports its LAN, and the
+server switches remote access on. Ten boxes on the shelf differ in nothing but
+their key.
 
-## Mini PC or VM (amd64)
+## The normal way: one command, printed by the console
 
-1. Install Debian 13 netinst: minimal, only "SSH server" and "standard system
-   utilities", a root SSH key, wired network, hostname e.g. `ex0-box-buero`.
-2. In the console: Keys → create one enrollment key, copy it.
-3. From the repository root:
+In the console: **Neue Box** → pick the site → the key appears once, together with
+two commands. Copy the one you need.
 
-```
-image/deploy-box.sh root@<box> --enroll-key 'EX0:1:…' --hostname ex0-box-buero --ssh-lan
-```
-
-## Container on a Proxmox host (same package, no SSH into the container)
-
-Files go in with `pct push`, the provisioning runs with `pct exec`, over SSH to the
-host. The container needs `features: nesting=1` (for the namespace) and `/dev/net/tun`:
+On a **Proxmox host** (creates and provisions the container):
 
 ```bash
-image/deploy-box-pct.sh root@<proxmox> <ctid> --enroll-key 'EX0:1:…' --hostname muster-box
+curl -fsSL https://raw.githubusercontent.com/excubra/excubra/v0.2.8/image/ex0-box-pct.sh | bash -s -- --enroll-key 'EX0:1:…' --hostname ex0-kunde-standort --version 0.2.8
 ```
+
+On the **box itself** (fresh Debian 13, as root: mini PC, Raspberry Pi, VM):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/excubra/excubra/v0.2.8/image/ex0-box.sh | bash -s -- --enroll-key 'EX0:1:…' --hostname ex0-kunde-standort --version 0.2.8
+```
+
+`ex0-box.sh` downloads the release, verifies `SHA256SUMS` against the release public
+key and runs `provision-box.sh`. `ex0-box-pct.sh` fetches the Debian 13 template if
+missing, creates an unprivileged container with nesting and `/dev/net/tun`, starts
+it and runs `ex0-box.sh` inside (`--ctid`, `--bridge`, `--ip`/`--gw`, `--storage`,
+`--disk`, `--memory` when the defaults do not fit).
+
+## From a checkout (development)
+
+`image/deploy-box.sh root@<box> …` and `image/deploy-box-pct.sh root@<proxmox> <ctid> …`
+build the binary from the working tree and provision over SSH; everything after
+the target is passed to `provision-box.sh`.
 
 In unprivilegierten Containern sind `sysctl`, `ufw`, `hostnamectl` und `timedatectl`
 schreibgeschützt; das Skript überspringt sie mit Hinweis. Der Agent weicht dann für Ping auf
@@ -62,9 +72,11 @@ us, no package upgrades, its NetBird untouched. Decided on the first run, rememb
 in `/etc/excubra/provision.env`. The operator peer still comes along — in its own
 namespace it cannot touch the guest's daemon.
 
-The agent enrolls with the key, deletes it, and heartbeats. The box shows up under
-Boxen → "nicht zugeordnet"; assign it to a site, and within minutes the inventory
-fills and the operator peer appears in the technicians' stack.
+The agent enrolls with the key, deletes it, and heartbeats. A key made for a site
+puts the box there at once; a key without a site leaves it under Boxen →
+"nicht zugeordnet" until somebody assigns it. Within minutes the inventory fills,
+the operator peer appears in the technicians' stack, and the LAN the box reports
+is switched on for remote access.
 
 ## Raspberry Pi (arm64)
 

@@ -11,15 +11,16 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { get, post, type AuditRow, type KeyRow, type MaintenanceWindow, type TokenRow, type UserRow, type WebhookRow } from "@/lib/api"
+import { get, post, type AuditRow, type KeyRow, type KeysData, type InstallerCommand, type MaintenanceWindow, type TokenRow, type UserRow, type WebhookRow } from "@/lib/api"
 import { fmtDateTime, fmtShort } from "@/lib/format"
 
 function useAct(keys: string[][]) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ path, form }: { path: string; form?: Record<string, string> }) => post<{ ok: boolean; message: string; to?: string; secrets?: string[]; token?: string; secret?: string }>(path, form),
+    mutationFn: ({ path, form }: { path: string; form?: Record<string, string> }) => post<{ ok: boolean; message: string; to?: string; secrets?: string[]; commands?: { title: string; cmd: string }[]; token?: string; secret?: string }>(path, form),
     onSuccess: (r) => { toast.success(r.message); keys.forEach((k) => qc.invalidateQueries({ queryKey: k })) },
     onError: (e) => toast.error(e.message),
   })
@@ -34,7 +35,8 @@ function Secret({ label, value }: { label: string; value: string }) {
   )
 }
 
-function CreateDialog({ title, description, fields, onSubmit, pending, trigger }: { title: string; description: string; fields: { key: string; label: string; placeholder?: string; type?: string; def?: string }[]; onSubmit: (v: Record<string, string>) => void; pending: boolean; trigger: ReactNode }) {
+type CreateField = { key: string; label: string; placeholder?: string; type?: string; def?: string; options?: { value: string; label: string }[] }
+function CreateDialog({ title, description, fields, onSubmit, pending, trigger, submitLabel }: { title: string; description: string; fields: CreateField[]; onSubmit: (v: Record<string, string>) => void; pending: boolean; trigger: ReactNode; submitLabel?: string }) {
   const [open, setOpen] = useState(false)
   const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((f) => [f.key, f.def ?? ""])))
   return (
@@ -42,8 +44,13 @@ function CreateDialog({ title, description, fields, onSubmit, pending, trigger }
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
-        <div className="grid gap-4">{fields.map((f) => <div key={f.key} className="grid gap-2"><Label htmlFor={f.key}>{f.label}</Label><Input id={f.key} type={f.type} value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} placeholder={f.placeholder} /></div>)}</div>
-        <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Abbrechen</Button><Button onClick={() => { onSubmit(v); setOpen(false) }} disabled={pending}>Anlegen</Button></DialogFooter>
+        <div className="grid gap-4">{fields.map((f) => <div key={f.key} className="grid gap-2"><Label htmlFor={f.key}>{f.label}</Label>{f.options ? (
+          <Select value={v[f.key] || "__none"} onValueChange={(val) => setV({ ...v, [f.key]: val === "__none" ? "" : val })}>
+            <SelectTrigger id={f.key}><SelectValue placeholder={f.placeholder} /></SelectTrigger>
+            <SelectContent>{f.options.map((o) => <SelectItem key={o.value || "__none"} value={o.value || "__none"}>{o.label}</SelectItem>)}</SelectContent>
+          </Select>
+        ) : <Input id={f.key} type={f.type} value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} placeholder={f.placeholder} />}</div>)}</div>
+        <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Abbrechen</Button><Button onClick={() => { onSubmit(v); setOpen(false) }} disabled={pending}>{submitLabel ?? "Anlegen"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   )
@@ -52,11 +59,14 @@ function CreateDialog({ title, description, fields, onSubmit, pending, trigger }
 // ---- Enrollment-Keys --------------------------------------------------------------------
 
 export function KeysPage() {
-  const q = useQuery({ queryKey: ["keys"], queryFn: () => get<KeyRow[]>("/api/keys") })
+  const q = useQuery({ queryKey: ["keys"], queryFn: () => get<KeysData>("/api/keys") })
   const act = useAct([["keys"]])
   const [fresh, setFresh] = useState<string[]>([])
+  const [cmds, setCmds] = useState<InstallerCommand[]>([])
+  const siteOptions = [{ value: "", label: "kein Standort (Box später zuordnen)" }, ...(q.data?.sites ?? []).map((s) => ({ value: s.ID, label: s.Name }))]
   const cols: ColumnDef<KeyRow, unknown>[] = [
     { id: "id", header: "Key", accessorFn: (r) => r.id, cell: ({ getValue }) => <span className="font-mono text-xs">{String(getValue())}</span> },
+    { id: "site", header: "Standort", accessorFn: (r) => r.siteName, cell: ({ getValue }) => getValue() ? <span>{String(getValue())}</span> : <span className="text-muted-foreground">–</span> },
     { id: "note", header: "Notiz", accessorFn: (r) => r.note },
     { id: "created", header: "Erstellt", accessorFn: (r) => r.createdAt, cell: ({ getValue }) => <span className="text-muted-foreground">{fmtShort(String(getValue()))}</span> },
     { id: "exp", header: "Gültig bis", accessorFn: (r) => r.expiresAt, cell: ({ getValue }) => <span className="text-muted-foreground">{fmtShort(String(getValue()))}</span> },
@@ -65,11 +75,14 @@ export function KeysPage() {
   ]
   return (
     <>
-      <PageHeader crumbs={[{ label: "Enrollment-Keys" }]} title="Enrollment-Keys" sub="Einmal gültig. Der Key steckt in der Box, die Box meldet sich, du ordnest sie zu."
-        actions={<CreateDialog title="Neuer Enrollment-Key" description="Der Key wird genau einmal angezeigt. Er enthält Ingest-Adresse und CA-Fingerprint." fields={[{ key: "note", label: "Notiz", placeholder: "Kunde, Standort" }, { key: "count", label: "Anzahl", type: "number", def: "1" }, { key: "expires_days", label: "Gültig (Tage)", type: "number", def: "7" }]} pending={act.isPending} trigger={<Button size="sm"><Plus />Neuer Key</Button>}
-          onSubmit={(v) => act.mutate({ path: "/api/keys", form: v }, { onSuccess: (r) => setFresh(r.secrets ?? []) })} />} />
-      {fresh.map((s) => <Secret key={s} label="Neuer Key, einmalig sichtbar" value={s} />)}
-      <DataTable columns={cols} data={q.data ?? []} search={(r) => `${r.id} ${r.note} ${r.usedBy}`} initialSort={[{ id: "created", desc: true }]} emptyTitle="Noch kein Key" />
+      <PageHeader crumbs={[{ label: "Neue Box" }]} title="Neue Box" sub="Ein Key je Box, einmal gültig, mit Standort. Die Box meldet sich, ordnet sich selbst zu, tritt dem Techniker-Stack bei, ihr LAN wird freigeschaltet. Einen Befehl kopieren, fertig."
+        actions={<CreateDialog title="Neue Box" description="Der Key wird genau einmal angezeigt, zusammen mit dem Befehl für den Proxmox-Host oder die Box selbst." submitLabel="Key erzeugen"
+          fields={[{ key: "site_id", label: "Standort", options: siteOptions, placeholder: "Standort wählen" }, { key: "note", label: "Notiz (optional)", placeholder: "z. B. Lagergerät Nr. 3" }, { key: "expires_days", label: "Gültig (Tage)", type: "number", def: "30" }]}
+          pending={act.isPending} trigger={<Button size="sm"><Plus />Neue Box</Button>}
+          onSubmit={(v) => act.mutate({ path: "/api/keys", form: v }, { onSuccess: (r) => { setFresh(r.secrets ?? []); setCmds(r.commands ?? []) } })} />} />
+      {fresh.map((s) => <Secret key={s} label="Enrollment-Key, einmalig sichtbar" value={s} />)}
+      {cmds.map((c) => <Secret key={c.cmd} label={c.title} value={c.cmd} />)}
+      <DataTable columns={cols} data={q.data?.keys ?? []} search={(r) => `${r.id} ${r.note} ${r.usedBy} ${r.siteName}`} initialSort={[{ id: "created", desc: true }]} emptyTitle="Noch kein Key" emptyText="„Neue Box“ erzeugt den Key und die Befehle." />
     </>
   )
 }

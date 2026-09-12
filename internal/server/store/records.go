@@ -53,6 +53,8 @@ type Box struct {
 	// the second NetBird client, in the operator's overlay (remote access)
 	NetbirdOpStatus string
 	NetbirdOpIP     string
+	// the box's own networks as it reports them, default-route interface first
+	LAN []string
 }
 
 // EnrollmentKey is a one-time key; only the hash of the secret is stored.
@@ -60,6 +62,7 @@ type EnrollmentKey struct {
 	ID         string
 	SecretHash string
 	Note       string
+	SiteID     string // made for a site: the box lands there on enrollment (ADR-0017)
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	UsedAt     *time.Time

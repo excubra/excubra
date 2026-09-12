@@ -100,6 +100,9 @@ type BoxInfo struct {
 	MemTotalBytes  uint64  `json:"mem_total_bytes"`
 	MemFreeBytes   uint64  `json:"mem_free_bytes"`
 	ClockOffsetMS  *int64  `json:"clock_offset_ms"` // box clock minus server clock, from the last response; nil if unknown
+	// LAN lists the private IPv4 networks the box sits in, the interface with the
+	// default route first; the server takes the first as the site's LAN (ADR-0017).
+	LAN []string `json:"lan,omitempty"`
 }
 
 // NetbirdInfo reports the state of the NetBird client on the box.
