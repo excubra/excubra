@@ -18,6 +18,7 @@ import (
 	"github.com/excubra/excubra/internal/id"
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/seal"
+	"github.com/excubra/excubra/internal/secretbox"
 	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/catalog"
@@ -63,7 +64,22 @@ func cliStore(envFile string) (*store.Store, Config, error) {
 		return nil, Config{}, err
 	}
 	st, err := store.Open(cfg.DataDir)
-	return st, cfg, err
+	if err != nil {
+		return nil, cfg, err
+	}
+	if st.Secrets, err = loadSecrets(cfg); err != nil {
+		_ = st.Close()
+		return nil, cfg, err
+	}
+	return st, cfg, nil
+}
+
+// loadSecrets reads the key that seals secrets at rest, or nil when none is configured.
+func loadSecrets(cfg Config) (*secretbox.Box, error) {
+	if cfg.SecretKeyFile == "" {
+		return nil, nil //nolint:nilnil // no key configured is a state, not an error
+	}
+	return secretbox.Load(cfg.SecretKeyFile)
 }
 
 // userCmd: excubra server user add|passwd|disable|enable|list
@@ -817,7 +833,7 @@ func settingCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(rest[1], "token") || strings.Contains(rest[1], "secret") {
+		if store.SecretSetting(rest[1]) || strings.Contains(rest[1], "token") || strings.Contains(rest[1], "secret") {
 			if v == "" {
 				fmt.Println("(unset)")
 			} else {

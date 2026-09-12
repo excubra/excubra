@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/excubra/excubra/internal/secretbox"
 )
 
 // Validity periods and the renewal threshold.
@@ -55,13 +57,51 @@ type CA struct {
 // LoadOrCreateCA loads ca.crt/ca.key from dir or creates a new ECDSA P-256 root.
 // If exactly one of the two files exists it refuses, rather than silently
 // creating a second CA next to an orphaned one.
+// KeySeal and KeyOpen wrap private key files at rest (ADR-0009 amendment):
+// the server sets them from its secret key; nil keeps the files plain. A key
+// file found plain while KeySeal is set is sealed on the spot, once.
+var (
+	KeySeal func(plain []byte) []byte
+	KeyOpen func(data []byte) ([]byte, bool, error)
+)
+
+// readKey reads a private key file through the hooks.
+func readKey(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if KeyOpen == nil {
+		if secretbox.Sealed(string(data)) {
+			return nil, fmt.Errorf("pki: %s is sealed; the secret key (EXCUBRA_SECRET_KEY_FILE) is needed to use it", path)
+		}
+		return data, nil
+	}
+	plain, sealed, err := KeyOpen(data)
+	if err != nil {
+		return nil, fmt.Errorf("pki: %s: %w", path, err)
+	}
+	if !sealed && KeySeal != nil {
+		_ = writeFile(path, KeySeal(plain), 0o600)
+	}
+	return plain, nil
+}
+
+// writeKey writes a private key file through the hooks.
+func writeKey(path string, plain []byte) error {
+	if KeySeal != nil {
+		return writeFile(path, KeySeal(plain), 0o600)
+	}
+	return writeFile(path, plain, 0o600)
+}
+
 func LoadOrCreateCA(dir string) (*CA, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("pki: %w", err)
 	}
 	certPath, keyPath := filepath.Join(dir, CACertFile), filepath.Join(dir, CAKeyFile)
 	certPEM, errC := os.ReadFile(certPath)
-	keyPEM, errK := os.ReadFile(keyPath)
+	keyPEM, errK := readKey(keyPath)
 	switch {
 	case errC == nil && errK == nil:
 		return LoadCA(certPEM, keyPEM)
@@ -100,7 +140,7 @@ func LoadOrCreateCA(dir string) (*CA, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := writeFile(keyPath, keyPEM, 0o600); err != nil {
+	if err := writeKey(keyPath, keyPEM); err != nil {
 		return nil, err
 	}
 	if err := writeFile(certPath, certPEM, 0o644); err != nil {
@@ -243,7 +283,7 @@ func (ca *CA) IssueServerNames(hosts []string, validity time.Duration) (tls.Cert
 func (ca *CA) LoadOrCreateServerCert(dir, host string) (tls.Certificate, error) {
 	certPath, keyPath := filepath.Join(dir, ServerCertFile), filepath.Join(dir, ServerKeyFile)
 	if certPEM, err := os.ReadFile(certPath); err == nil {
-		if keyPEM, err := os.ReadFile(keyPath); err == nil {
+		if keyPEM, err := readKey(keyPath); err == nil {
 			if tc, ok := ca.usableServerCert(certPEM, keyPEM, host); ok {
 				return tc, nil
 			}
@@ -253,7 +293,7 @@ func (ca *CA) LoadOrCreateServerCert(dir, host string) (tls.Certificate, error) 
 	if err != nil {
 		return tls.Certificate{}, err
 	}
-	if err := writeFile(keyPath, keyPEM, 0o600); err != nil {
+	if err := writeKey(keyPath, keyPEM); err != nil {
 		return tls.Certificate{}, err
 	}
 	if err := writeFile(certPath, certPEM, 0o644); err != nil {

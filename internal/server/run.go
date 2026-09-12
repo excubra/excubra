@@ -89,11 +89,26 @@ func run(envFile string) error {
 	if err := waitForOverlayAddress(cfg, log); err != nil {
 		return err
 	}
+	secrets, err := loadSecrets(cfg)
+	if err != nil {
+		return err
+	}
+	if secrets == nil {
+		log.Warn("secrets at rest are not encrypted: set EXCUBRA_SECRET_KEY_FILE (ADR-0009)")
+	} else {
+		pki.KeySeal, pki.KeyOpen = secrets.SealBytes, secrets.OpenBytes
+	}
 	st, err := store.Open(cfg.DataDir)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
+	st.Secrets = secrets
+	if n, err := st.SealPlainSecrets(context.Background()); err != nil {
+		return err
+	} else if n > 0 {
+		log.Info("sealed secrets that were stored in plain text", "count", n)
+	}
 	if wasRolledBack {
 		log.Warn("self-update rolled back", "failed_version", rolledBack.To, "restored", rolledBack.From)
 		_ = st.Audit(context.Background(), time.Now(), "server", "server.update.rolled_back", rolledBack.To, "restored "+rolledBack.From+": the new build did not confirm within 5 minutes")

@@ -16,6 +16,9 @@ EXCUBRA_INGEST_PUBLIC_HOST=127.0.0.1:18443
 EXCUBRA_OVERLAY_LISTEN=127.0.0.1:18080
 EXCUBRA_LOG_LEVEL=warn
 ENV
+# the backup holds sealed keys and tokens; the restore needs the same secret key
+KEYFILE="$(sed -n 's/^EXCUBRA_SECRET_KEY_FILE=//p' /etc/excubra/server.env 2>/dev/null)"
+if [ -n "$KEYFILE" ] && [ -r "$KEYFILE" ]; then echo "EXCUBRA_SECRET_KEY_FILE=$KEYFILE" >> "$TMP/server.env"; fi
 /usr/local/bin/excubra server run --env-file "$TMP/server.env" &
 PID=$!
 for i in $(seq 1 20); do

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/id"
+	"github.com/excubra/excubra/internal/secretbox"
 	"github.com/excubra/excubra/internal/server/state"
 	"github.com/excubra/excubra/internal/wire"
 )
@@ -1136,20 +1137,69 @@ func (s *Store) ChannelVersion(ctx context.Context, channel string) (string, err
 	return s.Setting(ctx, "channel."+channel)
 }
 
-// Setting returns a setting value ("" if unset).
+// Setting returns a setting value ("" if unset); a sealed one is opened.
 func (s *Store) Setting(ctx context.Context, key string) (string, error) {
 	var v string
 	err := s.main.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
-	return v, wrap("setting", err)
+	if err != nil {
+		return "", wrap("setting", err)
+	}
+	return s.Secrets.Open(v)
 }
 
-// SetSetting stores a setting.
+// SetSetting stores a setting; a secret one (a token, a key) is sealed when the
+// store has a key.
 func (s *Store) SetSetting(ctx context.Context, key, value string) error {
+	if SecretSetting(key) && value != "" {
+		value = s.Secrets.Seal(value)
+	}
 	_, err := s.main.ExecContext(ctx, `INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, key, value)
 	return wrap("set setting", err)
+}
+
+// SecretSetting reports whether a setting holds a secret: those are sealed at
+// rest and masked on the CLI.
+func SecretSetting(key string) bool {
+	for _, suffix := range []string{".token", ".api_key", ".key", ".secret", ".password"} {
+		if strings.HasSuffix(key, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// SealPlainSecrets seals the secret settings still stored in plain text — once,
+// after a key was configured on a running installation. It returns how many.
+func (s *Store) SealPlainSecrets(ctx context.Context) (int, error) {
+	if s.Secrets == nil {
+		return 0, nil
+	}
+	rows, err := s.main.QueryContext(ctx, `SELECT key, value FROM settings`)
+	if err != nil {
+		return 0, wrap("seal secrets", err)
+	}
+	type kv struct{ k, v string }
+	var todo []kv
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			_ = rows.Close()
+			return 0, wrap("seal secrets", err)
+		}
+		if SecretSetting(k) && v != "" && !secretbox.Sealed(v) {
+			todo = append(todo, kv{k, v})
+		}
+	}
+	_ = rows.Close()
+	for _, e := range todo {
+		if _, err := s.main.ExecContext(ctx, `UPDATE settings SET value = ? WHERE key = ?`, s.Secrets.Seal(e.v), e.k); err != nil {
+			return 0, wrap("seal secrets", err)
+		}
+	}
+	return len(todo), nil
 }
 
 // ---- helpers --------------------------------------------------------------------------
