@@ -111,14 +111,15 @@ func (s *Store) RenameSite(ctx context.Context, siteID, name string) error {
 // ---- boxes -----------------------------------------------------------------------
 
 const boxCols = `id, site_id, name, hw_id, agent_version, os, arch, cert_serial, cert_not_after, channel, discovery_mode, discovery_subnets,
-	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip`
+	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip, lan`
 
 func scanBox(sc interface{ Scan(...any) error }) (Box, error) {
 	var b Box
 	var site, revoked sql.NullString
-	var notAfter, enrolled, subnets, lastSeen string
+	var notAfter, enrolled, subnets, lastSeen, lan string
 	err := sc.Scan(&b.ID, &site, &b.Name, &b.HWID, &b.AgentVersion, &b.OS, &b.Arch, &b.CertSerial, &notAfter, &b.Channel, &b.DiscoveryMode, &subnets,
-		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP)
+		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP, &lan)
+	_ = json.Unmarshal([]byte(lan), &b.LAN)
 	b.SiteID = site.String
 	b.CertNotAfter = parseTS(notAfter)
 	b.LastSeen = parseTS(lastSeen)
@@ -137,9 +138,10 @@ func (s *Store) CreateBox(ctx context.Context, b Box) error {
 		b.DiscoveryMode = wire.DiscoverySweep
 	}
 	subnets, _ := json.Marshal(nonNil(b.DiscoverySubnets))
-	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	lanJSON, _ := json.Marshal(nonNil(b.LAN))
+	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ID, nullIfEmpty(b.SiteID), b.Name, b.HWID, b.AgentVersion, b.OS, b.Arch, b.CertSerial, ts(b.CertNotAfter), b.Channel, b.DiscoveryMode, string(subnets),
-		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey, b.NetbirdOpStatus, b.NetbirdOpIP)
+		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey, b.NetbirdOpStatus, b.NetbirdOpIP, string(lanJSON))
 	return wrap("create box", err)
 }
 
@@ -149,9 +151,10 @@ func (s *Store) UpdateBoxHeartbeat(ctx context.Context, boxID string, hb wire.He
 	if hb.NetbirdOperator != nil {
 		opStatus, opIP = hb.NetbirdOperator.Status, hb.NetbirdOperator.IP
 	}
+	lanJSON, _ := json.Marshal(nonNil(hb.Box.LAN))
 	return s.exec1(ctx, "update box heartbeat", `UPDATE boxes SET agent_version = ?, os = ?, arch = ?, netbird_status = ?, netbird_ip = ?,
-		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ? WHERE id = ?`,
-		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, boxID)
+		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ? WHERE id = ?`,
+		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), boxID)
 }
 
 // SetBoxDiscovery sets the discovery mode and the additional subnets to sweep.
@@ -276,22 +279,22 @@ func (s *Store) DeleteBox(ctx context.Context, boxID string) error {
 
 // ---- enrollment keys -------------------------------------------------------------
 
-const keyCols = `id, secret_hash, note, created_at, expires_at, used_at, used_by_box, revoked_at`
+const keyCols = `id, secret_hash, note, created_at, expires_at, used_at, used_by_box, revoked_at, site_id`
 
 func scanKey(sc interface{ Scan(...any) error }) (EnrollmentKey, error) {
 	var k EnrollmentKey
 	var created, expires string
-	var used, usedBy, revoked sql.NullString
-	err := sc.Scan(&k.ID, &k.SecretHash, &k.Note, &created, &expires, &used, &usedBy, &revoked)
+	var used, usedBy, revoked, site sql.NullString
+	err := sc.Scan(&k.ID, &k.SecretHash, &k.Note, &created, &expires, &used, &usedBy, &revoked, &site)
 	k.CreatedAt, k.ExpiresAt = parseTS(created), parseTS(expires)
-	k.UsedAt, k.UsedByBox, k.RevokedAt = parseTSP(used), usedBy.String, parseTSP(revoked)
+	k.UsedAt, k.UsedByBox, k.RevokedAt, k.SiteID = parseTSP(used), usedBy.String, parseTSP(revoked), site.String
 	return k, err
 }
 
 // CreateEnrollmentKey stores a key (hash only).
 func (s *Store) CreateEnrollmentKey(ctx context.Context, k EnrollmentKey) error {
-	_, err := s.main.ExecContext(ctx, `INSERT INTO enrollment_keys (id, secret_hash, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		k.ID, k.SecretHash, k.Note, ts(k.CreatedAt), ts(k.ExpiresAt))
+	_, err := s.main.ExecContext(ctx, `INSERT INTO enrollment_keys (id, secret_hash, note, created_at, expires_at, site_id) VALUES (?, ?, ?, ?, ?, ?)`,
+		k.ID, k.SecretHash, k.Note, ts(k.CreatedAt), ts(k.ExpiresAt), nullIfEmpty(k.SiteID))
 	return wrap("create enrollment key", err)
 }
 

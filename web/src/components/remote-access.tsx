@@ -37,7 +37,7 @@ export function RemoteAccessCard({ siteId }: { siteId: string }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Waypoints className="size-4" />Fernzugriff<Badge variant="outline" className={cls}>{state}</Badge></CardTitle>
         <CardDescription>
-          Das LAN dieses Standorts im Techniker-Stack. Die Box ist dort Peer, sobald sie zugeordnet ist und ihren Operator-Daemon meldet; hier wird ihr LAN als Netzwerk freigeschaltet. Kein Tunnelwechsel mehr, kein Profil.
+          Das LAN dieses Standorts im Techniker-Stack. Die Box ist dort Peer, sobald sie zugeordnet ist, und das Netz, das sie meldet, wird von selbst freigeschaltet. Hier lässt es sich ändern, abschalten oder wieder einschalten. Kein Tunnelwechsel, kein Profil.
           {d.boxOperator && <> · Box im Techniker-Stack: {d.boxOperator === "connected" ? <>verbunden <span className="font-mono">{d.boxOpIp}</span></> : d.boxOperator}</>}
         </CardDescription>
         {a && (

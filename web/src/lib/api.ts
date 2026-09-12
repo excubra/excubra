@@ -48,7 +48,7 @@ export interface Me { user: string; csrf: string; version: string; now: string; 
 export interface BoxState { ID: string; Status: string; LastHeartbeat: string; SilentSince: string; AgentVersion: string }
 export interface BoxRow {
   ID: string; SiteID: string; Name: string; HWID: string; AgentVersion: string; OS: string; Arch: string; CertSerial: string; CertNotAfter: string
-  Channel: string; DiscoveryMode: string; DiscoverySubnets: string[] | null; NetbirdStatus: string; NetbirdIP: string; NetbirdOpStatus?: string; NetbirdOpIP?: string
+  Channel: string; DiscoveryMode: string; DiscoverySubnets: string[] | null; NetbirdStatus: string; NetbirdIP: string; NetbirdOpStatus?: string; NetbirdOpIP?: string; LAN?: string[] | null
   DiskTotalBytes: number; DiskFreeBytes: number; UptimeS: number; LastSeen: string; EnrolledAt: string; RevokedAt: string | null
   SealKey?: string
   State: BoxState; SiteName: string; TenantName: string; Assigned: boolean
@@ -114,7 +114,9 @@ export interface HostData {
   Events: EventRow[] | null; Hours: HourBucket[] | null; Tab: string
 }
 export interface MaintenanceWindow { ID: string; Scope: string; TargetID: string; Until: string; Reason: string; SetBy: string; StartedAt?: string }
-export interface KeyRow { id: string; note: string; createdAt: string; expiresAt: string; usedAt: string | null; usedBy: string; revokedAt: string | null }
+export interface KeyRow { id: string; note: string; siteId: string; siteName: string; createdAt: string; expiresAt: string; usedAt: string | null; usedBy: string; revokedAt: string | null }
+export interface KeysData { keys: KeyRow[]; sites: { ID: string; Name: string }[] | null }
+export interface InstallerCommand { title: string; cmd: string }
 export interface TokenRow { id: string; name: string; tenants: string[]; createdAt: string; lastUsed: string | null; revokedAt: string | null }
 export interface WebhookRow { id: string; name: string; url: string; enabled: boolean; createdAt: string }
 export interface UserRow { id: string; name: string; totp: boolean; disabled: boolean; locked: boolean; lockedUntil: string | null; failedLogins: number; createdAt: string }

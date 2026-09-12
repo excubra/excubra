@@ -31,6 +31,10 @@ const (
 	SettingTechGroup = "netbird.operator.tech_group"
 	SettingLANGroup  = "netbird.operator.lan_group"
 	SettingBoxGroup  = "netbird.operator.box_group"
+	// SettingAutoLAN ("1" by default) lets the server switch a site's LAN on by
+	// itself once its box is a peer and reports its network (ADR-0017); "0" keeps
+	// the switch manual.
+	SettingAutoLAN = "remote.auto_lan"
 	// PolicyName lets technicians into every switched-on LAN; PolicyBoxName lets
 	// them onto the boxes themselves (SSH at the box's overlay address, ADR-0016).
 	PolicyName    = "ex0: Techniker → Kunden-LANs"
@@ -232,7 +236,8 @@ func (s *Service) Disable(ctx context.Context, siteID, actor string) (store.Remo
 	return ra, s.Store.SetRemoteAccess(ctx, ra)
 }
 
-// Remove deletes the network in our stack and the row; the box stays a peer — that
+// Remove deletes the network in our stack. The row stays, switched off, so the
+// automatic switch does not put the LAN straight back; the box stays a peer — that
 // is part of the box image, not of the site's switch.
 func (s *Service) Remove(ctx context.Context, siteID, actor string) error {
 	ra, err := s.Store.RemoteAccess(ctx, siteID)
@@ -249,7 +254,9 @@ func (s *Service) Remove(ctx context.Context, siteID, actor string) error {
 		}
 	}
 	_ = s.Store.Audit(ctx, s.Now(), actor, "remote.remove", siteID, ra.CIDR)
-	return s.Store.DeleteRemoteAccess(ctx, siteID)
+	ra.NetworkID, ra.ResourceID, ra.RouterID, ra.PeerID, ra.PeerIP = "", "", "", "", ""
+	ra.Enabled, ra.State, ra.Detail, ra.UpdatedAt = false, store.RemoteOff, "entfernt von "+actor+"; Einschalten legt das Netzwerk neu an", s.Now()
+	return s.Store.SetRemoteAccess(ctx, ra)
 }
 
 // Reconcile moves everything forward: boxes that run the operator daemon get their
@@ -258,6 +265,7 @@ func (s *Service) Remove(ctx context.Context, siteID, actor string) error {
 func (s *Service) Reconcile(ctx context.Context) {
 	if c, err := s.client(ctx); err == nil {
 		s.ensurePeers(ctx, c)
+		s.ensureLANs(ctx)
 	}
 	rows, err := s.Store.RemoteAccesses(ctx)
 	if err != nil {
@@ -379,6 +387,40 @@ func (s *Service) ensurePolicies(ctx context.Context, c *netbird.Client) (lan, b
 		return lan, box, fmt.Errorf("Richtlinie: %w", err)
 	}
 	return lan, box, nil
+}
+
+// ensureLANs switches remote access on for every site whose box is a peer and
+// reports its network — unless the site has a row already: a person switched it
+// off, or an earlier attempt left its reason there. Nobody types a LAN any more;
+// the console shows what happened and lets a person change it.
+func (s *Service) ensureLANs(ctx context.Context) {
+	if s.setting(ctx, SettingAutoLAN, "1") != "1" {
+		return
+	}
+	boxes, err := s.Store.Boxes(ctx, "")
+	if err != nil {
+		return
+	}
+	for _, b := range boxes {
+		if b.RevokedAt != nil || b.SiteID == "" || b.NetbirdOpStatus != wire.NetbirdConnected || b.NetbirdOpIP == "" || len(b.LAN) == 0 {
+			continue
+		}
+		if _, err := s.Store.RemoteAccess(ctx, b.SiteID); err == nil {
+			continue
+		}
+		lan := b.LAN[0]
+		ra, err := s.Enable(ctx, b.SiteID, lan, "auto")
+		if err != nil {
+			// leave the reason where a person looks: the site's card
+			site, _ := s.Store.Site(ctx, b.SiteID)
+			now := s.Now()
+			_ = s.Store.SetRemoteAccess(ctx, store.RemoteAccess{SiteID: b.SiteID, TenantID: site.TenantID, BoxID: b.ID, CIDR: lan, Enabled: false, State: store.RemoteError,
+				Detail: "nicht automatisch eingeschaltet: " + err.Error(), RequestedBy: "auto", CreatedAt: now, UpdatedAt: now})
+			s.Log.Warn("remote access not switched on automatically", "site", b.SiteID, "lan", lan, "err", err)
+			continue
+		}
+		s.Log.Info("remote access switched on automatically", "site", b.SiteID, "lan", lan, "state", ra.State)
+	}
 }
 
 // PeerState is one box's standing in the operator stack, as the CLI lists it.

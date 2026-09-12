@@ -181,6 +181,13 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Engine.RegisterBox(b)
+	if ek.SiteID != "" {
+		// a key made for a site: the box lands there by itself (ADR-0017); the tenant
+		// comes from the key record on the server, never from the box
+		if err := s.Engine.AssignBox(r.Context(), boxID, ek.SiteID, "key "+ek.ID); err != nil {
+			s.Log.Warn("enroll: pre-assignment failed", "box", boxID, "site", ek.SiteID, "err", err)
+		}
+	}
 	_ = s.Store.Audit(r.Context(), now, "ingest", "box.enroll", boxID, "key "+ek.ID+" hw "+b.HWID+" from "+ip)
 	s.Log.Info("box enrolled", "box", boxID, "key", ek.ID, "ip", ip)
 	writeJSON(w, http.StatusOK, wire.EnrollResponse{BoxID: boxID, Certificate: string(certPEM), CA: string(s.CA.CertPEM()), NotAfter: cert.NotAfter})

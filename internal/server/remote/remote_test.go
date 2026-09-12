@@ -52,9 +52,9 @@ func must(t *testing.T, err error) {
 }
 
 // the box reports its operator daemon in the heartbeat; that is all the server sees of it
-func (w *world) report(t *testing.T, boxID, status, ip string) {
+func (w *world) report(t *testing.T, boxID, status, ip string, lan ...string) {
 	t.Helper()
-	must(t, w.st.UpdateBoxHeartbeat(context.Background(), boxID, wire.Heartbeat{Agent: wire.AgentInfo{Version: "0.2.7"}, NetbirdOperator: &wire.NetbirdInfo{Status: status, IP: ip}}, w.now))
+	must(t, w.st.UpdateBoxHeartbeat(context.Background(), boxID, wire.Heartbeat{Agent: wire.AgentInfo{Version: "0.2.7"}, Box: wire.BoxInfo{LAN: lan}, NetbirdOperator: &wire.NetbirdInfo{Status: status, IP: ip}}, w.now))
 }
 
 func (w *world) operatorKey(t *testing.T, boxID string) (store.NetbirdKey, error) {
@@ -177,13 +177,19 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 		t.Fatalf("re-enable: %+v keys=%d", ra, len(w.fake.Keys))
 	}
 
-	// remove deletes the network and the row; the box stays a peer, its key record stays
+	// remove deletes the network; the row stays switched off (so the automatic switch
+	// respects the decision), the box stays a peer, its key record stays
 	must(t, w.svc.Remove(ctx, "site_a", "jeremia"))
-	if _, err := w.st.RemoteAccess(ctx, "site_a"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatal("row survived remove")
+	ra, err = w.st.RemoteAccess(ctx, "site_a")
+	if err != nil || ra.Enabled || ra.State != store.RemoteOff || ra.NetworkID != "" || ra.RouterID != "" {
+		t.Fatalf("after remove: %+v %v", ra, err)
 	}
 	if len(w.fake.Networks) != 0 {
 		t.Fatal("network survived remove")
+	}
+	w.svc.Reconcile(ctx)
+	if len(w.fake.Networks) != 0 {
+		t.Fatal("the automatic switch put the removed LAN back")
 	}
 	if _, err := w.operatorKey(t, "box_a"); err != nil {
 		t.Fatalf("remove took the box out of the stack: %v", err)
@@ -275,5 +281,62 @@ func TestKeyNobodyFetchesExpires(t *testing.T) {
 	ra, _ := w.st.RemoteAccess(ctx, "site_a")
 	if ra.State != store.RemoteError || !strings.Contains(ra.Detail, "Operator-Daemon") {
 		t.Fatalf("expected a timeout error: %+v", ra)
+	}
+}
+
+// The box image is one package and the box reports its network: a site whose box
+// is a peer gets its LAN switched on without anyone typing it. Decisions and
+// problems stay visible in the row; overlapping LANs are refused, not remapped.
+func TestLANIsSwitchedOnByItself(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	must(t, w.svc.SaveSettings(ctx, w.srv.URL, "tok", "", "", ""))
+
+	// a peer without a reported LAN: nothing happens
+	w.report(t, "box_a", wire.NetbirdConnected, "100.90.0.7")
+	w.fake.Peers = []netbird.Peer{{ID: "peer_box_a", Hostname: "muster-box", IP: "100.90.0.7", Connected: true}}
+	w.svc.Reconcile(ctx)
+	if _, err := w.st.RemoteAccess(ctx, "site_a"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("row without a LAN: %v", err)
+	}
+
+	// the box reports its networks: the first one is the LAN, switched on and wired
+	w.report(t, "box_a", wire.NetbirdConnected, "100.90.0.7", "192.168.10.0/24", "10.9.0.0/16")
+	w.svc.Reconcile(ctx)
+	ra, err := w.st.RemoteAccess(ctx, "site_a")
+	if err != nil || ra.State != store.RemoteActive || ra.CIDR != "192.168.10.0/24" || ra.RequestedBy != "auto" || ra.RouterID == "" {
+		t.Fatalf("automatic switch: %+v %v", ra, err)
+	}
+	if res := w.fake.Res[ra.NetworkID]; len(res) != 1 || res[0].Address != "192.168.10.0/24" {
+		t.Fatalf("resource: %+v", res)
+	}
+
+	// a second site with the same LAN: refused, and the reason lands in its row
+	w.report(t, "box_b", wire.NetbirdConnected, "100.90.0.8", "192.168.10.0/24")
+	w.fake.Peers = append(w.fake.Peers, netbird.Peer{ID: "peer_box_b", Hostname: "lager-box", IP: "100.90.0.8", Connected: true})
+	w.svc.Reconcile(ctx)
+	rb, err := w.st.RemoteAccess(ctx, "site_b")
+	if err != nil || rb.Enabled || rb.State != store.RemoteError || !strings.Contains(rb.Detail, "nicht automatisch") || len(w.fake.Networks) != 1 {
+		t.Fatalf("overlap: %+v %v networks=%d", rb, err, len(w.fake.Networks))
+	}
+	w.svc.Reconcile(ctx)
+	if rb2, _ := w.st.RemoteAccess(ctx, "site_b"); rb2.UpdatedAt != rb.UpdatedAt {
+		t.Fatalf("the failed row was rewritten: %+v", rb2)
+	}
+
+	// switched off by a person: stays off
+	_, err = w.svc.Disable(ctx, "site_a", "jeremia")
+	must(t, err)
+	w.svc.Reconcile(ctx)
+	if ra, _ := w.st.RemoteAccess(ctx, "site_a"); ra.Enabled || ra.State != store.RemoteOff {
+		t.Fatalf("disable not respected: %+v", ra)
+	}
+
+	// the automatic switch can be turned off altogether
+	must(t, w.st.SetSetting(ctx, SettingAutoLAN, "0"))
+	must(t, w.st.DeleteRemoteAccess(ctx, "site_a"))
+	w.svc.Reconcile(ctx)
+	if _, err := w.st.RemoteAccess(ctx, "site_a"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("auto_lan=0 ignored: %v", err)
 	}
 }

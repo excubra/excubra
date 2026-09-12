@@ -247,7 +247,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/webhooks/{id}/delete", s.auth(s.webhookDelete))
 	mux.Handle("POST /api/webhooks/{id}/test", s.auth(s.webhookTest))
 	mux.Handle("GET /api/keys", s.auth(s.apiKeys))
-	mux.Handle("POST /api/keys", s.auth(s.keysCreate))
+	mux.Handle("POST /api/keys", s.auth(s.apiKeysCreate))
 	mux.Handle("POST /api/keys/{id}/revoke", s.auth(s.keyRevoke))
 	mux.Handle("GET /api/tokens", s.auth(s.apiTokens))
 	mux.Handle("POST /api/tokens", s.auth(s.tokenCreate))

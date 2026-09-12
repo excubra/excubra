@@ -215,6 +215,39 @@ func TestEnrollmentAndKeyIsOneTime(t *testing.T) {
 	}
 }
 
+// A key made for a site: the box is assigned the moment it enrolls, nobody clicks.
+func TestSiteBoundKeyAssignsTheBox(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	k2, _ := pki.NewEnrollmentKey(f.host, 443, f.ca.Fingerprint())
+	must(t, f.st.CreateEnrollmentKey(ctx, store.EnrollmentKey{ID: "key_site", SecretHash: k2.SecretHash(), SiteID: "site_a", CreatedAt: f.now, ExpiresAt: f.now.Add(24 * time.Hour)}))
+	boxID, boxClient, status := f.enroll(k2.String())
+	if status != 200 {
+		t.Fatalf("enroll: %d", status)
+	}
+	b, err := f.st.Box(ctx, boxID)
+	must(t, err)
+	if b.SiteID != "site_a" {
+		t.Fatalf("box not assigned by its key: %+v", b)
+	}
+	status, body := f.do(boxClient, "POST", "/v1/heartbeat", wire.Heartbeat{SentAt: f.now, Agent: wire.AgentInfo{Version: "0.0.0", OS: "linux", Arch: "amd64"}, Box: wire.BoxInfo{LAN: []string{"192.168.10.0/24", "10.9.0.0/16"}}}, nil)
+	var hr wire.HeartbeatResponse
+	_ = json.Unmarshal(body, &hr)
+	if status != 200 || !hr.Assigned {
+		t.Fatalf("heartbeat after pre-assignment: %d %+v", status, hr)
+	}
+	b, _ = f.st.Box(ctx, boxID)
+	if len(b.LAN) != 2 || b.LAN[0] != "192.168.10.0/24" {
+		t.Fatalf("LAN not stored from the heartbeat: %+v", b.LAN)
+	}
+	keys, _ := f.st.EnrollmentKeys(ctx)
+	for _, k := range keys {
+		if k.ID == "key_site" && (k.SiteID != "site_a" || k.UsedByBox != boxID) {
+			t.Fatalf("key record: %+v", k)
+		}
+	}
+}
+
 func TestAssignedBoxLifecycle(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

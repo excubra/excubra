@@ -52,8 +52,12 @@ func (s *Server) apiSiteRemote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, v)
 }
 
-// suggestLAN is the /24 most of the site's devices live in.
+// suggestLAN is the network the box reports, else the /24 most of the site's
+// devices live in.
 func (s *Server) suggestLAN(ctx context.Context, siteID string) string {
+	if box, err := s.siteBox(ctx, siteID); err == nil && box != nil && len(box.LAN) > 0 {
+		return box.LAN[0]
+	}
 	site, err := s.Store.Site(ctx, siteID)
 	if err != nil {
 		return ""
@@ -100,7 +104,7 @@ func (s *Server) remoteEnable(w http.ResponseWriter, r *http.Request) {
 	case ra.State == store.RemoteActive:
 		s.flash(w, r, "Fernzugriff aktiv: "+ra.CIDR+" ist im Techniker-Stack erreichbar.", back)
 	default:
-		s.flash(w, r, "Fernzugriff wird eingeschaltet. Sobald die Box im Techniker-Stack ist, legt EX0 das Netzwerk an; ihren Schlüssel holt die Box mit dem nächsten Heartbeat. Dauert zwei bis drei Minuten.", back)
+		s.flash(w, r, "Fernzugriff wird eingeschaltet. Sobald die Box im Techniker-Stack ist, legt EX0 das Netzwerk an. Dauert zwei bis drei Minuten.", back)
 	}
 }
 
