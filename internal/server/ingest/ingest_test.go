@@ -18,6 +18,7 @@ import (
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/core"
+	"github.com/excubra/excubra/internal/server/feed"
 	"github.com/excubra/excubra/internal/server/ingest"
 	"github.com/excubra/excubra/internal/server/state"
 	"github.com/excubra/excubra/internal/server/store"
@@ -591,6 +592,57 @@ func TestOutpostScansTheSitesPublicAddress(t *testing.T) {
 	_, _ = f.do(boxClient, "POST", "/v1/heartbeat", wire.Heartbeat{SentAt: f.now, Agent: wire.AgentInfo{Version: "0.3.2", OS: "linux", Arch: "amd64"}, Scan: rep3}, nil)
 	if svcs, _ := f.st.ServicesForDevice(ctx, ext.ID); len(svcs) != 2 {
 		t.Fatalf("a box reported an outside view: %+v", svcs)
+	}
+}
+
+// Version rules (ADR-0018): what the scan identifies is judged against the
+// end-of-life feed; a line past its end is urgent, and a new feed re-judges
+// every device without waiting for the next round.
+func TestVersionsAreJudgedAgainstTheFeed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	boxID, boxClient, _ := f.enroll(f.key.String())
+	must(t, f.eng.AssignBox(ctx, boxID, "site_a", "test"))
+	must(t, f.eng.SetSiteScan(ctx, "site_a", true, "test"))
+	fd := feed.New(nil, nil)
+	fd.Now = func() time.Time { return f.now }
+	fd.Put(&feed.Product{Slug: "nginx", FetchedAt: f.now, Cycles: []feed.Cycle{{Cycle: "1.28", Latest: "1.28.1", EOL: false}, {Cycle: "1.18", Latest: "1.18.0", EOL: "2021-04-20"}}})
+	f.eng.Feed = fd
+	beat := func(hb wire.Heartbeat) {
+		t.Helper()
+		f.now = f.now.Add(60 * time.Second)
+		hb.SentAt, hb.Agent = f.now, wire.AgentInfo{Version: "0.3.3", OS: "linux", Arch: "amd64"}
+		if status, body := f.do(boxClient, "POST", "/v1/heartbeat", hb, nil); status != 200 {
+			t.Fatalf("heartbeat: %d %s", status, body)
+		}
+	}
+	beat(wire.Heartbeat{Discovery: wire.DiscoveryReport{Seen: []wire.Sighting{{MAC: "00:11:22:33:44:66", IP: "192.168.1.51", LastSeen: f.now}}}})
+	beat(wire.Heartbeat{Scan: &wire.ScanReport{Round: "scan_v1", StartedAt: f.now, Final: true, Scanned: 1, Hosts: []wire.ScanHost{{IP: "192.168.1.51", MAC: "00:11:22:33:44:66", Services: []wire.ScanService{
+		{Port: 80, Proto: "tcp", Name: "http", Product: "nginx", Version: "1.18.0", Banner: "nginx/1.18.0"},
+		{Port: 8080, Proto: "tcp", Name: "http", Product: "nginx", Version: "1.28.0", Banner: "nginx/1.28.0"},
+	}}}}})
+	open, _ := f.st.OpenFindings(ctx, "ten_a")
+	got := map[string]string{}
+	for _, fd := range open {
+		if fd.ConnectorID == "version" {
+			got[fd.Rule+"/"+fd.Key] = fd.Severity
+		}
+	}
+	if got["version.eol/tcp/80"] != "high" || got["version.outdated/tcp/8080"] != "low" || len(got) != 2 {
+		t.Fatalf("version findings: %v", got)
+	}
+	// the feed moves on: 1.28 reaches its end → re-assessed without a new scan
+	fd.Put(&feed.Product{Slug: "nginx", FetchedAt: f.now, Cycles: []feed.Cycle{{Cycle: "1.30", Latest: "1.30.0", EOL: false}, {Cycle: "1.28", Latest: "1.28.1", EOL: "2026-01-01"}, {Cycle: "1.18", Latest: "1.18.0", EOL: "2021-04-20"}}})
+	f.eng.ReassessVersions(ctx)
+	open, _ = f.st.OpenFindings(ctx, "ten_a")
+	got = map[string]string{}
+	for _, fd := range open {
+		if fd.ConnectorID == "version" {
+			got[fd.Rule+"/"+fd.Key] = fd.Severity
+		}
+	}
+	if got["version.eol/tcp/80"] != "high" || got["version.eol/tcp/8080"] != "high" || len(got) != 2 {
+		t.Fatalf("after the feed changed: %v", got)
 	}
 }
 

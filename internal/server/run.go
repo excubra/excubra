@@ -27,6 +27,7 @@ import (
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/console"
 	"github.com/excubra/excubra/internal/server/core"
+	"github.com/excubra/excubra/internal/server/feed"
 	"github.com/excubra/excubra/internal/server/ingest"
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
@@ -223,6 +224,17 @@ func run(envFile string) error {
 				restartc <- err
 			}
 		}()
+	}
+	// end-of-life data for the version rules (ADR-0018): fetched per product as the
+	// scan sees it, refreshed daily, nothing about a customer in the request
+	if cfg.Feeds != "off" {
+		fd := feed.New(st, log)
+		if cfg.Feeds != "" {
+			fd.URL = cfg.Feeds
+		}
+		fd.OnRefresh = eng.ReassessVersions
+		eng.Feed = fd
+		go fd.Run(ctx, 10*time.Minute)
 	}
 	go eng.RunTicker(ctx, 10*time.Second)
 	if cfg.ReleaseCatalog != "" && cfg.ReleaseCatalog != "off" {

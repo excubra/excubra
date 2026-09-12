@@ -23,6 +23,7 @@ type Config struct {
 	ConsoleURL       string // base URL for webhook links; derived from OverlayListen when empty
 	UpdateBaseURL    string
 	ReleaseCatalog   string // GitHub-style releases URL the server imports release metadata from; "off" disables
+	Feeds            string // end-of-life feed base URL for the version rules (ADR-0018); "" = endoflife.date, "off" disables
 	SelfUpdate       string // "on": the server installs signed releases of its channel itself (ADR-0006); "off" in containers
 	LogLevel         string
 	LogFormat        string
@@ -72,6 +73,7 @@ func LoadConfig(envFile string, getenv func(string) string) (Config, error) {
 		ConsoleURL:       get("EXCUBRA_CONSOLE_URL", ""),
 		UpdateBaseURL:    get("EXCUBRA_UPDATE_BASE_URL", "https://github.com/excubra/excubra/releases/download"),
 		ReleaseCatalog:   get("EXCUBRA_RELEASE_CATALOG", "https://api.github.com/repos/excubra/excubra/releases"),
+		Feeds:            get("EXCUBRA_FEEDS", ""),
 		SelfUpdate:       get("EXCUBRA_SELF_UPDATE", "on"),
 		LogLevel:         get("EXCUBRA_LOG_LEVEL", "info"),
 		LogFormat:        get("EXCUBRA_LOG_FORMAT", "text"),

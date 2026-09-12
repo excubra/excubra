@@ -53,6 +53,15 @@ wants. The tool is now the product: open, announced, with the customer's consent
    end-of-life matching against a feed the server keeps, and the AI's evaluation
    (E21), build on the same tables.
 
+6. **Versions are judged against a feed.** `internal/server/feed` keeps
+   end-of-life and latest-release data per product from endoflife.date, cached in
+   the store (`feeds`), fetched only for products the scan or a connector actually
+   identified, refreshed daily; the request names a product, never a customer. A
+   release line past its end is an urgent finding, one about to end warns, a newer
+   release in the line is a note (source `version`). When the feed changes, every
+   device is re-assessed without waiting for the next round. `EXCUBRA_FEEDS=off`
+   switches it off; a different base URL points at a mirror.
+
 ## Rejected
 
 - **Syslog as the first step**: needs a receiver port and device settings per
