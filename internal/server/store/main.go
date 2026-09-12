@@ -1163,7 +1163,7 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 // SecretSetting reports whether a setting holds a secret: those are sealed at
 // rest and masked on the CLI.
 func SecretSetting(key string) bool {
-	for _, suffix := range []string{".token", ".api_key", ".key", ".secret", ".password"} {
+	for _, suffix := range []string{"token", "api_key", "_key", ".key", "secret", "password"} {
 		if strings.HasSuffix(key, suffix) {
 			return true
 		}
