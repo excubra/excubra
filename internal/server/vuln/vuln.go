@@ -54,6 +54,11 @@ type CVE struct {
 	Untriaged bool `json:"untriaged,omitempty"`
 }
 
+// resultVersion changes whenever the judgement of a result changes (what is
+// dropped, what is marked untriaged): cached results of another version are
+// fetched again instead of trusted.
+const resultVersion = 2
+
 // Result is what the databases say about one product version.
 type Result struct {
 	Key       string    `json:"key"`
@@ -61,6 +66,7 @@ type Result struct {
 	Version   string    `json:"version"`
 	FetchedAt time.Time `json:"fetched_at"`
 	CVEs      []CVE     `json:"cves"`
+	Judged    int       `json:"judged,omitempty"` // resultVersion of the code that built it
 }
 
 // Query is one product version to look up. CPEs ask NVD (the upstream view);
@@ -194,7 +200,7 @@ func New(st *store.Store, log *slog.Logger) *Service {
 					continue
 				}
 				var res Result
-				if json.Unmarshal(r.Body, &res) == nil {
+				if json.Unmarshal(r.Body, &res) == nil && res.Judged == resultVersion {
 					res.Key, res.FetchedAt = r.Key, r.FetchedAt
 					s.cache[r.Key] = &res
 				}
@@ -367,7 +373,7 @@ func (s *Service) fetch(ctx context.Context, q Query) (*Result, error) {
 	if cves == nil {
 		cves = []CVE{}
 	}
-	return &Result{Key: q.Key(), Product: q.Product, Version: q.Version, FetchedAt: s.Now(), CVEs: cves}, nil
+	return &Result{Key: q.Key(), Product: q.Product, Version: q.Version, FetchedAt: s.Now(), CVEs: cves, Judged: resultVersion}, nil
 }
 
 // ---- NVD ------------------------------------------------------------------------------
