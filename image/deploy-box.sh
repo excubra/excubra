@@ -25,7 +25,7 @@ echo "== copying to $TARGET"
 R=/root/excubra-box
 ssh -o BatchMode=yes "$TARGET" "rm -rf $R && mkdir -p $R"
 scp -q "dist/excubra_linux_$ARCH" "$TARGET:$R/excubra"
-scp -q image/provision-box.sh image/netbird-operator-netns.sh image/netbird-operator.service deploy/systemd/excubra-agent.service "$TARGET:$R/"
+scp -q image/provision-box.sh image/netbird-operator-netns.sh image/netbird-operator-netns.service image/netbird-operator.service image/netbird-operator-ssh.service deploy/systemd/excubra-agent.service "$TARGET:$R/"
 echo "== provisioning"
 ssh -o BatchMode=yes "$TARGET" "chmod +x $R/provision-box.sh && $R/provision-box.sh --binary $R/excubra $*"
 ssh -o BatchMode=yes "$TARGET" "rm -rf $R"

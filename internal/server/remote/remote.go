@@ -1,9 +1,12 @@
 // Package remote brings a customer LAN into the operator's own overlay (salt:
-// Vollausbau, Stufe B). The box becomes a second peer there and routes its LAN as a
-// network resource; technicians reach it from their one tunnel. EX0 creates the
-// pieces through the NetBird API of our stack (group, one-off setup key, network,
-// resource, router, policy), hands the key to the box through the usual claim, and
-// keeps the row in remote_access honest. Nothing here touches a customer system.
+// Vollausbau, Stufe B). The box image is one package — agent, operator peer,
+// prepared customer peer — so every assigned box that runs the operator daemon
+// becomes a peer in our stack by itself: EX0 mints its one-off setup key and hands
+// it over through the usual claim. Switching a site on then routes its LAN as a
+// network resource, and technicians reach LAN and box from the one tunnel they
+// already sit in. Everything goes through the NetBird API of our stack (groups,
+// keys, policies, network, resource, router), and the row in remote_access stays
+// honest. Nothing here touches a customer system.
 package remote
 
 import (
@@ -28,7 +31,10 @@ const (
 	SettingTechGroup = "netbird.operator.tech_group"
 	SettingLANGroup  = "netbird.operator.lan_group"
 	SettingBoxGroup  = "netbird.operator.box_group"
-	PolicyName       = "ex0: Techniker → Kunden-LANs"
+	// PolicyName lets technicians into every switched-on LAN; PolicyBoxName lets
+	// them onto the boxes themselves (SSH at the box's overlay address, ADR-0016).
+	PolicyName    = "ex0: Techniker → Kunden-LANs"
+	PolicyBoxName = "ex0: Techniker → Kunden-Boxen"
 )
 
 // Defaults match the stack the NetBird runbook creates.
@@ -134,9 +140,9 @@ func (s *Service) Test(ctx context.Context) (int, error) {
 	return len(gs), err
 }
 
-// Enable switches remote access on for a site: validates the LAN, creates the
-// groups and policy if missing, mints a one-off key and hands it to the box. The
-// rest (peer, network, resource, router) happens in Reconcile once the box joined.
+// Enable switches remote access on for a site: validates the LAN, then either wires
+// the network right away (the box is already a peer) or leaves the row waiting for
+// the box to join — the peer side runs by itself, see ensurePeer.
 func (s *Service) Enable(ctx context.Context, siteID, cidr, actor string) (store.RemoteAccess, error) {
 	prefix, err := parseLAN(cidr)
 	if err != nil {
@@ -177,27 +183,23 @@ func (s *Service) Enable(ctx context.Context, siteID, cidr, actor string) (store
 	} else if foreign != "" {
 		return store.RemoteAccess{}, fmt.Errorf("%w: im Techniker-Stack routet bereits das Netzwerk „%s“ dieses Netz", ErrOverlap, foreign)
 	}
-	// already a peer in our stack (switched off earlier, or re-enabled): no new key
+	// already a peer in our stack (the image joined it, or switched off earlier): wire now
 	if box.NetbirdOpStatus == wire.NetbirdConnected && box.NetbirdOpIP != "" {
 		ra.State, ra.Detail = store.RemoteJoining, "Box ist bereits im Techniker-Stack, Netzwerk wird angelegt"
 		if err := s.Store.SetRemoteAccess(ctx, ra); err != nil {
 			return ra, err
 		}
+		_ = s.Store.Audit(ctx, now, actor, "remote.enable", siteID, prefix.String())
 		return s.wire(ctx, c, ra, box)
 	}
-	boxGroup, err := c.EnsureGroup(ctx, s.setting(ctx, SettingBoxGroup, DefaultBoxGroup))
-	if err != nil {
-		return s.failed(ctx, ra, "Gruppe anlegen: "+err.Error())
+	ra.Detail = "Box holt ihren Schlüssel für den Techniker-Stack mit dem nächsten Heartbeat"
+	if k, err := s.Store.NetbirdKeyProfile(ctx, box.ID, wire.NetbirdProfileOperator); err == nil && k.ClaimedAt != nil {
+		ra.State, ra.Detail = store.RemoteJoining, "Box hat den Schlüssel, verbindet sich mit dem Techniker-Stack"
 	}
-	tenant, _ := s.Store.Tenant(ctx, site.TenantID)
-	key, err := c.CreateSetupKey(ctx, "ex0 "+firstNonEmpty(tenant.Name, site.TenantID)+" · "+site.Name+" · "+firstNonEmpty(box.Name, box.ID), []string{boxGroup.ID}, keyTTL)
-	if err != nil {
-		return s.failed(ctx, ra, "Setup-Key: "+err.Error())
+	if box.NetbirdOpStatus == "" {
+		ra.Detail = "Box meldet keinen Operator-Daemon; mit dem Box-Image (provision-box.sh) bekommt sie ihren Schlüssel von selbst"
 	}
-	if err := s.Store.SetNetbirdKey(ctx, store.NetbirdKey{BoxID: box.ID, Profile: wire.NetbirdProfileOperator, ManagementURL: s.setting(ctx, SettingURL, ""), SetupKey: key.Key, CreatedAt: now}); err != nil {
-		return ra, err
-	}
-	ra.Detail = "Setup-Key erzeugt; die Box holt ihn mit dem nächsten Heartbeat und tritt dem Techniker-Stack bei"
+	s.ensurePeer(ctx, c, box) // no need to wait for the next tick
 	if err := s.Store.SetRemoteAccess(ctx, ra); err != nil {
 		return ra, err
 	}
@@ -230,7 +232,8 @@ func (s *Service) Disable(ctx context.Context, siteID, actor string) (store.Remo
 	return ra, s.Store.SetRemoteAccess(ctx, ra)
 }
 
-// Remove deletes the network in our stack and the row; the box stays a peer.
+// Remove deletes the network in our stack and the row; the box stays a peer — that
+// is part of the box image, not of the site's switch.
 func (s *Service) Remove(ctx context.Context, siteID, actor string) error {
 	ra, err := s.Store.RemoteAccess(ctx, siteID)
 	if err != nil {
@@ -245,14 +248,17 @@ func (s *Service) Remove(ctx context.Context, siteID, actor string) error {
 			return err
 		}
 	}
-	_ = s.Store.DeleteNetbirdKeyProfile(ctx, ra.BoxID, wire.NetbirdProfileOperator)
 	_ = s.Store.Audit(ctx, s.Now(), actor, "remote.remove", siteID, ra.CIDR)
 	return s.Store.DeleteRemoteAccess(ctx, siteID)
 }
 
-// Reconcile moves every row forward: a box that joined gets its network, an active
-// row gets its peer state refreshed, a key nobody fetched in time expires.
+// Reconcile moves everything forward: boxes that run the operator daemon get their
+// key, a box that joined gets its network, an active row gets its peer state
+// refreshed, a site whose box never joins runs into the timeout.
 func (s *Service) Reconcile(ctx context.Context) {
+	if c, err := s.client(ctx); err == nil {
+		s.ensurePeers(ctx, c)
+	}
 	rows, err := s.Store.RemoteAccesses(ctx)
 	if err != nil {
 		s.Log.Error("remote access", "err", err)
@@ -289,6 +295,129 @@ func (s *Service) Run(ctx context.Context, every time.Duration) {
 		}
 	}
 }
+
+// ---- the peer side: every box with the operator daemon joins our stack ------------------
+
+// ensurePeers hands every assigned box that runs the operator daemon a setup key for
+// our stack, so the box is a peer there before anyone switches a LAN on.
+func (s *Service) ensurePeers(ctx context.Context, c *netbird.Client) {
+	boxes, err := s.Store.Boxes(ctx, "")
+	if err != nil {
+		s.Log.Error("remote peers", "err", err)
+		return
+	}
+	for _, b := range boxes {
+		s.ensurePeer(ctx, c, b)
+	}
+}
+
+// ensurePeer mints a key for one box when it needs one: it reports an operator
+// daemon, is assigned, is not connected, and has no key in flight. A key nobody
+// fetched within its lifetime is replaced; so is one the box fetched but whose
+// daemon is still unconfigured two hours later (the up failed, or the daemon was
+// reset). A daemon that has its config and is merely disconnected is left alone.
+func (s *Service) ensurePeer(ctx context.Context, c *netbird.Client, box store.Box) {
+	if box.RevokedAt != nil || box.SiteID == "" || box.NetbirdOpStatus == "" || box.NetbirdOpStatus == wire.NetbirdConnected {
+		return
+	}
+	now := s.Now()
+	k, err := s.Store.NetbirdKeyProfile(ctx, box.ID, wire.NetbirdProfileOperator)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+	case err != nil:
+		s.Log.Error("remote peer", "box", box.ID, "err", err)
+		return
+	case k.ClaimedAt == nil && now.Sub(k.CreatedAt) < keyTTL:
+		return // the box has not fetched it yet
+	case k.ClaimedAt != nil && (now.Sub(*k.ClaimedAt) < joinTimeout || box.NetbirdOpStatus != wire.NetbirdNotConfigured):
+		return // fetched; the daemon is connecting, or has its config and retries on its own
+	}
+	if err := s.mintKey(ctx, c, box); err != nil {
+		s.Log.Warn("remote peer key", "box", box.ID, "err", err)
+	}
+}
+
+// mintKey creates a one-off setup key in the box group and stores it for the claim.
+func (s *Service) mintKey(ctx context.Context, c *netbird.Client, box store.Box) error {
+	_, boxGroup, err := s.ensurePolicies(ctx, c)
+	if err != nil {
+		return err
+	}
+	site, _ := s.Store.Site(ctx, box.SiteID)
+	tenant, _ := s.Store.Tenant(ctx, site.TenantID)
+	name := "ex0 " + firstNonEmpty(tenant.Name, site.TenantID) + " · " + firstNonEmpty(site.Name, box.SiteID) + " · " + firstNonEmpty(box.Name, box.ID)
+	key, err := c.CreateSetupKey(ctx, name, []string{boxGroup.ID}, keyTTL)
+	if err != nil {
+		return fmt.Errorf("setup key: %w", err)
+	}
+	now := s.Now()
+	if err := s.Store.SetNetbirdKey(ctx, store.NetbirdKey{BoxID: box.ID, Profile: wire.NetbirdProfileOperator, ManagementURL: s.setting(ctx, SettingURL, ""), SetupKey: key.Key, CreatedAt: now}); err != nil {
+		return err
+	}
+	_ = s.Store.Audit(ctx, now, "server", "remote.peer_key", box.ID, name)
+	s.Log.Info("remote peer key minted", "box", box.ID, "site", box.SiteID)
+	return nil
+}
+
+// ensurePolicies makes sure the three groups and the two policies exist —
+// technicians → LANs, technicians → boxes — and returns the LAN and box groups.
+func (s *Service) ensurePolicies(ctx context.Context, c *netbird.Client) (lan, box netbird.Group, err error) {
+	tech, err := c.EnsureGroup(ctx, s.setting(ctx, SettingTechGroup, DefaultTechGroup))
+	if err != nil {
+		return lan, box, fmt.Errorf("Gruppe: %w", err)
+	}
+	if lan, err = c.EnsureGroup(ctx, s.setting(ctx, SettingLANGroup, DefaultLANGroup)); err != nil {
+		return lan, box, fmt.Errorf("Gruppe: %w", err)
+	}
+	if box, err = c.EnsureGroup(ctx, s.setting(ctx, SettingBoxGroup, DefaultBoxGroup)); err != nil {
+		return lan, box, fmt.Errorf("Gruppe: %w", err)
+	}
+	if _, err = c.EnsurePolicy(ctx, PolicyName, []string{tech.ID}, []string{lan.ID}); err != nil {
+		return lan, box, fmt.Errorf("Richtlinie: %w", err)
+	}
+	if _, err = c.EnsurePolicy(ctx, PolicyBoxName, []string{tech.ID}, []string{box.ID}); err != nil {
+		return lan, box, fmt.Errorf("Richtlinie: %w", err)
+	}
+	return lan, box, nil
+}
+
+// PeerState is one box's standing in the operator stack, as the CLI lists it.
+type PeerState struct {
+	BoxID   string
+	BoxName string
+	SiteID  string
+	Status  string // what the box reports for its operator daemon
+	IP      string
+	Key     string // none | waiting since … | fetched …
+}
+
+// PeerStates lists every assigned box with what it reports and where its key stands.
+func (s *Service) PeerStates(ctx context.Context) ([]PeerState, error) {
+	boxes, err := s.Store.Boxes(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	var out []PeerState
+	for _, b := range boxes {
+		if b.RevokedAt != nil || b.SiteID == "" {
+			continue
+		}
+		p := PeerState{BoxID: b.ID, BoxName: b.Name, SiteID: b.SiteID, Status: b.NetbirdOpStatus, IP: b.NetbirdOpIP, Key: "none"}
+		if p.Status == "" {
+			p.Status = "no operator daemon"
+		}
+		if k, err := s.Store.NetbirdKeyProfile(ctx, b.ID, wire.NetbirdProfileOperator); err == nil {
+			p.Key = "waiting since " + k.CreatedAt.Local().Format("02.01. 15:04")
+			if k.ClaimedAt != nil {
+				p.Key = "fetched " + k.ClaimedAt.Local().Format("02.01. 15:04")
+			}
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// ---- the site side: the LAN as a network resource ---------------------------------------
 
 func (s *Service) step(ctx context.Context, ra store.RemoteAccess) {
 	box, err := s.Store.Box(ctx, ra.BoxID)
@@ -354,16 +483,9 @@ func (s *Service) wire(ctx context.Context, c *netbird.Client, ra store.RemoteAc
 		return ra, s.Store.SetRemoteAccess(ctx, ra)
 	}
 	ra.PeerID, ra.PeerIP = peer.ID, peer.IP
-	lan, err := c.EnsureGroup(ctx, s.setting(ctx, SettingLANGroup, DefaultLANGroup))
+	lan, _, err := s.ensurePolicies(ctx, c)
 	if err != nil {
-		return s.failed(ctx, ra, "Gruppe: "+err.Error())
-	}
-	tech, err := c.EnsureGroup(ctx, s.setting(ctx, SettingTechGroup, DefaultTechGroup))
-	if err != nil {
-		return s.failed(ctx, ra, "Gruppe: "+err.Error())
-	}
-	if _, err := c.EnsurePolicy(ctx, PolicyName, []string{tech.ID}, []string{lan.ID}); err != nil {
-		return s.failed(ctx, ra, "Richtlinie: "+err.Error())
+		return s.failed(ctx, ra, err.Error())
 	}
 	site, _ := s.Store.Site(ctx, ra.SiteID)
 	tenant, _ := s.Store.Tenant(ctx, ra.TenantID)

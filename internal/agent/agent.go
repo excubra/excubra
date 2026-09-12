@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
@@ -87,8 +88,25 @@ func Main(args []string) error {
 		}
 		return Selftest(*stateDir)
 
+	case "forward":
+		// the SSH relay of the operator namespace (netbird-operator-ssh.service, ADR-0016)
+		fs := flag.NewFlagSet("excubra agent forward", flag.ContinueOnError)
+		listen := fs.String("listen", ":22", "address to accept connections on, inside the operator namespace")
+		target := fs.String("to", "169.254.222.1:22", "where to hand them: the root namespace's end of the veth pair")
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", *listen)
+		if err != nil {
+			return fmt.Errorf("agent forward: %w", err)
+		}
+		log.Info("forwarding", "listen", ln.Addr().String(), "to", *target)
+		return Forward(ctx, ln, *target, log)
+
 	default:
-		fmt.Fprintln(os.Stderr, "usage: excubra agent [enroll|run|selftest] [flags]")
+		fmt.Fprintln(os.Stderr, "usage: excubra agent [enroll|run|selftest|forward] [flags]")
 		return fmt.Errorf("agent: unknown subcommand %q", sub)
 	}
 }

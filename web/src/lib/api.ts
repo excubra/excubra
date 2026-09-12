@@ -48,7 +48,7 @@ export interface Me { user: string; csrf: string; version: string; now: string; 
 export interface BoxState { ID: string; Status: string; LastHeartbeat: string; SilentSince: string; AgentVersion: string }
 export interface BoxRow {
   ID: string; SiteID: string; Name: string; HWID: string; AgentVersion: string; OS: string; Arch: string; CertSerial: string; CertNotAfter: string
-  Channel: string; DiscoveryMode: string; DiscoverySubnets: string[] | null; NetbirdStatus: string; NetbirdIP: string
+  Channel: string; DiscoveryMode: string; DiscoverySubnets: string[] | null; NetbirdStatus: string; NetbirdIP: string; NetbirdOpStatus?: string; NetbirdOpIP?: string
   DiskTotalBytes: number; DiskFreeBytes: number; UptimeS: number; LastSeen: string; EnrolledAt: string; RevokedAt: string | null
   SealKey?: string
   State: BoxState; SiteName: string; TenantName: string; Assigned: boolean
