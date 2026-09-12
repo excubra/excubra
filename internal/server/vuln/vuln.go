@@ -48,6 +48,10 @@ type CVE struct {
 	Summary   string  `json:"summary,omitempty"`
 	Fixed     string  `json:"fixed,omitempty"`     // the distribution version that fixes it (OSV)
 	Published string  `json:"published,omitempty"` // YYYY-MM-DD
+	// Untriaged: the distribution lists it but has not judged it yet ("not yet
+	// assigned" in Debian's tracker) and has no fix; nothing to install, only to
+	// watch — such findings never rise above medium unless the CVE is exploited.
+	Untriaged bool `json:"untriaged,omitempty"`
 }
 
 // Result is what the databases say about one product version.
@@ -120,7 +124,7 @@ var ubuntuRelease = map[string]string{"7.6p1": "18.04:LTS", "8.2p1": "20.04:LTS"
 // (no version, or a product the databases do not name that way).
 func Identify(sv rules.Service) (Query, bool) {
 	name := strings.ToLower(strings.TrimSpace(sv.Product))
-	ver := strings.TrimSpace(sv.Version)
+	ver := strings.TrimPrefix(strings.TrimSpace(sv.Version), "v") // FortiOS says v7.4.12
 	prefixes, ok := products[name]
 	if !ok || ver == "" || !versionOK.MatchString(ver) {
 		return Query{}, false
@@ -330,7 +334,7 @@ func (s *Service) fetch(ctx context.Context, q Query) (*Result, error) {
 			if !ok {
 				c = CVE{ID: id, Score: o.Score, Summary: o.Summary}
 			}
-			c.Fixed = o.Fixed
+			c.Fixed, c.Untriaged = o.Fixed, o.Untriaged
 			if c.Summary == "" {
 				c.Summary = o.Summary
 			}
@@ -487,9 +491,11 @@ func (s *Service) fetchNVD(ctx context.Context, cpe string) ([]CVE, error) {
 // ---- OSV ------------------------------------------------------------------------------
 
 type osvVuln struct {
-	Score   float64
-	Summary string
-	Fixed   string
+	Score     float64
+	Summary   string
+	Fixed     string
+	Untriaged bool
+	Skip      bool // the distribution says it does not matter ("unimportant")
 }
 
 type osvResponse struct {
@@ -507,7 +513,8 @@ type osvResponse struct {
 				Ecosystem string `json:"ecosystem"`
 				Name      string `json:"name"`
 			} `json:"package"`
-			Ranges []struct {
+			EcosystemSpecific map[string]any `json:"ecosystem_specific"`
+			Ranges            []struct {
 				Type   string `json:"type"`
 				Events []struct {
 					Introduced string `json:"introduced"`
@@ -563,6 +570,16 @@ func (s *Service) fetchOSV(ctx context.Context, q Query) (map[string]osvVuln, er
 			if a.Package.Ecosystem != q.Ecosystem || a.Package.Name != q.Package {
 				continue
 			}
+			// Debian's tracker grades what it lists: "unimportant" is a non-issue in
+			// Debian's build, "not yet assigned" is not judged yet
+			if u, _ := a.EcosystemSpecific["urgency"].(string); u != "" {
+				switch strings.ToLower(u) {
+				case "unimportant":
+					o.Skip = true
+				case "not yet assigned", "end-of-life":
+					o.Untriaged = true
+				}
+			}
 			for _, r := range a.Ranges {
 				for _, e := range r.Events {
 					if e.Fixed != "" {
@@ -570,6 +587,12 @@ func (s *Service) fetchOSV(ctx context.Context, q Query) (map[string]osvVuln, er
 					}
 				}
 			}
+		}
+		if o.Skip {
+			continue
+		}
+		if o.Fixed != "" {
+			o.Untriaged = false // a fix exists: that is a judgement
 		}
 		for _, id := range ids {
 			if cur, ok := out[id]; !ok || (cur.Fixed == "" && o.Fixed != "") {
@@ -583,6 +606,19 @@ func (s *Service) fetchOSV(ctx context.Context, q Query) (map[string]osvVuln, er
 // ---- KEV ------------------------------------------------------------------------------
 
 func (s *Service) fetchKEV(ctx context.Context) ([]string, error) {
+	ids, err := s.fetchKEVCISA(ctx)
+	if err == nil {
+		return ids, nil
+	}
+	s.Log.Info("vuln: kev list from NVD instead of CISA", "cisa_err", err)
+	ids, err2 := s.fetchKEVNVD(ctx)
+	if err2 != nil {
+		return nil, fmt.Errorf("cisa: %w; nvd: %w", err, err2)
+	}
+	return ids, nil
+}
+
+func (s *Service) fetchKEVCISA(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.KEV, nil)
 	if err != nil {
 		return nil, err
@@ -609,6 +645,60 @@ func (s *Service) fetchKEV(ctx context.Context) ([]string, error) {
 	for _, v := range body.Vulnerabilities {
 		if v.CVEID != "" {
 			ids = append(ids, v.CVEID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("empty list")
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+// fetchKEVNVD pages through NVD's copy of the KEV list (every CVE with a CISA
+// exploit date), five hundred at a time.
+func (s *Service) fetchKEVNVD(ctx context.Context) ([]string, error) {
+	key := s.nvdKey(ctx)
+	var ids []string
+	for start := 0; start < 20000; {
+		if err := s.throttleNVD(ctx, key != ""); err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s?hasKev&noRejected&resultsPerPage=500&startIndex=%d", s.NVD, start), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "excubra (EX0 vulnerability matching)")
+		if key != "" {
+			req.Header.Set("apiKey", key)
+		}
+		res, err := s.HTTP.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		var body struct {
+			TotalResults    int `json:"totalResults"`
+			Vulnerabilities []struct {
+				CVE struct {
+					ID string `json:"id"`
+				} `json:"cve"`
+			} `json:"vulnerabilities"`
+		}
+		if res.StatusCode != http.StatusOK {
+			_ = res.Body.Close()
+			return nil, fmt.Errorf("HTTP %d", res.StatusCode)
+		}
+		err = json.NewDecoder(io.LimitReader(res.Body, 4*maxBody)).Decode(&body)
+		_ = res.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range body.Vulnerabilities {
+			ids = append(ids, v.CVE.ID)
+		}
+		start += 500
+		if len(body.Vulnerabilities) == 0 || start >= body.TotalResults {
+			break
 		}
 	}
 	if len(ids) == 0 {
@@ -665,10 +755,13 @@ func finding(sv rules.Service, q Query, r *Result) rules.Finding {
 		key = fmt.Sprintf("%s/%d", firstNonEmpty(sv.Proto, "tcp"), sv.Port)
 	}
 	var exploited []string
-	maxScore, scored := 0.0, false
+	maxScore, scored, untriaged := 0.0, false, 0
 	for _, c := range r.CVEs {
 		if c.Exploited {
 			exploited = append(exploited, c.ID)
+		}
+		if c.Untriaged {
+			untriaged++
 		}
 		if c.Score > 0 {
 			scored = true
@@ -684,14 +777,21 @@ func finding(sv rules.Service, q Query, r *Result) rules.Finding {
 	case maxScore >= 4 || !scored:
 		sev = rules.Medium
 	}
+	allUntriaged := untriaged == len(r.CVEs)
+	if allUntriaged && len(exploited) == 0 && sev == rules.High {
+		sev = rules.Medium // reported, not judged, nothing to install: watch, do not panic
+	}
 	label := q.Product + " " + q.Version
 	title := fmt.Sprintf("%s: %s", label, count(len(r.CVEs), "bekannte Schwachstelle", "bekannte Schwachstellen"))
+	if allUntriaged {
+		title = fmt.Sprintf("%s: %s, Fix der Distribution steht aus", label, count(len(r.CVEs), "gemeldete Schwachstelle", "gemeldete Schwachstellen"))
+	}
 	switch {
 	case len(exploited) == 1:
 		title += ", eine wird aktiv ausgenutzt"
 	case len(exploited) > 1:
 		title += fmt.Sprintf(", %d werden aktiv ausgenutzt", len(exploited))
-	case maxScore > 0:
+	case maxScore > 0 && !allUntriaged:
 		title += fmt.Sprintf(", höchste CVSS %.1f", maxScore)
 	}
 	var b strings.Builder
@@ -700,6 +800,9 @@ func finding(sv rules.Service, q Query, r *Result) rules.Finding {
 		source = "OSV für " + strings.SplitN(q.Ecosystem, ":", 2)[0] + " (zurückportierte Fixes berücksichtigt) und NVD"
 	}
 	fmt.Fprintf(&b, "Für %s %s (Quelle: %s, Stand %s). ", label, plainCount(len(r.CVEs)), source, r.FetchedAt.Format("02.01.2006"))
+	if untriaged > 0 {
+		fmt.Fprintf(&b, "%s hat die Distribution noch nicht eingestuft und noch nicht behoben: nichts zu installieren, aber im Blick behalten und den Dienst nicht aus dem Internet erreichbar lassen. ", count(untriaged, "davon", "davon"))
+	}
 	if len(exploited) > 0 {
 		fmt.Fprintf(&b, "Auf der Liste der aktiv ausgenutzten Schwachstellen (CISA KEV): %s. ", strings.Join(exploited, ", "))
 	}
@@ -733,7 +836,7 @@ func finding(sv rules.Service, q Query, r *Result) rules.Finding {
 	default:
 		b.WriteString("Auf eine aktuelle Version bringen. Läuft der Dienst aus einer Distribution, kann der Fix schon zurückportiert sein; dann ist die Paketversion maßgeblich, nicht die Versionsnummer im Banner.")
 	}
-	ev := map[string]any{"product": q.Product, "version": q.Version, "count": len(r.CVEs), "max_score": maxScore, "fetched": r.FetchedAt.UTC().Format(time.RFC3339), "cves": r.CVEs}
+	ev := map[string]any{"product": q.Product, "version": q.Version, "count": len(r.CVEs), "max_score": maxScore, "untriaged": untriaged, "fetched": r.FetchedAt.UTC().Format(time.RFC3339), "cves": r.CVEs}
 	if len(exploited) > 0 {
 		ev["exploited"] = exploited
 	}

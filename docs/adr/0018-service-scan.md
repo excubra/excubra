@@ -80,6 +80,12 @@ wants. The tool is now the product: open, announced, with the customer's consent
      an `arp_scan`; the gateway's address claimed by a second MAC is an
      `arp_spoof` at once, any other address only when it flaps three times in ten
      minutes (a new DHCP lease is one change, not a fight).
+   - **A FortiGate's logs**, where a connector reads one (ADR-0015): failed admin
+     logins, failed SSL-VPN logins and IPS hits, from the device that sees the
+     WAN. The reader keeps a cursor per log and counts only rows newer than
+     it; the signals hang on the firewall's device with the remote source in
+     them, judged by origin and count (a typo from the LAN is medium, a
+     dictionary run from the internet urgent, a signature let through urgent).
    Signals travel in the heartbeat (at most 200, oldest dropped first, acknowledged
    like sightings). The server hangs a finding on the source device (source
    `signal`, rules `signal.canary|port_scan|arp_scan|arp_spoof`, all urgent — a
@@ -104,15 +110,18 @@ wants. The tool is now the product: open, announced, with the customer's consent
    `Ubuntu-3ubuntu13.19` → the package version in `Debian:12` or
    `Ubuntu:24.04:LTS`): OSV knows which fixes were backported, so only what the
    distribution still lists as open survives, and the fixing package version
-   comes with it. CISA's KEV list marks what is exploited in the wild. One
+   comes with it. Debian's own grading is respected: "unimportant" is dropped,
+   "not yet assigned" (reported, not judged, no fix) is counted but never rises
+   above medium on scores alone — nothing to install, only to watch. CISA's KEV list marks what is exploited in the wild. One
    finding per service (`vuln.known`, source `vuln`): urgent when a CVE is
    exploited or scored 7 or more, otherwise medium, low below 4; the detail names
    the three that matter and the fix. Results are cached in `vulns`, fetched
    only for versions a customer actually runs, refreshed daily, paused a quarter
    hour after a failure; the request names a product and a version, never a
    customer. NVD allows five requests per half minute without a key and fifty
-   with one (`vuln.nvd_key`, console → Einstellungen). `EXCUBRA_VULNS=off`
-   switches it off.
+   with one (`vuln.nvd_key`, console → Einstellungen). CISA's CDN refuses some
+   data-centre addresses; then the KEV list comes from NVD's copy (`hasKev`).
+   `EXCUBRA_VULNS=off` switches it off.
 
 ## Rejected
 

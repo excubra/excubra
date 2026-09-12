@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -994,24 +995,37 @@ func (e *Engine) absorbSignals(ctx context.Context, site store.Site, box store.B
 		if !ok || (sg.IP == "" && sg.MAC == "") {
 			continue
 		}
-		dev, err := e.Store.DeviceByAddress(ctx, site.ID, sg.MAC, sg.IP)
-		if err != nil {
-			d, _, _, err := e.Store.UpsertSighting(ctx, site.TenantID, site.ID, wire.Sighting{MAC: sg.MAC, IP: sg.IP, LastSeen: sg.LastAt}, now)
-			if err != nil {
-				e.Log.Warn("signal: source unknown", "site", site.ID, "ip", sg.IP, "mac", sg.MAC, "err", err)
+		var dev store.Device
+		if sg.DeviceID != "" {
+			// a connector's device reported it (its logs); the source is remote
+			d, err := e.Store.Device(ctx, sg.DeviceID)
+			if err != nil || d.SiteID != site.ID {
 				continue
+			}
+			dev = d
+		} else {
+			d, err := e.Store.DeviceByAddress(ctx, site.ID, sg.MAC, sg.IP)
+			if err != nil {
+				d, _, _, err = e.Store.UpsertSighting(ctx, site.TenantID, site.ID, wire.Sighting{MAC: sg.MAC, IP: sg.IP, LastSeen: sg.LastAt}, now)
+				if err != nil {
+					e.Log.Warn("signal: source unknown", "site", site.ID, "ip", sg.IP, "mac", sg.MAC, "err", err)
+					continue
+				}
 			}
 			dev = d
 		}
 		prev, perr := e.Store.OpenFinding(ctx, dev.ID, f.Rule, f.Key)
-		if perr == nil && sg.Kind == wire.SignalCanary {
-			// touches add up over the life of the finding
+		if perr == nil && additiveSignal(sg.Kind) {
+			// events add up over the life of the finding
 			var old struct {
 				Count int `json:"count"`
 			}
 			if json.Unmarshal(prev.Evidence, &old) == nil && old.Count > 0 {
-				f.Evidence["count"] = old.Count + sg.Count
-				f.Detail = rules.CanaryDetail(sg.Port, old.Count+sg.Count)
+				total := old.Count + sg.Count
+				sg.Count = total
+				if f2, ok := rules.EvaluateSignal(rules.Signal{Kind: sg.Kind, IP: sg.IP, MAC: sg.MAC, Port: sg.Port, Count: total, Detail: sg.Detail, First: prev.FirstSeen, Last: sg.LastAt}); ok {
+					f = f2
+				}
 			}
 		}
 		ev, _ := json.Marshal(f.Evidence)
@@ -1039,9 +1053,24 @@ func (e *Engine) absorbSignals(ctx context.Context, site store.Site, box store.B
 	return events
 }
 
+// additiveSignal reports whether a kind counts events (which add up over the
+// life of a finding) rather than a size.
+func additiveSignal(kind string) bool {
+	switch kind {
+	case wire.SignalCanary, wire.SignalFGTAdminFail, wire.SignalFGTVPNFail, wire.SignalFGTIPS:
+		return true
+	}
+	return false
+}
+
 // signalInfo is the one-line detail of a security.alert event.
 func signalInfo(sg wire.Signal) string {
 	switch sg.Kind {
+	case wire.SignalFGTAdminFail, wire.SignalFGTVPNFail:
+		return fmt.Sprintf("%d× von %s", sg.Count, sg.IP)
+	case wire.SignalFGTIPS:
+		attack, _, _ := strings.Cut(sg.Detail, "|")
+		return fmt.Sprintf("%s von %s, %d×", attack, sg.IP, sg.Count)
 	case wire.SignalCanary:
 		return fmt.Sprintf("Port %s, %d×", rules.PortLabel(sg.Port), sg.Count)
 	case wire.SignalPortScan:

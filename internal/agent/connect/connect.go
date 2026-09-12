@@ -39,12 +39,17 @@ type Target struct {
 	URL    string
 	Secret []byte // the sealed JSON document, opened
 	Client *http.Client
+	// State is the reader's memory between reads of the same connector (log
+	// cursors); the runner keeps it per connector and drops it on removal.
+	State map[string]string
+	Now   time.Time
 }
 
 // Reading is what a Reader returns.
 type Reading struct {
 	Facts   map[string]any     // what the device says about itself
 	Metrics map[string]float64 // numbers worth charting
+	Signals []wire.Signal      // what the device's logs say happened since the last read (ADR-0018 §7)
 	// NewToken is set when the reader turned a one-time admin login into a credential
 	// of its own (the credential document to use from now on). The runner seals it to
 	// the box key and reports it; the server stores it and drops the admin login.
@@ -68,16 +73,19 @@ type Runner struct {
 	Open func(sealed string) ([]byte, error) // opens a sealed credential with the box key
 	Seal func(plain []byte) (string, error)  // seals to the box's own key (bootstrap results)
 	Now  func() time.Time
+	// OnSignals takes what a device's logs said (the sentinel queues it for the heartbeat).
+	OnSignals func([]wire.Signal)
 
 	mu        sync.Mutex
 	ctx       context.Context
 	loops     map[string]*loop
 	latest    map[string]wire.ConnectorReport
-	sentFacts map[string]string // connector id → hash of the facts the server acknowledged
-	pending   map[string]string // connector id → hash handed out in the last Reports()
-	override  map[string][]byte // connector id → credential from a bootstrap, until the server has it
-	overVer   map[string]string // connector id → config version the override belongs to
-	tokenSent map[string]bool   // connector id → the sealed token went out and was acknowledged
+	sentFacts map[string]string            // connector id → hash of the facts the server acknowledged
+	pending   map[string]string            // connector id → hash handed out in the last Reports()
+	override  map[string][]byte            // connector id → credential from a bootstrap, until the server has it
+	overVer   map[string]string            // connector id → config version the override belongs to
+	tokenSent map[string]bool              // connector id → the sealed token went out and was acknowledged
+	state     map[string]map[string]string // connector id → the reader's memory between reads
 }
 
 type loop struct {
@@ -91,7 +99,7 @@ func New(log *slog.Logger, open func(string) ([]byte, error)) *Runner {
 		log = slog.Default()
 	}
 	return &Runner{Log: log, Open: open, Now: time.Now, loops: map[string]*loop{}, latest: map[string]wire.ConnectorReport{}, sentFacts: map[string]string{}, pending: map[string]string{},
-		override: map[string][]byte{}, overVer: map[string]string{}, tokenSent: map[string]bool{}}
+		override: map[string][]byte{}, overVer: map[string]string{}, tokenSent: map[string]bool{}, state: map[string]map[string]string{}}
 }
 
 // Run starts the loops of every applied connector and blocks until ctx ends.
@@ -147,6 +155,7 @@ func (r *Runner) Apply(cfgs []wire.ConnectorConfig) {
 			delete(r.loops, id)
 			delete(r.latest, id)
 			delete(r.sentFacts, id)
+			delete(r.state, id)
 			delete(r.pending, id)
 			delete(r.override, id)
 			delete(r.overVer, id)
@@ -195,6 +204,12 @@ func (r *Runner) ReadOnce(ctx context.Context, cfg wire.ConnectorConfig) {
 	} else {
 		rep.OK = true
 		rep.Metrics = reading.Metrics
+		if len(reading.Signals) > 0 && r.OnSignals != nil {
+			for i := range reading.Signals {
+				reading.Signals[i].DeviceID = cfg.DeviceID
+			}
+			r.OnSignals(reading.Signals)
+		}
 		if len(reading.NewToken) > 0 && r.Seal != nil {
 			// use the new credential from now on and hand it to the server, sealed
 			r.mu.Lock()
@@ -240,7 +255,14 @@ func (r *Runner) read(ctx context.Context, cfg wire.ConnectorConfig) (Reading, s
 	client := &http.Client{Timeout: readTimeout, Transport: transport(cfg.TLSFingerprint, &seen)}
 	cctx, cancel := context.WithTimeout(ctx, readTimeout)
 	defer cancel()
-	reading, err := reader.Read(cctx, Target{URL: cfg.URL, Secret: secret, Client: client})
+	r.mu.Lock()
+	state := r.state[cfg.ID]
+	if state == nil {
+		state = map[string]string{}
+		r.state[cfg.ID] = state
+	}
+	r.mu.Unlock()
+	reading, err := reader.Read(cctx, Target{URL: cfg.URL, Secret: secret, Client: client, State: state, Now: r.Now()})
 	return reading, seen.get(), err
 }
 
