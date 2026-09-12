@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,13 +22,55 @@ type Netbird struct {
 	Binary   string // "netbird" on PATH by default
 	StateDir string
 	Exec     func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// A second daemon for the operator's overlay (remote access): its own socket,
+	// WireGuard interface and port. Empty means the default daemon.
+	DaemonAddr string
+	Interface  string
+	WGPort     int
+	Profile    string // customer | operator, for the key file name and logs
 }
 
-// NewNetbird returns the production controller.
+// Operator daemon defaults; image/provision-box.sh installs the matching unit.
+const (
+	OperatorDaemonAddr = "unix:///var/run/netbird-operator.sock"
+	OperatorInterface  = "wt1"
+	OperatorWGPort     = 51821
+)
+
+// NewNetbird returns the controller for the default (customer-stack) daemon.
 func NewNetbird(stateDir string) *Netbird {
-	return &Netbird{Binary: "netbird", StateDir: stateDir, Exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return &Netbird{Binary: "netbird", StateDir: stateDir, Profile: wire.NetbirdProfileCustomer, Exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, name, args...).CombinedOutput() //nolint:gosec // name is the pinned client binary, args are ours
 	}}
+}
+
+// NewNetbirdOperator returns the controller for the second daemon.
+func NewNetbirdOperator(stateDir string) *Netbird {
+	n := NewNetbird(stateDir)
+	n.DaemonAddr, n.Interface, n.WGPort, n.Profile = OperatorDaemonAddr, OperatorInterface, OperatorWGPort, wire.NetbirdProfileOperator
+	return n
+}
+
+// Installed reports whether this daemon exists on the box (socket present).
+func (n *Netbird) Installed() bool {
+	if _, err := exec.LookPath(n.Binary); err != nil {
+		return false
+	}
+	if n.DaemonAddr == "" {
+		return true
+	}
+	if p, ok := strings.CutPrefix(n.DaemonAddr, "unix://"); ok {
+		_, err := os.Stat(p)
+		return err == nil
+	}
+	return true
+}
+
+func (n *Netbird) daemonArgs(args ...string) []string {
+	if n.DaemonAddr != "" {
+		return append([]string{"--daemon-addr", n.DaemonAddr}, args...)
+	}
+	return args
 }
 
 // Status reports the client's state for the heartbeat. A box without the client
@@ -38,7 +81,7 @@ func (n *Netbird) Status(ctx context.Context) wire.NetbirdInfo {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, err := n.Exec(ctx, n.Binary, "status", "--json")
+	out, err := n.Exec(ctx, n.Binary, n.daemonArgs("status", "--json")...)
 	if err != nil {
 		msg := strings.ToLower(string(out))
 		if strings.Contains(msg, "not logged in") || strings.Contains(msg, "needslogin") || strings.Contains(msg, "login") {
@@ -78,13 +121,23 @@ func (n *Netbird) Up(ctx context.Context, managementURL, setupKey string) error 
 		return errors.New("netbird client is not installed on this box")
 	}
 	keyFile := filepath.Join(n.StateDir, "netbird-setup-key")
+	if n.Profile == wire.NetbirdProfileOperator {
+		keyFile = filepath.Join(n.StateDir, "netbird-operator-setup-key")
+	}
 	if err := os.WriteFile(keyFile, []byte(setupKey), 0o600); err != nil {
 		return fmt.Errorf("netbird: %w", err)
 	}
 	defer func() { _ = os.Remove(keyFile) }()
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	out, err := n.Exec(ctx, n.Binary, "up", "--management-url", managementURL, "--setup-key-file", keyFile)
+	args := []string{"up", "--management-url", managementURL, "--setup-key-file", keyFile}
+	if n.Interface != "" {
+		args = append(args, "--interface-name", n.Interface)
+	}
+	if n.WGPort != 0 {
+		args = append(args, "--wireguard-port", strconv.Itoa(n.WGPort))
+	}
+	out, err := n.Exec(ctx, n.Binary, n.daemonArgs(args...)...)
 	if err != nil {
 		return fmt.Errorf("netbird up: %w: %s", err, strings.TrimSpace(string(out)))
 	}

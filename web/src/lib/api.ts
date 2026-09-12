@@ -135,3 +135,6 @@ export interface FindingView {
 }
 export interface FindingsData { open: FindingView[]; resolved?: FindingView[]; counts: Record<string, number> }
 export interface SamplePoint { at: string; value: number }
+export interface RemoteAccessRow { SiteID: string; TenantID: string; BoxID: string; CIDR: string; Enabled: boolean; State: "key" | "joining" | "wiring" | "active" | "off" | "error"; Detail: string; PeerID: string; PeerIP: string; NetworkID: string; ResourceID: string; RouterID: string; RequestedBy: string; CreatedAt: string; UpdatedAt: string }
+export interface SiteRemote { configured: boolean; access: RemoteAccessRow | null; suggested: string; boxOperator: string; boxOpIp: string; labels: Record<string, string> }
+export interface NetbirdSettings { url: string; hasToken: boolean; techGroup: string; lanGroup: string; boxGroup: string }

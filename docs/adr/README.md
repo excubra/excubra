@@ -29,3 +29,4 @@ Rules:
 | [0013](0013-console-spa.md) | The console is a single-page app, built at build time and embedded |
 | [0014](0014-box-tasks.md) | Box tasks: a closed list, pulled with the config, run once |
 | [0015](0015-connectors-and-sealed-credentials.md) | Connectors read devices from the box; credentials are sealed to the box |
+| [0016](0016-remote-access-through-the-box.md) | Remote access through the box: the customer LAN in the operator's overlay |

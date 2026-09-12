@@ -50,6 +50,9 @@ type Box struct {
 	EnrolledAt     time.Time
 	RevokedAt      *time.Time
 	SealKey        string // base64 X25519 public key the box reported (ADR-0015)
+	// the second NetBird client, in the operator's overlay (remote access)
+	NetbirdOpStatus string
+	NetbirdOpIP     string
 }
 
 // EnrollmentKey is a one-time key; only the hash of the secret is stored.
@@ -67,11 +70,41 @@ type EnrollmentKey struct {
 // NetbirdKey is the pending NetBird hand-over for a box (ADR-0010).
 type NetbirdKey struct {
 	BoxID         string
+	Profile       string // customer (default) or operator
 	ManagementURL string
 	SetupKey      string
 	CreatedAt     time.Time
 	ClaimedAt     *time.Time
 }
+
+// RemoteAccess is one site's LAN in the operator's overlay (salt: Vollausbau B).
+type RemoteAccess struct {
+	SiteID      string
+	TenantID    string
+	BoxID       string
+	CIDR        string
+	Enabled     bool
+	State       string // key | joining | wiring | active | off | error
+	Detail      string
+	PeerID      string
+	PeerIP      string
+	NetworkID   string
+	ResourceID  string
+	RouterID    string
+	RequestedBy string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// Remote access states.
+const (
+	RemoteKey     = "key"     // setup key created, the box has not fetched it yet
+	RemoteJoining = "joining" // the box has the key, its peer has not appeared yet
+	RemoteWiring  = "wiring"  // network, resource and router are being created
+	RemoteActive  = "active"
+	RemoteOff     = "off"
+	RemoteError   = "error"
+)
 
 // Device is something discovery has seen at a site.
 type Device struct {

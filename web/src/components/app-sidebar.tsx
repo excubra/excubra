@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router"
-import { Activity, Box, Building2, Download, ShieldAlert, FileClock, KeyRound, LayoutDashboard, LogOut, Search, ShieldCheck, Users, Webhook, Wrench } from "lucide-react"
+import { Activity, Box, Building2, Download, Settings2, ShieldAlert, FileClock, KeyRound, LayoutDashboard, LogOut, Search, ShieldCheck, Users, Webhook, Wrench } from "lucide-react"
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
   SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarRail,
@@ -24,6 +24,7 @@ const system = [
   { to: "/tokens", label: "API-Tokens", icon: ShieldCheck },
   { to: "/users", label: "Benutzer", icon: Users },
   { to: "/audit", label: "Audit-Log", icon: FileClock },
+  { to: "/settings", label: "Einstellungen", icon: Settings2 },
 ]
 
 function isActive(path: string, to: string) {

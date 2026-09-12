@@ -111,14 +111,14 @@ func (s *Store) RenameSite(ctx context.Context, siteID, name string) error {
 // ---- boxes -----------------------------------------------------------------------
 
 const boxCols = `id, site_id, name, hw_id, agent_version, os, arch, cert_serial, cert_not_after, channel, discovery_mode, discovery_subnets,
-	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key`
+	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip`
 
 func scanBox(sc interface{ Scan(...any) error }) (Box, error) {
 	var b Box
 	var site, revoked sql.NullString
 	var notAfter, enrolled, subnets, lastSeen string
 	err := sc.Scan(&b.ID, &site, &b.Name, &b.HWID, &b.AgentVersion, &b.OS, &b.Arch, &b.CertSerial, &notAfter, &b.Channel, &b.DiscoveryMode, &subnets,
-		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey)
+		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP)
 	b.SiteID = site.String
 	b.CertNotAfter = parseTS(notAfter)
 	b.LastSeen = parseTS(lastSeen)
@@ -137,17 +137,21 @@ func (s *Store) CreateBox(ctx context.Context, b Box) error {
 		b.DiscoveryMode = wire.DiscoverySweep
 	}
 	subnets, _ := json.Marshal(nonNil(b.DiscoverySubnets))
-	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ID, nullIfEmpty(b.SiteID), b.Name, b.HWID, b.AgentVersion, b.OS, b.Arch, b.CertSerial, ts(b.CertNotAfter), b.Channel, b.DiscoveryMode, string(subnets),
-		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey)
+		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey, b.NetbirdOpStatus, b.NetbirdOpIP)
 	return wrap("create box", err)
 }
 
 // UpdateBoxHeartbeat records what the last heartbeat said about the box.
 func (s *Store) UpdateBoxHeartbeat(ctx context.Context, boxID string, hb wire.Heartbeat, at time.Time) error {
+	opStatus, opIP := "", ""
+	if hb.NetbirdOperator != nil {
+		opStatus, opIP = hb.NetbirdOperator.Status, hb.NetbirdOperator.IP
+	}
 	return s.exec1(ctx, "update box heartbeat", `UPDATE boxes SET agent_version = ?, os = ?, arch = ?, netbird_status = ?, netbird_ip = ?,
-		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ? WHERE id = ?`,
-		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), boxID)
+		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ? WHERE id = ?`,
+		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, boxID)
 }
 
 // SetBoxDiscovery sets the discovery mode and the additional subnets to sweep.
@@ -335,38 +339,107 @@ func (s *Store) RevokeEnrollmentKey(ctx context.Context, keyID string, at time.T
 
 // SetNetbirdKey stores (or replaces) the pending hand-over for a box.
 func (s *Store) SetNetbirdKey(ctx context.Context, k NetbirdKey) error {
-	_, err := s.main.ExecContext(ctx, `INSERT OR REPLACE INTO netbird_keys (box_id, management_url, setup_key, created_at, claimed_at) VALUES (?, ?, ?, ?, NULL)`,
-		k.BoxID, k.ManagementURL, k.SetupKey, ts(k.CreatedAt))
+	if k.Profile == "" {
+		k.Profile = wire.NetbirdProfileCustomer
+	}
+	_, err := s.main.ExecContext(ctx, `INSERT OR REPLACE INTO netbird_keys (box_id, profile, management_url, setup_key, created_at, claimed_at) VALUES (?, ?, ?, ?, ?, NULL)`,
+		k.BoxID, k.Profile, k.ManagementURL, k.SetupKey, ts(k.CreatedAt))
 	return wrap("set netbird key", err)
 }
 
-// NetbirdKey returns the hand-over record of a box.
+// NetbirdKey returns the customer-stack hand-over record of a box.
 func (s *Store) NetbirdKey(ctx context.Context, boxID string) (NetbirdKey, error) {
+	return s.NetbirdKeyProfile(ctx, boxID, wire.NetbirdProfileCustomer)
+}
+
+// NetbirdKeyProfile returns the hand-over record of a box for one profile.
+func (s *Store) NetbirdKeyProfile(ctx context.Context, boxID, profile string) (NetbirdKey, error) {
 	var k NetbirdKey
 	var created string
 	var claimed sql.NullString
-	err := s.main.QueryRowContext(ctx, `SELECT box_id, management_url, setup_key, created_at, claimed_at FROM netbird_keys WHERE box_id = ?`, boxID).
-		Scan(&k.BoxID, &k.ManagementURL, &k.SetupKey, &created, &claimed)
+	err := s.main.QueryRowContext(ctx, `SELECT box_id, profile, management_url, setup_key, created_at, claimed_at FROM netbird_keys WHERE box_id = ? AND profile = ?`, boxID, profile).
+		Scan(&k.BoxID, &k.Profile, &k.ManagementURL, &k.SetupKey, &created, &claimed)
 	k.CreatedAt, k.ClaimedAt = parseTS(created), parseTSP(claimed)
 	return k, wrap("netbird key", err)
 }
 
-// ClaimNetbirdKey hands the key over exactly once; a second claim is ErrNotFound.
+// ClaimNetbirdKey hands the customer-stack key over exactly once.
 func (s *Store) ClaimNetbirdKey(ctx context.Context, boxID string, at time.Time) (NetbirdKey, error) {
-	res, err := s.main.ExecContext(ctx, `UPDATE netbird_keys SET claimed_at = ? WHERE box_id = ? AND claimed_at IS NULL`, ts(at), boxID)
+	return s.ClaimNetbirdKeyProfile(ctx, boxID, wire.NetbirdProfileCustomer, at)
+}
+
+// ClaimNetbirdKeyProfile hands a key over exactly once; a second claim is ErrNotFound.
+func (s *Store) ClaimNetbirdKeyProfile(ctx context.Context, boxID, profile string, at time.Time) (NetbirdKey, error) {
+	res, err := s.main.ExecContext(ctx, `UPDATE netbird_keys SET claimed_at = ? WHERE box_id = ? AND profile = ? AND claimed_at IS NULL`, ts(at), boxID, profile)
 	if err != nil {
 		return NetbirdKey{}, wrap("claim netbird key", err)
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
 		return NetbirdKey{}, ErrNotFound
 	}
-	return s.NetbirdKey(ctx, boxID)
+	return s.NetbirdKeyProfile(ctx, boxID, profile)
 }
 
-// DeleteNetbirdKey removes the record.
+// DeleteNetbirdKey removes the customer-stack record.
 func (s *Store) DeleteNetbirdKey(ctx context.Context, boxID string) error {
-	_, err := s.main.ExecContext(ctx, `DELETE FROM netbird_keys WHERE box_id = ?`, boxID)
+	return s.DeleteNetbirdKeyProfile(ctx, boxID, wire.NetbirdProfileCustomer)
+}
+
+// DeleteNetbirdKeyProfile removes one profile's record.
+func (s *Store) DeleteNetbirdKeyProfile(ctx context.Context, boxID, profile string) error {
+	_, err := s.main.ExecContext(ctx, `DELETE FROM netbird_keys WHERE box_id = ? AND profile = ?`, boxID, profile)
 	return wrap("delete netbird key", err)
+}
+
+// ---- remote access (salt: Vollausbau B) ----------------------------------------------------
+
+const remoteCols = `site_id, tenant_id, box_id, cidr, enabled, state, detail, peer_id, peer_ip, network_id, resource_id, router_id, requested_by, created_at, updated_at`
+
+func scanRemote(sc interface{ Scan(...any) error }) (RemoteAccess, error) {
+	var r RemoteAccess
+	var enabled int
+	var created, updated string
+	err := sc.Scan(&r.SiteID, &r.TenantID, &r.BoxID, &r.CIDR, &enabled, &r.State, &r.Detail, &r.PeerID, &r.PeerIP, &r.NetworkID, &r.ResourceID, &r.RouterID, &r.RequestedBy, &created, &updated)
+	r.Enabled = enabled != 0
+	r.CreatedAt, r.UpdatedAt = parseTS(created), parseTS(updated)
+	return r, err
+}
+
+// SetRemoteAccess inserts or replaces a site's remote-access row.
+func (s *Store) SetRemoteAccess(ctx context.Context, r RemoteAccess) error {
+	_, err := s.main.ExecContext(ctx, `INSERT OR REPLACE INTO remote_access (`+remoteCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.SiteID, r.TenantID, r.BoxID, r.CIDR, boolInt(r.Enabled), r.State, r.Detail, r.PeerID, r.PeerIP, r.NetworkID, r.ResourceID, r.RouterID, r.RequestedBy, ts(r.CreatedAt), ts(r.UpdatedAt))
+	return wrap("set remote access", err)
+}
+
+// RemoteAccess returns a site's row.
+func (s *Store) RemoteAccess(ctx context.Context, siteID string) (RemoteAccess, error) {
+	r, err := scanRemote(s.main.QueryRowContext(ctx, `SELECT `+remoteCols+` FROM remote_access WHERE site_id = ?`, siteID))
+	return r, wrap("remote access", err)
+}
+
+// RemoteAccesses returns every row.
+func (s *Store) RemoteAccesses(ctx context.Context) ([]RemoteAccess, error) {
+	rows, err := s.main.QueryContext(ctx, `SELECT `+remoteCols+` FROM remote_access ORDER BY tenant_id, site_id`)
+	if err != nil {
+		return nil, wrap("remote accesses", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []RemoteAccess
+	for rows.Next() {
+		r, err := scanRemote(rows)
+		if err != nil {
+			return nil, wrap("remote accesses", err)
+		}
+		out = append(out, r)
+	}
+	return out, wrap("remote accesses", rows.Err())
+}
+
+// DeleteRemoteAccess removes a site's row.
+func (s *Store) DeleteRemoteAccess(ctx context.Context, siteID string) error {
+	_, err := s.main.ExecContext(ctx, `DELETE FROM remote_access WHERE site_id = ?`, siteID)
+	return wrap("delete remote access", err)
 }
 
 // ---- devices ---------------------------------------------------------------------

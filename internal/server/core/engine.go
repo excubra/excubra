@@ -563,6 +563,12 @@ func (e *Engine) config(ctx context.Context, box store.Box) (wire.Config, error)
 		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return wire.Config{}, err
 		}
+		ok, err := e.Store.NetbirdKeyProfile(ctx, box.ID, wire.NetbirdProfileOperator)
+		if err == nil && ok.ClaimedAt == nil {
+			cfg.NetbirdOperatorPending = true
+		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return wire.Config{}, err
+		}
 	}
 	if box.RevokedAt == nil {
 		pending, err := e.Store.PendingBoxTasks(ctx, box.ID, e.Now())

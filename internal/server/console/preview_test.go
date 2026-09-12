@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/wire"
 )
@@ -220,6 +221,21 @@ func seedActions(t *testing.T, f *fixture) {
 			at := now.Add(-time.Duration(i) * time.Hour)
 			_ = f.st.AddConnectorSamples(ctx, "ten_muster", c.ID, at, map[string]float64{"cpu_pct": float64(4 + i%7), "sessions": float64(900 + (i*137)%600)})
 		}
+	}
+	// remote access: the operator stack is configured and this site's LAN is active in it
+	f.con.Remote = remote.New(f.st, nil)
+	for k, v := range map[string]string{"netbird.operator.url": "https://viico.vpn.example.test", "netbird.operator.token": "nbp_example"} {
+		if err := f.st.SetSetting(ctx, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.st.Box(ctx, box); err == nil {
+		_ = f.st.UpdateBoxHeartbeat(ctx, box, wire.Heartbeat{Agent: wire.AgentInfo{Version: "v0.2.3", OS: "linux", Arch: "amd64"}, Netbird: wire.NetbirdInfo{Status: wire.NetbirdConnected, IP: "100.112.91.255"},
+			NetbirdOperator: &wire.NetbirdInfo{Status: wire.NetbirdConnected, IP: "100.85.40.12"}}, now)
+	}
+	if err := f.st.SetRemoteAccess(ctx, store.RemoteAccess{SiteID: "site_geschaeftsstelle", TenantID: "ten_muster", BoxID: box, CIDR: "192.168.100.0/24", Enabled: true, State: store.RemoteActive,
+		Detail: "Peer verbunden", PeerID: "peer_x", PeerIP: "100.85.40.12", NetworkID: "net_x", ResourceID: "res_x", RouterID: "rtr_x", RequestedBy: "console:jeremia", CreatedAt: now.Add(-90 * time.Minute), UpdatedAt: now.Add(-2 * time.Minute)}); err != nil {
+		t.Fatal(err)
 	}
 	views, err := f.eng.HostViews(ctx, "ten_muster")
 	if err != nil {

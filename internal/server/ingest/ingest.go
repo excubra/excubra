@@ -257,7 +257,15 @@ func (s *Server) netbirdClaim(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, wire.ErrNotAssigned, "box is not assigned")
 		return
 	}
-	k, err := s.Store.ClaimNetbirdKey(r.Context(), b.ID, s.Now())
+	profile := r.URL.Query().Get("profile")
+	if profile == "" {
+		profile = wire.NetbirdProfileCustomer
+	}
+	if profile != wire.NetbirdProfileCustomer && profile != wire.NetbirdProfileOperator {
+		writeErr(w, http.StatusBadRequest, wire.ErrBadRequest, "profile must be customer or operator")
+		return
+	}
+	k, err := s.Store.ClaimNetbirdKeyProfile(r.Context(), b.ID, profile, s.Now())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeErr(w, http.StatusNotFound, wire.ErrNothingPending, "no NetBird key pending")
@@ -266,8 +274,8 @@ func (s *Server) netbirdClaim(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, wire.ErrInternal, "claim failed")
 		return
 	}
-	_ = s.Store.Audit(r.Context(), s.Now(), "ingest", "netbird.claim", b.ID, k.ManagementURL)
-	writeJSON(w, http.StatusOK, wire.NetbirdClaimResponse{ManagementURL: k.ManagementURL, SetupKey: k.SetupKey})
+	_ = s.Store.Audit(r.Context(), s.Now(), "ingest", "netbird.claim", b.ID, profile+" "+k.ManagementURL)
+	writeJSON(w, http.StatusOK, wire.NetbirdClaimResponse{Profile: profile, ManagementURL: k.ManagementURL, SetupKey: k.SetupKey})
 }
 
 // update serves release metadata for the box's channel, or 204.
