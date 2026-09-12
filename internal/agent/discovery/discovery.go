@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/excubra/excubra/internal/agent/guard"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -444,7 +445,7 @@ func (d *Discovery) Run(ctx context.Context) {
 func (d *Discovery) runPassive(ctx context.Context) {
 	backoff := 5 * time.Second
 	for {
-		err := d.passive(ctx, d.Table.See, d.observe)
+		err := d.passiveGuarded(ctx)
 		if ctx.Err() != nil {
 			return
 		}
@@ -464,11 +465,24 @@ func (d *Discovery) runPassive(ctx context.Context) {
 	}
 }
 
-// observe hands a frame to the ARP observer, if there is one.
+// observe hands a frame to the ARP observer, if there is one; a frame that
+// trips an observer is dropped, the listener goes on.
 func (d *Discovery) observe(f ARPFrame) {
 	if d.ARP != nil {
+		defer guard.Recover(d.Log, "arp frame")
 		d.ARP(f)
 	}
+}
+
+// passiveGuarded runs the platform listener; a panic in it (a frame the parser
+// did not expect) becomes an error, and the loop restarts the listener.
+func (d *Discovery) passiveGuarded(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("passive listener panicked: %v", r)
+		}
+	}()
+	return d.passive(ctx, d.Table.See, d.observe)
 }
 
 // sweep does one round: neighbor tables always, ARP and ICMP only in sweep mode.

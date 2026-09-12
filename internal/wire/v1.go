@@ -96,8 +96,9 @@ type DNSReport struct {
 	Queries     int    `json:"queries"`
 	Blocked     int    `json:"blocked"`
 	NXDomain    int    `json:"nxdomain"`
-	Failed      int    `json:"failed"`  // no upstream answered
-	Clients     int    `json:"clients"` // distinct sources in the interval
+	Failed      int    `json:"failed"`            // no upstream answered
+	Clients     int    `json:"clients"`           // distinct sources in the interval
+	Refused     int    `json:"refused,omitempty"` // queries from outside the private ranges, dropped unanswered
 }
 
 // AgentInfo describes the running agent.

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/agent/discovery"
+	"github.com/excubra/excubra/internal/agent/guard"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -221,7 +222,7 @@ func (s *Sentinel) runWatch(ctx context.Context) {
 	backoff := 5 * time.Second
 	for {
 		s.setRaw(true)
-		err := s.watch(ctx, s.observeFrame)
+		err := s.watchGuarded(ctx)
 		s.setRaw(false)
 		if ctx.Err() != nil {
 			return
@@ -240,6 +241,20 @@ func (s *Sentinel) runWatch(ctx context.Context) {
 			backoff *= 2
 		}
 	}
+}
+
+// watchGuarded runs the platform watcher with every frame guarded: a frame that
+// trips the parser is dropped, the watcher goes on.
+func (s *Sentinel) watchGuarded(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("watcher panicked: %v", r)
+		}
+	}()
+	return s.watch(ctx, func(f []byte) {
+		defer guard.Recover(s.Log, "syn frame")
+		s.observeFrame(f)
+	})
 }
 
 func (s *Sentinel) setRaw(on bool) {
@@ -326,6 +341,7 @@ func (s *Sentinel) accept(ctx context.Context, ln net.Listener, port int) {
 		}
 		go func() {
 			defer func() { <-s.sem; _ = conn.Close() }()
+			defer guard.Recover(s.Log, "decoy connection")
 			if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
 				s.mu.Lock()
 				raw := s.raw
