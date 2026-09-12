@@ -18,6 +18,7 @@ import (
 	"github.com/excubra/excubra/internal/seal"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/catalog"
+	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/version"
@@ -31,6 +32,8 @@ func cliArgs(args []string) (positional, flags []string) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "-":
+			positional = append(positional, a) // "read the value from stdin", never a flag
 		case a == "--":
 			return append(positional, args[i+1:]...), flags
 		case strings.HasPrefix(a, "-") && strings.Contains(a, "="):
@@ -763,4 +766,45 @@ func settingCmd(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("usage: excubra server setting get <key> | set <key> <value|->")
+}
+
+// remoteCmd: excubra server remote test | status — the operator stack from a shell.
+func remoteCmd(args []string) error {
+	fs := flag.NewFlagSet("excubra server remote", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "server env file")
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
+		return err
+	}
+	st, _, err := cliStore(*envFile)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	svc := remote.New(st, nil)
+	switch {
+	case len(rest) == 1 && rest[0] == "test":
+		set := svc.Settings(ctx)
+		n, err := svc.Test(ctx)
+		if err != nil {
+			return fmt.Errorf("operator stack %s: %w", orDash(set.URL), err)
+		}
+		fmt.Printf("operator stack %s: ok, %d groups (technicians=%s, lans=%s, boxes=%s)\n", set.URL, n, set.TechGroup, set.LANGroup, set.BoxGroup)
+		return nil
+	case len(rest) == 1 && rest[0] == "status":
+		rows, err := st.RemoteAccesses(ctx)
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			fmt.Println("(no site has remote access)")
+			return nil
+		}
+		for _, r := range rows {
+			fmt.Printf("%s\t%s\tenabled=%v\tstate=%s\tpeer=%s\t%s\n", r.SiteID, r.CIDR, r.Enabled, r.State, orDash(r.PeerIP), r.Detail)
+		}
+		return nil
+	}
+	return fmt.Errorf("usage: excubra server remote test | status")
 }
