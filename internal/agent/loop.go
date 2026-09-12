@@ -17,6 +17,7 @@ import (
 	"github.com/excubra/excubra/internal/agent/connect"
 	"github.com/excubra/excubra/internal/agent/discovery"
 	"github.com/excubra/excubra/internal/agent/scan"
+	"github.com/excubra/excubra/internal/agent/sentinel"
 	"github.com/excubra/excubra/internal/agent/update"
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/seal"
@@ -50,7 +51,8 @@ type Agent struct {
 	netbirdOp *Netbird // the operator's overlay, remote access (may be absent on the box)
 	upd       *update.Updater
 	conn      *connect.Runner
-	scan      *scan.Scanner // the service scan of the LAN (ADR-0018)
+	scan      *scan.Scanner      // the service scan of the LAN (ADR-0018)
+	sent      *sentinel.Sentinel // decoy ports and live signals (ADR-0018 §7)
 	sealKey   *ecdh.PrivateKey
 
 	cfgMu        sync.RWMutex
@@ -176,6 +178,8 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 		}
 		return out
 	})
+	a.sent = sentinel.New(log)
+	a.disc.ARP = a.sent.ObserveARP
 	a.hbInterval, a.checkEvery, a.configMaxAge = 60*time.Second, 30*time.Second, 15*time.Minute
 	a.doneTasks, a.taskResults = st.LoadTasks()
 	for _, id := range a.doneTasks {
@@ -193,6 +197,7 @@ func (a *Agent) run(ctx context.Context) error {
 	go a.disc.Run(ctx)
 	go a.conn.Run(ctx)
 	go a.scan.Run(ctx)
+	go a.sent.Run(ctx)
 	go a.checkLoop(ctx)
 
 	hb := time.NewTimer(5 * time.Second)
@@ -360,6 +365,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	}
 	box := boxInfo(a.st.Dir)
 	box.LAN = lanPrefixes()
+	box.Canary = a.sent.Armed()
 	hb := wire.Heartbeat{
 		SentAt:          a.now().UTC(),
 		Agent:           wire.AgentInfo{Version: version.Version, UptimeS: uptimeSeconds(), BootID: bootID(), OS: runtime.GOOS, Arch: runtime.GOARCH, SealKey: a.sealPublic()},
@@ -375,6 +381,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		TaskResults:     results,
 		Connectors:      conns,
 		Scan:            a.scan.Drain(),
+		Signals:         a.sent.Drain(),
 	}
 	hb.Box.ClockOffsetMS = a.clockOffset
 
@@ -385,6 +392,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		a.putRounds(reports)
 		a.disc.Table.Nack()
 		a.scan.Nack()
+		a.sent.Nack()
 		if a.conn != nil {
 			a.conn.Nack()
 		}
@@ -411,6 +419,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	}
 	a.disc.Table.Ack()
 	a.scan.Ack()
+	a.sent.Ack()
 	if a.conn != nil {
 		a.conn.Ack()
 	}
@@ -483,6 +492,9 @@ func (a *Agent) applyConfig(cfg wire.Config) {
 	scfg, serrs := scan.ParseConfig(cfg.Scan)
 	errs = append(errs, serrs...)
 	a.scan.Apply(scfg)
+	ccfg, cerrs := sentinel.ParseConfig(cfg.Canary)
+	errs = append(errs, cerrs...)
+	a.sent.Apply(ccfg)
 
 	a.cfgMu.Lock()
 	a.cfg = cfg

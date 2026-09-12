@@ -3,7 +3,9 @@
 A box is a Debian machine with one package on it, always the same three parts
 (salt: Konzept, "Die Box"; ADR-0016):
 
-1. **the EX0 agent** — unprivileged, opens no port, enrolls, monitors, updates itself
+1. **the EX0 agent** — unprivileged, enrolls, monitors, updates itself; the only
+   ports it opens are decoys that look like SMB, RDP, telnet, MSSQL and VNC and
+   report who knocks (ADR-0018 §7)
 2. **the operator peer** — a NetBird client in the operator's own overlay, in its own
    network namespace. Always on. EX0 hands it its key once the box is assigned to a
    site; technicians then reach the box (`ssh root@<its overlay address>`) and,
@@ -88,14 +90,16 @@ written yet); until then a Pi is provisioned like a mini PC over SSH.
 
 - Debian security updates automatically, reboot window 04:45
 - chrony, Europe/Berlin, persistent journald capped at 256 MB (SSD-friendly)
-- sshd keys-only; ufw: inbound nothing (or 22 with `--ssh-lan`), plus the two rules
-  for the operator namespace's veth pair
+- sshd keys-only; ufw: inbound nothing but the five decoy ports of the live detection
+  (445, 3389, 23, 1433, 5900 — the agent accepts, waits and closes; ADR-0018 §7), or
+  22 too with `--ssh-lan`, plus the two rules for the operator namespace's veth pair
 - `net.ipv4.ping_group_range` open so the agent pings without raw-socket rights
   (it falls back to a raw socket via CAP_NET_RAW if that sysctl is missing)
 - user `excubra-agent`, state in `/var/lib/excubra-agent` (0700), binary in
   `/opt/excubra/bin` owned by the agent so the signed self-update can swap it
-- the agent unit with CAP_NET_RAW only, CPU 20 %, memory 256 MB, strict
-  filesystem protection
+- the agent unit with CAP_NET_RAW and CAP_NET_BIND_SERVICE only (raw sockets for
+  ARP, ICMP and the SYN watcher; the decoy ports below 1024), CPU 20 %, memory
+  256 MB, strict filesystem protection
 - the pinned NetBird client with both daemon sockets opened to the agent group, so
   `netbird up` works without root; `netbird-operator-netns.service` (namespace),
   `netbird-operator.service` (the daemon in it), `netbird-operator-ssh.service` (the

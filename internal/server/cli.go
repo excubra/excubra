@@ -346,11 +346,14 @@ func siteCmd(args []string) error {
 			return err
 		}
 		for _, s := range ss {
-			scan := "scan=off"
+			scan, canary := "scan=off", "canary=off"
 			if s.ScanEnabled {
 				scan = "scan=on"
 			}
-			fmt.Printf("%s\t%s\t%s\t%s\n", s.ID, s.TenantID, s.Name, scan)
+			if s.CanaryEnabled {
+				canary = "canary=on"
+			}
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", s.ID, s.TenantID, s.Name, scan, canary)
 		}
 		return nil
 	case len(rest) == 3 && rest[0] == "scan" && (rest[2] == "on" || rest[2] == "off"):
@@ -364,8 +367,19 @@ func siteCmd(args []string) error {
 		_ = st.Audit(ctx, time.Now(), "cli", "site.scan", rest[1], rest[2])
 		fmt.Printf("scan %s for %s; the box picks it up with its next config pull\n", rest[2], rest[1])
 		return nil
+	case len(rest) == 3 && rest[0] == "canary" && (rest[2] == "on" || rest[2] == "off"):
+		// the live detection switch (ADR-0018 §7): decoy ports and signals
+		if _, err := st.Site(ctx, rest[1]); err != nil {
+			return err
+		}
+		if err := st.SetSiteCanary(ctx, rest[1], rest[2] == "on"); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "site.canary", rest[1], rest[2])
+		fmt.Printf("canary %s for %s; the box picks it up with its next config pull\n", rest[2], rest[1])
+		return nil
 	}
-	return fmt.Errorf("usage: excubra server site add <tenant_id> <slug> <name> | list | scan <site_id> on|off")
+	return fmt.Errorf("usage: excubra server site add <tenant_id> <slug> <name> | list | scan <site_id> on|off | canary <site_id> on|off")
 }
 
 // boxCmd: excubra server box list | assign <box_id> <site_id> | unassign <box_id>

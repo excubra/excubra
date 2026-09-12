@@ -646,6 +646,102 @@ func TestVersionsAreJudgedAgainstTheFeed(t *testing.T) {
 	}
 }
 
+// Live detection (ADR-0018 §7): the canary is on by default and off on request; a
+// signal becomes a finding on its source device and, when it opens, one
+// security.alert; the same signal again only grows the count; a quiet day
+// resolves it.
+func TestSignalsBecomeAlertsAndFindings(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	boxID, boxClient, _ := f.enroll(f.key.String())
+	must(t, f.eng.AssignBox(ctx, boxID, "site_a", "test"))
+	beat := func(hb wire.Heartbeat) {
+		t.Helper()
+		f.now = f.now.Add(60 * time.Second)
+		hb.SentAt, hb.Agent = f.now, wire.AgentInfo{Version: "0.5.0", OS: "linux", Arch: "amd64"}
+		if status, body := f.do(boxClient, "POST", "/v1/heartbeat", hb, nil); status != 200 {
+			t.Fatalf("heartbeat: %d %s", status, body)
+		}
+	}
+	_, body := f.do(boxClient, "GET", "/v1/config", nil, nil)
+	var cfg wire.Config
+	_ = json.Unmarshal(body, &cfg)
+	if !cfg.Canary.Enabled {
+		t.Fatal("canary off by default")
+	}
+	beat(wire.Heartbeat{Box: wire.BoxInfo{Canary: []int{445, 3389}}, Discovery: wire.DiscoveryReport{Seen: []wire.Sighting{{MAC: "00:11:22:33:44:55", IP: "192.168.1.50", Vendor: "Acme", LastSeen: f.now}}}})
+	box, err := f.st.Box(ctx, boxID)
+	must(t, err)
+	if len(box.Canary) != 2 || box.Canary[0] != 445 {
+		t.Fatalf("armed ports not stored: %+v", box.Canary)
+	}
+	f.pub.reset()
+
+	// two touches of the SMB decoy and a network search, both from the known device
+	beat(wire.Heartbeat{Signals: []wire.Signal{
+		{Kind: wire.SignalCanary, IP: "192.168.1.50", MAC: "00:11:22:33:44:55", Port: 445, Count: 2, FirstAt: f.now, LastAt: f.now},
+		{Kind: wire.SignalARPScan, IP: "192.168.1.50", MAC: "00:11:22:33:44:55", Count: 254, FirstAt: f.now, LastAt: f.now},
+	}})
+	if got := f.pub.types(); got != "security.alert security.alert" {
+		t.Fatalf("events: %q", got)
+	}
+	al := f.pub.events[0]
+	if al.Severity != event.Critical || al.Source != event.SourceSignals || al.SiteID != "site_a" || al.BoxID != boxID || al.DeviceID == "" || al.Device == nil || al.Device.IP != "192.168.1.50" || al.Details["kind"] != wire.SignalCanary {
+		t.Fatalf("alert: %+v", al)
+	}
+	open, err := f.st.OpenFindings(ctx, "ten_a")
+	must(t, err)
+	byRule := map[string]store.Finding{}
+	for _, fd := range open {
+		if fd.ConnectorID == "signal" {
+			byRule[fd.Rule] = fd
+		}
+	}
+	if len(byRule) != 2 || byRule["signal.canary"].Severity != "high" || byRule["signal.canary"].Key != "445" || byRule["signal.canary"].DeviceID != al.DeviceID || byRule["signal.arp_scan"].Severity != "high" {
+		t.Fatalf("findings: %+v", byRule)
+	}
+
+	// the same touch again: no second alert, the count adds up
+	f.pub.reset()
+	beat(wire.Heartbeat{Signals: []wire.Signal{{Kind: wire.SignalCanary, IP: "192.168.1.50", MAC: "00:11:22:33:44:55", Port: 445, Count: 3, FirstAt: f.now, LastAt: f.now}}})
+	if got := f.pub.types(); got != "" {
+		t.Fatalf("repeated signal alerted again: %q", got)
+	}
+	fd, err := f.st.OpenFinding(ctx, al.DeviceID, "signal.canary", "445")
+	must(t, err)
+	var ev struct {
+		Count int `json:"count"`
+	}
+	_ = json.Unmarshal(fd.Evidence, &ev)
+	if ev.Count != 5 || !strings.Contains(fd.Detail, "5 Versuche") {
+		t.Fatalf("count did not add up: %d %s", ev.Count, fd.Detail)
+	}
+
+	// a source the inventory does not know is put there so the finding has a device
+	beat(wire.Heartbeat{Signals: []wire.Signal{{Kind: wire.SignalARPSpoof, IP: "192.168.1.1", MAC: "de:ad:be:ef:00:01", Count: 1, Detail: "gateway 00:09:0f:aa:bb:cc → de:ad:be:ef:00:01", FirstAt: f.now, LastAt: f.now}}})
+	dev, err := f.st.DeviceByAddress(ctx, "site_a", "de:ad:be:ef:00:01", "")
+	must(t, err)
+	if _, err := f.st.OpenFinding(ctx, dev.ID, "signal.arp_spoof", "192.168.1.1"); err != nil {
+		t.Fatalf("spoof finding on the new device: %v", err)
+	}
+
+	// a quiet day resolves the incidents, the switch turns the decoys off
+	f.now = f.now.Add(25 * time.Hour)
+	must(t, f.eng.Tick(ctx))
+	open, _ = f.st.OpenFindings(ctx, "ten_a")
+	for _, fd := range open {
+		if fd.ConnectorID == "signal" {
+			t.Fatalf("signal finding survived a quiet day: %+v", fd)
+		}
+	}
+	must(t, f.eng.SetSiteCanary(ctx, "site_a", false, "test"))
+	_, body = f.do(boxClient, "GET", "/v1/config", nil, nil)
+	_ = json.Unmarshal(body, &cfg)
+	if cfg.Canary.Enabled {
+		t.Fatal("canary still on after switching it off")
+	}
+}
+
 func TestVersionWindowAndRateLimit(t *testing.T) {
 	f := newFixture(t)
 	_, boxClient, _ := f.enroll(f.key.String())

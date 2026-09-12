@@ -318,7 +318,7 @@ func (s *Server) apiEvents(w http.ResponseWriter, r *http.Request) {
 			if sid := q.Get("site"); sid != "" && ev.SiteID != sid {
 				continue
 			}
-			re := recentEvent{Event: ev, TenantName: t.Name, Class: eventClass(ev.Type), Title: eventTitle(ev), Info: eventInfo(ev)}
+			re := recentEvent{Event: ev, TenantName: t.Name, Class: eventClass(ev), Title: eventTitle(ev), Info: eventInfo(ev)}
 			if site, ok := sm[ev.SiteID]; ok {
 				re.SiteName = site.Name
 			}

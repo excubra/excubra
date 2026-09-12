@@ -230,6 +230,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/tenants/{id}/ai", s.auth(s.tenantAISet))
 	mux.Handle("GET /api/sites/{id}/scan", s.auth(s.apiSiteScan))
 	mux.Handle("POST /api/sites/{id}/scan", s.auth(s.siteScanSet))
+	mux.Handle("POST /api/sites/{id}/canary", s.auth(s.siteCanarySet))
 	mux.Handle("GET /api/devices/{id}/connectors", s.auth(s.apiDeviceConnectors))
 	mux.Handle("POST /api/devices/{id}/connectors", s.auth(s.connectorCreate))
 	mux.Handle("POST /api/connectors/{id}/secret", s.auth(s.connectorSecret))

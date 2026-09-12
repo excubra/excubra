@@ -107,6 +107,10 @@ func eventInfo(ev event.Event) string {
 		if d, ok := ev.Details["missed_heartbeats"]; ok {
 			return fmt.Sprintf("%d Heartbeats ausgeblieben", toInt64(d))
 		}
+	case event.SecurityAlert:
+		if info, ok := ev.Details["info"].(string); ok {
+			return info
+		}
 	}
 	return ""
 }
@@ -334,7 +338,7 @@ func (s *Server) buildStatus(ctx context.Context, rng string) (statusData, error
 			return d, err
 		}
 		for _, ev := range evs {
-			re := recentEvent{Event: ev, TenantName: t.Name, Class: eventClass(ev.Type), Title: eventTitle(ev), Info: eventInfo(ev)}
+			re := recentEvent{Event: ev, TenantName: t.Name, Class: eventClass(ev), Title: eventTitle(ev), Info: eventInfo(ev)}
 			if site, ok := sm[ev.SiteID]; ok {
 				re.SiteName = site.Name
 			}
@@ -352,10 +356,15 @@ func (s *Server) buildStatus(ctx context.Context, rng string) (statusData, error
 	return d, nil
 }
 
-func eventClass(t event.Type) string {
-	switch t {
+func eventClass(ev event.Event) string {
+	switch ev.Type {
 	case event.HostDown, event.BoxSilent:
 		return "down"
+	case event.SecurityAlert:
+		if ev.Severity == event.Critical {
+			return "down"
+		}
+		return "warn"
 	case event.HostUp, event.BoxBack:
 		return "ok"
 	case event.MaintenanceStarted, event.MaintenanceEnded, event.DeviceNew:
@@ -395,6 +404,15 @@ func eventTitle(ev event.Event) string {
 		return "Wartung beendet"
 	case event.TestPing:
 		return "Test-Ereignis"
+	case event.SecurityAlert:
+		title, _ := ev.Details["title"].(string)
+		if title == "" {
+			title = "Sicherheitswarnung"
+		}
+		if ev.Device != nil {
+			return title + " · " + firstNonEmpty(ev.Device.Hostname, ev.Device.IP)
+		}
+		return title
 	}
 	return string(ev.Type)
 }
@@ -517,7 +535,7 @@ func (s *Server) buildHost(ctx context.Context, hostID, tab string) (hostData, e
 		return hostData{}, err
 	}
 	for i := len(evs) - 1; i >= 0; i-- { // newest first
-		d.Events = append(d.Events, recentEvent{Event: evs[i], TenantName: d.Tenant.Name, SiteName: d.Site.Name, Class: eventClass(evs[i].Type), Title: eventTitle(evs[i]), Info: eventInfo(evs[i])})
+		d.Events = append(d.Events, recentEvent{Event: evs[i], TenantName: d.Tenant.Name, SiteName: d.Site.Name, Class: eventClass(evs[i]), Title: eventTitle(evs[i]), Info: eventInfo(evs[i])})
 	}
 	d.Tab = tab
 	if d.Tab != "verlauf" && d.Tab != "einstellungen" {

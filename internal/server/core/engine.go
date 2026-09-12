@@ -457,6 +457,9 @@ func (e *Engine) Heartbeat(ctx context.Context, box store.Box, hb wire.Heartbeat
 		if hb.Scan != nil {
 			e.absorbScan(ctx, site, box, hb.Scan, now)
 		}
+		if len(hb.Signals) > 0 && box.Role != store.RoleOutpost {
+			events = append(events, e.absorbSignals(ctx, site, box, hb.Signals, now)...)
+		}
 	}
 	e.publish(ctx, events)
 
@@ -546,9 +549,12 @@ func (e *Engine) config(ctx context.Context, box store.Box) (wire.Config, error)
 	}
 	if _, ok := e.sites[box.SiteID]; ok && box.RevokedAt == nil {
 		cfg.Assigned = true
-		// the scan switch is read fresh: the CLI flips it in the store, not in this cache
-		if site, err := e.Store.Site(ctx, box.SiteID); err == nil && site.ScanEnabled && box.Role != store.RoleOutpost {
-			cfg.Scan = wire.ScanConfig{Enabled: true, IntervalS: 24 * 3600, MaxPPS: 20}
+		// the switches are read fresh: the CLI flips them in the store, not in this cache
+		if site, err := e.Store.Site(ctx, box.SiteID); err == nil && box.Role != store.RoleOutpost {
+			if site.ScanEnabled {
+				cfg.Scan = wire.ScanConfig{Enabled: true, IntervalS: 24 * 3600, MaxPPS: 20}
+			}
+			cfg.Canary = wire.CanaryConfig{Enabled: site.CanaryEnabled}
 		}
 		if box.Role == store.RoleOutpost {
 			// an outpost looks at the sites' public addresses every hour
@@ -647,6 +653,14 @@ func (e *Engine) Tick(ctx context.Context) error {
 	}
 	if err := e.Store.PruneFindings(ctx, now.Add(-taskHistory)); err != nil {
 		return err
+	}
+	// a live signal that stopped is over: its finding resolves after a quiet day
+	quiet, err := e.Store.ResolveQuietFindings(ctx, SourceSignal, now.Add(-signalQuiet), now)
+	if err != nil {
+		return err
+	}
+	for _, fid := range quiet {
+		_ = e.Store.DeleteAck(ctx, "finding", fid)
 	}
 	// windows the machine expired are deleted from the store
 	live := map[string]bool{}
@@ -954,6 +968,86 @@ func (e *Engine) absorbScan(ctx context.Context, site store.Site, box store.Box,
 	}
 }
 
+// SourceSignal is the findings source of the live detection (ADR-0018 §7).
+const SourceSignal = "signal"
+
+// signalQuiet is how long a signal finding stays open after the last sighting.
+const signalQuiet = 24 * time.Hour
+
+// absorbSignals turns what the box saw live into findings on the source device
+// and, when a finding opens, into a security.alert event. A source the inventory
+// does not know yet is put there first (the discovery has seen its ARP in the
+// same heartbeat, or it hides behind a router).
+func (e *Engine) absorbSignals(ctx context.Context, site store.Site, box store.Box, sigs []wire.Signal, now time.Time) []event.Event {
+	var events []event.Event
+	if len(sigs) > wire.MaxSignals {
+		sigs = sigs[:wire.MaxSignals]
+	}
+	for _, sg := range sigs {
+		f, ok := rules.EvaluateSignal(rules.Signal{Kind: sg.Kind, IP: sg.IP, MAC: sg.MAC, Port: sg.Port, Count: sg.Count, Detail: sg.Detail, First: sg.FirstAt, Last: sg.LastAt})
+		if !ok || (sg.IP == "" && sg.MAC == "") {
+			continue
+		}
+		dev, err := e.Store.DeviceByAddress(ctx, site.ID, sg.MAC, sg.IP)
+		if err != nil {
+			d, _, _, err := e.Store.UpsertSighting(ctx, site.TenantID, site.ID, wire.Sighting{MAC: sg.MAC, IP: sg.IP, LastSeen: sg.LastAt}, now)
+			if err != nil {
+				e.Log.Warn("signal: source unknown", "site", site.ID, "ip", sg.IP, "mac", sg.MAC, "err", err)
+				continue
+			}
+			dev = d
+		}
+		prev, perr := e.Store.OpenFinding(ctx, dev.ID, f.Rule, f.Key)
+		if perr == nil && sg.Kind == wire.SignalCanary {
+			// touches add up over the life of the finding
+			var old struct {
+				Count int `json:"count"`
+			}
+			if json.Unmarshal(prev.Evidence, &old) == nil && old.Count > 0 {
+				f.Evidence["count"] = old.Count + sg.Count
+				f.Detail = rules.CanaryDetail(sg.Port, old.Count+sg.Count)
+			}
+		}
+		ev, _ := json.Marshal(f.Evidence)
+		fnd := store.Finding{ID: id.New("fnd"), TenantID: site.TenantID, SiteID: site.ID, DeviceID: dev.ID, ConnectorID: SourceSignal,
+			Rule: f.Rule, Key: f.Key, Severity: f.Severity, Title: f.Title, Detail: f.Detail, Evidence: ev}
+		if err := e.Store.UpsertFinding(ctx, fnd, now); err != nil {
+			e.Log.Error("signal: finding", "device", dev.ID, "err", err)
+			continue
+		}
+		if perr == nil {
+			continue // still going on; the finding carries the count, the event was sent when it opened
+		}
+		e.Log.Warn("signal", "site", site.ID, "kind", sg.Kind, "ip", sg.IP, "mac", sg.MAC, "port", sg.Port, "count", sg.Count, "device", dev.ID)
+		al := event.New(event.SecurityAlert, now)
+		al.Source = event.SourceSignals
+		al.Severity = event.Critical
+		if f.Severity != rules.High {
+			al.Severity = event.Warning
+		}
+		al.TenantID, al.SiteID, al.BoxID, al.DeviceID = site.TenantID, site.ID, box.ID, dev.ID
+		al.Device = &event.DeviceRef{IP: dev.IP, MAC: dev.MAC, Vendor: dev.Vendor, Hostname: dev.Hostname}
+		al.Details = map[string]any{"kind": sg.Kind, "rule": f.Rule, "title": f.Title, "info": signalInfo(sg), "ip": sg.IP, "mac": sg.MAC, "port": sg.Port, "count": sg.Count, "detail": sg.Detail}
+		events = append(events, al)
+	}
+	return events
+}
+
+// signalInfo is the one-line detail of a security.alert event.
+func signalInfo(sg wire.Signal) string {
+	switch sg.Kind {
+	case wire.SignalCanary:
+		return fmt.Sprintf("Port %s, %d×", rules.PortLabel(sg.Port), sg.Count)
+	case wire.SignalPortScan:
+		return fmt.Sprintf("%d Ports in einer Minute", sg.Count)
+	case wire.SignalARPScan:
+		return fmt.Sprintf("%d Adressen in einer Minute", sg.Count)
+	case wire.SignalARPSpoof:
+		return sg.Detail
+	}
+	return ""
+}
+
 // scanServices converts a report's services for the store and for the rules.
 func scanServices(deviceID string, in []wire.ScanService) ([]store.Service, []rules.Service) {
 	svcs := make([]store.Service, 0, len(in))
@@ -1104,4 +1198,24 @@ func (e *Engine) SetSiteScan(ctx context.Context, siteID string, enabled bool, a
 		state = "on"
 	}
 	return e.audit(ctx, actor, "site.scan", siteID, state)
+}
+
+// SetSiteCanary switches a site's decoy ports and live signals (ADR-0018 §7).
+func (e *Engine) SetSiteCanary(ctx context.Context, siteID string, enabled bool, actor string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	site, ok := e.sites[siteID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if err := e.Store.SetSiteCanary(ctx, siteID, enabled); err != nil {
+		return err
+	}
+	site.CanaryEnabled = enabled
+	e.sites[siteID] = site
+	state := "off"
+	if enabled {
+		state = "on"
+	}
+	return e.audit(ctx, actor, "site.canary", siteID, state)
 }

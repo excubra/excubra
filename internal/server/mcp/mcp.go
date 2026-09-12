@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/version"
@@ -137,7 +138,7 @@ func tools() []tool {
 		{Name: "ex0_site", Description: "Ein Standort im Detail: Box, gemeldetes LAN, Fernzugriff, Scan-Stand, Zahl der Geräte und Dienste, letzte KI-Einschätzung.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung, z. B. site_geschaeftsstelle")}, "site_id")},
 		{Name: "ex0_devices", Description: "Das Inventar eines Standorts: Geräte mit Adresse, Hersteller, Name, zuletzt gesehen, und ihre offenen Dienste aus dem Scan (Port, Produkt, Version, Titel, Zertifikat).", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
 		{Name: "ex0_findings", Description: "Offene Findings, schwerste zuerst: Regeln über Scan innen, Außenansicht, Versionsabgleich, Konnektoren und KI. Optional nach Standort oder Schwere gefiltert.", InputSchema: schema(map[string]any{"site_id": str("nur dieser Standort (optional)"), "severity": str("high | medium | low (optional)")})},
-		{Name: "ex0_events", Description: "Ereignisse der letzten Stunden eines Kunden: Ausfälle, Rückkehr, neue Geräte, Box-Schweigen.", InputSchema: schema(map[string]any{"tenant_id": str("Kunden-Kennung"), "hours": map[string]any{"type": "integer", "description": "Zeitraum, Standard 24"}}, "tenant_id")},
+		{Name: "ex0_events", Description: "Ereignisse der letzten Stunden eines Kunden: Ausfälle, Rückkehr, neue Geräte, Box-Schweigen, Sicherheitswarnungen der Live-Erkennung (Köder-Ports, Portscans, ARP).", InputSchema: schema(map[string]any{"tenant_id": str("Kunden-Kennung"), "hours": map[string]any{"type": "integer", "description": "Zeitraum, Standard 24"}}, "tenant_id")},
 		{Name: "ex0_situation", Description: "Das vollständige Lagebild eines Standorts als JSON, genau das, was das Nacht-Modell bekommt: Box, Geräte mit Diensten, Außenansicht, Findings, Ereignisse, Konnektor-Facts. Grundlage für eine Einschätzung.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
 		{Name: "ex0_save_assessment", Description: "Speichert deine Einschätzung eines Standorts als KI-Bericht in der Konsole (Reiter KI) und legt gerätegebundene Findings der Quelle „ki“ an. Schema: {\"risk\":\"hoch|mittel|niedrig\",\"summary\":\"2-4 Sätze\",\"priorities\":[{\"title\",\"why\",\"action\",\"device_id\",\"severity\":\"high|medium|low\"}],\"findings\":[{\"device_id\",\"slug\",\"severity\",\"title\",\"detail\"}]}. Nur Geräte-Kennungen aus dem Lagebild.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung"), "result": map[string]any{"type": "object", "description": "die Einschätzung im Schema"}, "model": str("welches Modell du bist, z. B. claude-fable-5-1")}, "site_id", "result")},
 		{Name: "ex0_briefs", Description: "Die bisherigen KI-Einschätzungen eines Standorts, neueste zuerst.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
@@ -396,6 +397,9 @@ func (s *Server) events(ctx context.Context, tenantID string, hours int) (string
 		if e.Device != nil {
 			row["device"] = firstNonEmpty(e.Device.Hostname, e.Device.IP)
 		}
+		if e.Type == event.SecurityAlert && e.Details != nil {
+			row["title"], row["info"] = e.Details["title"], e.Details["info"]
+		}
 		out = append(out, row)
 	}
 	if len(out) == 0 {
@@ -414,6 +418,8 @@ func source(connectorID string) string {
 		return "Versionsabgleich"
 	case "ki":
 		return "KI"
+	case "signal":
+		return "Live-Erkennung"
 	case "":
 		return ""
 	}

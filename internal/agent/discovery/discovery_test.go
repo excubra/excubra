@@ -161,9 +161,12 @@ func TestHostsAndClamp(t *testing.T) {
 func TestRunWithFakes(t *testing.T) {
 	d := New(slog.Default())
 	passiveCalls, arpCalls, icmpCalls, neighCalls := 0, 0, 0, 0
-	d.passive = func(ctx context.Context, see func(mac, ip, ip6 string)) error {
+	var observed []ARPFrame
+	d.ARP = func(f ARPFrame) { observed = append(observed, f) }
+	d.passive = func(ctx context.Context, see func(mac, ip, ip6 string), observe func(ARPFrame)) error {
 		passiveCalls++
 		see("aa:bb:cc:00:00:01", "192.168.1.10", "")
+		observe(ARPFrame{Op: 1, SenderMAC: "aa:bb:cc:00:00:01", SenderIP: "192.168.1.10", TargetIP: "192.168.1.1"})
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -196,6 +199,9 @@ func TestRunWithFakes(t *testing.T) {
 	if len(s) != 3 {
 		t.Fatalf("sightings: %+v", s)
 	}
+	if len(observed) != 1 || observed[0].TargetIP != "192.168.1.1" {
+		t.Fatalf("arp observer: %+v", observed)
+	}
 	// passive mode never sweeps
 	d.Apply(Config{Mode: wire.DiscoveryPassive, Interval: time.Hour, MaxPPS: 50})
 	d.sweep(context.Background(), d.config())
@@ -216,9 +222,17 @@ func TestParseARPFrame(t *testing.T) {
 	if !ok || mac != "00:09:0f:aa:bb:cc" || ip != "192.168.1.1" {
 		t.Fatalf("parse: %s %s %v", mac, ip, ok)
 	}
+	copy(a[24:28], []byte{192, 168, 1, 77})
+	fr, ok := parseARP(f)
+	if !ok || fr.Op != 1 || fr.SenderMAC != "00:09:0f:aa:bb:cc" || fr.SenderIP != "192.168.1.1" || fr.TargetIP != "192.168.1.77" {
+		t.Fatalf("frame: %+v %v", fr, ok)
+	}
 	copy(a[14:18], []byte{0, 0, 0, 0}) // probe
 	if _, _, ok := parseARPPortable(f); ok {
 		t.Fatal("arp probe reported as a device")
+	}
+	if fr, ok := parseARP(f); !ok || fr.SenderIP != "0.0.0.0" {
+		t.Fatalf("probe not handed to the observer: %+v %v", fr, ok)
 	}
 	if _, _, ok := parseARPPortable(f[:30]); ok {
 		t.Fatal("short frame parsed")

@@ -81,6 +81,7 @@ type Heartbeat struct {
 	TaskResults     []TaskResult      `json:"task_results,omitempty"` // finished tasks since the last successful heartbeat
 	Connectors      []ConnectorReport `json:"connectors,omitempty"`   // latest reading of every connector (ADR-0015)
 	Scan            *ScanReport       `json:"scan,omitempty"`         // a chunk of the last service scan round (ADR-0018)
+	Signals         []Signal          `json:"signals,omitempty"`      // live signs of an attack in the LAN since the last acknowledged heartbeat (ADR-0018 §7)
 }
 
 // AgentInfo describes the running agent.
@@ -104,6 +105,8 @@ type BoxInfo struct {
 	// LAN lists the private IPv4 networks the box sits in, the interface with the
 	// default route first; the server takes the first as the site's LAN (ADR-0017).
 	LAN []string `json:"lan,omitempty"`
+	// Canary lists the decoy ports the box currently listens on (ADR-0018 §7).
+	Canary []int `json:"canary,omitempty"`
 }
 
 // NetbirdInfo reports the state of the NetBird client on the box.
@@ -167,6 +170,32 @@ type Sighting struct {
 	LastSeen time.Time `json:"last_seen"` // box time
 }
 
+// Signal kinds — the complete list. The box reports; the server judges.
+const (
+	SignalCanary   = "canary"    // a decoy port of the box was touched
+	SignalPortScan = "port_scan" // one source knocked on many ports of the box within a minute
+	SignalARPScan  = "arp_scan"  // one source asked for many addresses within a minute
+	SignalARPSpoof = "arp_spoof" // an address changed its MAC: the gateway, or flapping between two
+)
+
+// MaxSignals bounds Heartbeat.Signals.
+const MaxSignals = 200
+
+// Signal is one thing the box saw that a healthy LAN does not show (ADR-0018 §7).
+// IP and MAC name the source; for arp_spoof, IP is the address that changed and
+// Detail names the MACs. Count is touches, ports, addresses or changes, depending
+// on the kind.
+type Signal struct {
+	Kind    string    `json:"kind"`
+	IP      string    `json:"ip,omitempty"`
+	MAC     string    `json:"mac,omitempty"`
+	Port    int       `json:"port,omitempty"` // canary: the decoy port
+	Count   int       `json:"count"`
+	Detail  string    `json:"detail,omitempty"` // port_scan: the ports; arp_spoof: "gateway"/"flapping" and the MACs
+	FirstAt time.Time `json:"first_at"`         // box time
+	LastAt  time.Time `json:"last_at"`
+}
+
 // BufferInfo is the agent's send buffer state.
 type BufferInfo struct {
 	Queued  int   `json:"queued"`
@@ -196,6 +225,15 @@ type Config struct {
 	Tasks                  []Task            `json:"tasks,omitempty"`      // pending one-shot tasks (ADR-0014)
 	Connectors             []ConnectorConfig `json:"connectors,omitempty"` // devices to read through their API (ADR-0015)
 	Scan                   ScanConfig        `json:"scan"`                 // the service scan of the site's LAN (ADR-0018)
+	Canary                 CanaryConfig      `json:"canary"`               // decoy ports and the live signals of the LAN (ADR-0018 §7)
+}
+
+// CanaryConfig switches the box's live detection on: decoy ports that look like the
+// services an intruder goes for (SMB, RDP, telnet, MSSQL, VNC) and the watcher behind
+// them that counts who knocks. Nothing on the box answers a byte of protocol.
+type CanaryConfig struct {
+	Enabled bool  `json:"enabled"`
+	Ports   []int `json:"ports,omitempty"` // empty: the built-in list
 }
 
 // ScanConfig is the box's service scan (ADR-0018, decision E20): switched on per

@@ -73,15 +73,15 @@ func (s *Store) CreateSite(ctx context.Context, st Site) error {
 func (s *Store) Site(ctx context.Context, siteID string) (Site, error) {
 	var st Site
 	var created string
-	var scan int
-	err := s.main.QueryRowContext(ctx, `SELECT id, tenant_id, name, created_at, scan_enabled FROM sites WHERE id = ?`, siteID).Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan)
-	st.CreatedAt, st.ScanEnabled = parseTS(created), scan != 0
+	var scan, canary int
+	err := s.main.QueryRowContext(ctx, `SELECT id, tenant_id, name, created_at, scan_enabled, canary_enabled FROM sites WHERE id = ?`, siteID).Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan, &canary)
+	st.CreatedAt, st.ScanEnabled, st.CanaryEnabled = parseTS(created), scan != 0, canary != 0
 	return st, wrap("site", err)
 }
 
 // Sites returns all sites, or those of one tenant when tenantID is not empty.
 func (s *Store) Sites(ctx context.Context, tenantID string) ([]Site, error) {
-	q := `SELECT id, tenant_id, name, created_at, scan_enabled FROM sites`
+	q := `SELECT id, tenant_id, name, created_at, scan_enabled, canary_enabled FROM sites`
 	var args []any
 	if tenantID != "" {
 		q += ` WHERE tenant_id = ?`
@@ -96,11 +96,11 @@ func (s *Store) Sites(ctx context.Context, tenantID string) ([]Site, error) {
 	for rows.Next() {
 		var st Site
 		var created string
-		var scan int
-		if err := rows.Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan); err != nil {
+		var scan, canary int
+		if err := rows.Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan, &canary); err != nil {
 			return nil, wrap("sites", err)
 		}
-		st.CreatedAt, st.ScanEnabled = parseTS(created), scan != 0
+		st.CreatedAt, st.ScanEnabled, st.CanaryEnabled = parseTS(created), scan != 0, canary != 0
 		out = append(out, st)
 	}
 	return out, wrap("sites", rows.Err())
@@ -114,15 +114,16 @@ func (s *Store) RenameSite(ctx context.Context, siteID, name string) error {
 // ---- boxes -----------------------------------------------------------------------
 
 const boxCols = `id, site_id, name, hw_id, agent_version, os, arch, cert_serial, cert_not_after, channel, discovery_mode, discovery_subnets,
-	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip, lan, public_ip, role`
+	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip, lan, public_ip, role, canary`
 
 func scanBox(sc interface{ Scan(...any) error }) (Box, error) {
 	var b Box
 	var site, revoked sql.NullString
-	var notAfter, enrolled, subnets, lastSeen, lan string
+	var notAfter, enrolled, subnets, lastSeen, lan, canary string
 	err := sc.Scan(&b.ID, &site, &b.Name, &b.HWID, &b.AgentVersion, &b.OS, &b.Arch, &b.CertSerial, &notAfter, &b.Channel, &b.DiscoveryMode, &subnets,
-		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP, &lan, &b.PublicIP, &b.Role)
+		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP, &lan, &b.PublicIP, &b.Role, &canary)
 	_ = json.Unmarshal([]byte(lan), &b.LAN)
+	_ = json.Unmarshal([]byte(canary), &b.Canary)
 	b.SiteID = site.String
 	b.CertNotAfter = parseTS(notAfter)
 	b.LastSeen = parseTS(lastSeen)
@@ -145,7 +146,7 @@ func (s *Store) CreateBox(ctx context.Context, b Box) error {
 		b.Role = RoleBox
 	}
 	lanJSON, _ := json.Marshal(nonNil(b.LAN))
-	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
 		b.ID, nullIfEmpty(b.SiteID), b.Name, b.HWID, b.AgentVersion, b.OS, b.Arch, b.CertSerial, ts(b.CertNotAfter), b.Channel, b.DiscoveryMode, string(subnets),
 		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey, b.NetbirdOpStatus, b.NetbirdOpIP, string(lanJSON), b.PublicIP, b.Role)
 	return wrap("create box", err)
@@ -158,9 +159,14 @@ func (s *Store) UpdateBoxHeartbeat(ctx context.Context, boxID string, hb wire.He
 		opStatus, opIP = hb.NetbirdOperator.Status, hb.NetbirdOperator.IP
 	}
 	lanJSON, _ := json.Marshal(nonNil(hb.Box.LAN))
+	canary := hb.Box.Canary
+	if canary == nil {
+		canary = []int{}
+	}
+	canaryJSON, _ := json.Marshal(canary)
 	return s.exec1(ctx, "update box heartbeat", `UPDATE boxes SET agent_version = ?, os = ?, arch = ?, netbird_status = ?, netbird_ip = ?,
-		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ? WHERE id = ?`,
-		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), boxID)
+		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ?, canary = ? WHERE id = ?`,
+		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), string(canaryJSON), boxID)
 }
 
 // SetBoxDiscovery sets the discovery mode and the additional subnets to sweep.
@@ -1761,6 +1767,46 @@ func (s *Store) ScanRounds(ctx context.Context, siteID string, limit int) ([]Sca
 // SetSiteScan switches the service scan of a site on or off.
 func (s *Store) SetSiteScan(ctx context.Context, siteID string, enabled bool) error {
 	return s.exec1(ctx, "set site scan", `UPDATE sites SET scan_enabled = ? WHERE id = ?`, boolInt(enabled), siteID)
+}
+
+// SetSiteCanary switches a site's decoy ports and live signals (ADR-0018 §7).
+func (s *Store) SetSiteCanary(ctx context.Context, siteID string, enabled bool) error {
+	return s.exec1(ctx, "set site canary", `UPDATE sites SET canary_enabled = ? WHERE id = ?`, boolInt(enabled), siteID)
+}
+
+// OpenFinding returns the open finding of a device under rule and key, or ErrNotFound.
+func (s *Store) OpenFinding(ctx context.Context, deviceID, rule, key string) (Finding, error) {
+	f, err := scanFinding(s.main.QueryRowContext(ctx, `SELECT `+findingCols+` FROM findings WHERE device_id = ? AND rule = ? AND key = ? AND resolved_at IS NULL`, deviceID, rule, key))
+	return f, wrap("open finding", err)
+}
+
+// UpsertFinding opens a finding or refreshes the one that is open under the same
+// device, rule and key: for sources that report incidents one by one instead of
+// a complete list (the live signals), where SyncDeviceFindings would resolve the
+// rest. A resolved finding of the same key is reopened with a fresh first_seen.
+func (s *Store) UpsertFinding(ctx context.Context, f Finding, now time.Time) error {
+	if len(f.Evidence) == 0 {
+		f.Evidence = json.RawMessage("{}")
+	}
+	_, err := s.main.ExecContext(ctx, `INSERT INTO findings (`+findingCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+		ON CONFLICT (device_id, rule, key) DO UPDATE SET
+			connector_id = excluded.connector_id, severity = excluded.severity, title = excluded.title, detail = excluded.detail, evidence = excluded.evidence,
+			last_seen = excluded.last_seen,
+			first_seen = CASE WHEN findings.resolved_at IS NULL THEN findings.first_seen ELSE excluded.first_seen END,
+			resolved_at = NULL`,
+		f.ID, f.TenantID, f.SiteID, f.DeviceID, f.ConnectorID, f.Rule, f.Key, f.Severity, f.Title, f.Detail, string(f.Evidence), ts(now), ts(now))
+	return wrap("upsert finding", err)
+}
+
+// ResolveQuietFindings resolves the open findings of a source that have not been
+// seen since the given time and returns their ids. Incidents end when they stop.
+func (s *Store) ResolveQuietFindings(ctx context.Context, source string, quietSince, now time.Time) ([]string, error) {
+	ids, err := idsOf(s.main.QueryContext(ctx, `SELECT id FROM findings WHERE connector_id = ? AND resolved_at IS NULL AND last_seen < ?`, source, ts(quietSince)))
+	if err != nil || len(ids) == 0 {
+		return nil, wrap("resolve quiet findings", err)
+	}
+	_, err = s.main.ExecContext(ctx, `UPDATE findings SET resolved_at = ? WHERE connector_id = ? AND resolved_at IS NULL AND last_seen < ?`, ts(now), source, ts(quietSince))
+	return ids, wrap("resolve quiet findings", err)
 }
 
 // SyncDeviceFindings is SyncFindings for findings that come from a source other
