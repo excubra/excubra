@@ -180,6 +180,7 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 	})
 	a.sent = sentinel.New(log)
 	a.disc.ARP = a.sent.ObserveARP
+	a.conn.OnSignals = a.sent.Record
 	a.hbInterval, a.checkEvery, a.configMaxAge = 60*time.Second, 30*time.Second, 15*time.Minute
 	a.doneTasks, a.taskResults = st.LoadTasks()
 	for _, id := range a.doneTasks {

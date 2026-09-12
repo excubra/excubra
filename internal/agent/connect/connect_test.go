@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,13 +21,15 @@ func fakeFortiGate(t *testing.T, sessions float64) *httptest.Server {
 	env := func(results any) any {
 		return map[string]any{"status": "success", "serial": "FGT60FTK1234", "version": "v7.2.8", "build": 1639, "results": results}
 	}
+	started := time.Now() // the log rows keep their timestamps across reads, like a real log
 	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok-1" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		var body any
-		switch r.URL.Path {
+		path := strings.Replace(r.URL.Path, "/api/v2/log/disk/", "/api/v2/log/memory/", 1) // the fake logs to disk; the reader asks there
+		switch path {
 		case "/api/v2/monitor/system/status":
 			body = env(map[string]any{"hostname": "fw-1", "model_name": "FortiGate", "model_number": "60F", "log_disk_status": "available"})
 		case "/api/v2/monitor/system/resource/usage":
@@ -44,6 +47,17 @@ func fakeFortiGate(t *testing.T, sessions float64) *httptest.Server {
 			body = env(map[string]any{"forticare": map[string]any{"status": "registered"}, "antivirus": map[string]any{"status": "expired", "expires": 1700000000}})
 		case "/api/v2/cmdb/system/global":
 			body = env(map[string]any{"admin-sport": 8443, "admin-ssh-port": 22, "admintimeout": 5, "timezone": "26"})
+		case "/api/v2/log/memory/event/system":
+			et := strconv.FormatInt(started.Add(-time.Minute).UnixNano(), 10)
+			body = env([]map[string]any{
+				{"eventtime": et, "logid": "0100032002", "action": "login", "status": "failed", "user": "admin", "srcip": "203.0.113.9", "logdesc": "Admin login failed"},
+				{"eventtime": et, "logid": "0100032002", "action": "login", "status": "failed", "user": "root", "srcip": "203.0.113.9", "logdesc": "Admin login failed"},
+				{"eventtime": et, "logid": "0100032001", "action": "login", "status": "success", "user": "admin", "srcip": "192.168.1.5", "logdesc": "Admin login successful"},
+			})
+		case "/api/v2/log/memory/event/vpn":
+			body = env([]map[string]any{})
+		case "/api/v2/log/memory/utm/ips":
+			body = env([]map[string]any{{"eventtime": strconv.FormatInt(started.Add(-30*time.Second).UnixNano(), 10), "attack": "Apache.Log4j.Error.Log.Remote.Code.Execution", "severity": "critical", "action": "dropped", "srcip": "198.51.100.7"}})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -62,6 +76,8 @@ func TestFortiGateReading(t *testing.T) {
 	srv := fakeFortiGate(t, 812)
 	defer srv.Close()
 	r := testRunner()
+	var got []wire.Signal
+	r.OnSignals = func(sigs []wire.Signal) { got = append(got, sigs...) }
 	cfg := wire.ConnectorConfig{ID: "con_1", DeviceID: "dev_1", Kind: wire.ConnectorFortiGate, URL: srv.URL, Sealed: `{"token":"tok-1"}`, Version: "v1"}
 	r.ReadOnce(context.Background(), cfg)
 	rep, ok := r.Latest("con_1")
@@ -92,6 +108,16 @@ func TestFortiGateReading(t *testing.T) {
 	}
 	if _, has := facts["problems"]; has {
 		t.Fatalf("no endpoint should have failed: %v", facts["problems"])
+	}
+	// the logs became signals, bound to the connector's device, and are not read twice
+	if len(got) != 2 || got[0].Kind != wire.SignalFGTAdminFail || got[0].DeviceID != "dev_1" || got[0].IP != "203.0.113.9" || got[0].Count != 2 || got[0].Detail != "admin, root" ||
+		got[1].Kind != wire.SignalFGTIPS || got[1].Detail != "Apache.Log4j.Error.Log.Remote.Code.Execution|critical|dropped" {
+		t.Fatalf("signals: %+v", got)
+	}
+	got = nil
+	r.ReadOnce(context.Background(), cfg)
+	if len(got) != 0 {
+		t.Fatalf("log rows counted twice: %+v", got)
 	}
 
 	// facts travel once, then only after a change

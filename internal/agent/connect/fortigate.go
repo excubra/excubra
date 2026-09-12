@@ -6,7 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/excubra/excubra/internal/wire"
 )
 
 // fortigate reads a FortiGate through the FortiOS REST API with an API-user token
@@ -291,9 +295,142 @@ func (fortigate) Read(ctx context.Context, t Target) (Reading, error) {
 		optional("system global", err)
 	}
 
+	// the logs: who fails at the admin login, who fails at the VPN, what the IPS saw
+	// (ADR-0018 §7). Memory logs are on by default on every model; disk when it has one.
+	source := "memory"
+	if st.Results.LogDiskStatus == "available" {
+		source = "disk"
+	}
+	now := t.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	for _, kind := range []string{"event/system", "event/vpn", "utm/ips"} {
+		var page struct {
+			Results []map[string]any `json:"results"`
+		}
+		if err := get("/api/v2/log/"+source+"/"+kind+"?rows=300", &page); err != nil {
+			optional("log "+kind, err)
+			continue
+		}
+		reading.Signals = append(reading.Signals, fortigateLogSignals(kind, page.Results, t.State, now)...)
+	}
 	if len(problems) > 0 {
 		facts["problems"] = problems
 	}
 	reading.Facts, reading.Metrics = facts, metrics
 	return reading, nil
+}
+
+// logLookback bounds the first read of a log: without a cursor (agent start),
+// only rows this fresh count, so a restart never replays the past.
+const logLookback = 10 * time.Minute
+
+// fortigateLogSignals turns log rows into signals, one per source and kind (and
+// per signature for the IPS), counting only rows newer than the cursor of the
+// last read. FortiOS stamps rows with eventtime in nanoseconds; the cursor is
+// that number.
+func fortigateLogSignals(kind string, rows []map[string]any, state map[string]string, now time.Time) []wire.Signal {
+	cursorKey := "log_cursor:" + kind
+	cursor, _ := strconv.ParseInt(state[cursorKey], 10, 64)
+	if cursor == 0 {
+		cursor = now.Add(-logLookback).UnixNano()
+	}
+	newest := cursor
+	type agg struct {
+		sig   wire.Signal
+		users map[string]bool
+	}
+	byKey := map[string]*agg{}
+	var order []string
+	for _, row := range rows {
+		et, ok := number(row["eventtime"])
+		if !ok || et <= cursor {
+			continue
+		}
+		if et > newest {
+			newest = et
+		}
+		var sig wire.Signal
+		src := str(row["srcip"])
+		switch kind {
+		case "event/system":
+			if str(row["action"]) != "login" || str(row["status"]) != "failed" {
+				continue
+			}
+			sig = wire.Signal{Kind: wire.SignalFGTAdminFail, IP: src, Count: 1}
+		case "event/vpn":
+			if a := str(row["action"]); a != "ssl-login-fail" && !(strings.Contains(str(row["logdesc"]), "login fail")) {
+				continue
+			}
+			sig = wire.Signal{Kind: wire.SignalFGTVPNFail, IP: src, Count: 1}
+		case "utm/ips":
+			attack := str(row["attack"])
+			if attack == "" {
+				continue
+			}
+			sig = wire.Signal{Kind: wire.SignalFGTIPS, IP: src, Count: 1, Detail: attack + "|" + str(row["severity"]) + "|" + str(row["action"])}
+		default:
+			continue
+		}
+		key := sig.Kind + "|" + sig.IP + "|" + sig.Detail
+		a, ok := byKey[key]
+		if !ok {
+			at := time.Unix(0, et).UTC()
+			sig.FirstAt, sig.LastAt = at, at
+			a = &agg{sig: sig, users: map[string]bool{}}
+			byKey[key] = a
+			order = append(order, key)
+		} else {
+			a.sig.Count++
+			at := time.Unix(0, et).UTC()
+			if at.After(a.sig.LastAt) {
+				a.sig.LastAt = at
+			}
+			if at.Before(a.sig.FirstAt) {
+				a.sig.FirstAt = at
+			}
+		}
+		if u := str(row["user"]); u != "" && kind != "utm/ips" {
+			a.users[u] = true
+		}
+	}
+	state[cursorKey] = strconv.FormatInt(newest, 10)
+	out := make([]wire.Signal, 0, len(order))
+	for _, key := range order {
+		a := byKey[key]
+		if len(a.users) > 0 {
+			users := make([]string, 0, len(a.users))
+			for u := range a.users {
+				users = append(users, u)
+			}
+			sort.Strings(users)
+			if len(users) > 5 {
+				users = append(users[:5], "…")
+			}
+			a.sig.Detail = strings.Join(users, ", ")
+		}
+		out = append(out, a.sig)
+	}
+	return out
+}
+
+func str(v any) string {
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
+}
+
+// number reads a JSON number that FortiOS may send as a string (eventtime).
+func number(v any) (int64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return int64(x), true
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(x), 10, 64)
+		return n, err == nil
+	case json.Number:
+		n, err := x.Int64()
+		return n, err == nil
+	}
+	return 0, false
 }

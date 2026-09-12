@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 // one kind, how often. The judgement is fixed per kind; the box does not judge.
 type Signal struct {
 	Kind   string
+	Device string // the reporting device's name, for signals a connector read from its logs
 	IP     string
 	MAC    string
 	Port   int
@@ -54,6 +56,44 @@ func EvaluateSignal(sg Signal) (Finding, bool) {
 	case "arp_scan":
 		return Finding{Rule: "signal.arp_scan", Severity: High, Title: "Netz wird abgesucht (ARP)",
 			Detail: fmt.Sprintf("Das Gerät hat innerhalb einer Minute nach %d Adressen im LAN gefragt. So erkundet nmap, ein Wurm oder ein Angreifer das Netz. Ein Inventar- oder Monitoring-Werkzeug sieht genauso aus; dann ist es bekannt und wird einmal quittiert.", sg.Count), Evidence: ev}, true
+	case "fgt_admin_fail":
+		where := origin(sg.IP)
+		sev := Medium
+		if sg.Count >= 5 || !private(sg.IP) {
+			sev = High
+		}
+		return Finding{Rule: "signal.fgt_admin_fail", Key: sg.IP, Severity: sev, Title: fmt.Sprintf("Admin-Login auf der FortiGate: %s", plural(sg.Count, "Fehlversuch", "Fehlversuche")),
+			Detail: fmt.Sprintf("Von %s%s%s. Ist die Verwaltung auf dem WAN-Interface erreichbar, wird sie gerade durchprobiert: Admin-Zugang auf WAN abschalten, Trusted Hosts setzen, Zwei-Faktor für Admins. Aus dem LAN heraus: klären, wer da an der Firewall probiert.", sg.IP, where, users(sg.Detail)), Evidence: ev}, true
+	case "fgt_vpn_fail":
+		sev := Medium
+		if sg.Count >= 20 {
+			sev = High
+		}
+		title := fmt.Sprintf("SSL-VPN-Anmeldung: %s", plural(sg.Count, "Fehlversuch", "Fehlversuche"))
+		if sg.Count >= 20 {
+			title = fmt.Sprintf("SSL-VPN wird durchprobiert: %d Fehlversuche", sg.Count)
+		}
+		return Finding{Rule: "signal.fgt_vpn_fail", Key: sg.IP, Severity: sev, Title: title,
+			Detail: fmt.Sprintf("Von %s%s%s. Ein Anwender vertippt sich ein paarmal; Dutzende Versuche in Minuten sind ein Wörterbuch-Angriff auf das VPN. Bei Bedarf die Quelle sperren, Konten mit schwachen Passwörtern prüfen, Zwei-Faktor für das VPN.", sg.IP, origin(sg.IP), users(sg.Detail)), Evidence: ev}, true
+	case "fgt_ips":
+		attack, ipsSev, action := splitIPS(sg.Detail)
+		sev := Medium
+		switch strings.ToLower(ipsSev) {
+		case "critical", "high":
+			sev = High
+		case "low", "info", "information":
+			sev = Low
+		}
+		blocked := action == "dropped" || action == "reset" || action == "blocked" || action == "reject"
+		verdict := "nicht geblockt"
+		if blocked {
+			verdict = "geblockt"
+		} else if sev != High {
+			sev = High // seen but let through
+		}
+		ev["attack"], ev["ips_severity"], ev["action"] = attack, ipsSev, action
+		return Finding{Rule: "signal.fgt_ips", Key: attack, Severity: sev, Title: fmt.Sprintf("IPS: %s von %s (%s)", attack, sg.IP, verdict),
+			Detail: fmt.Sprintf("Die FortiGate hat die Signatur „%s“ %s erkannt, Quelle %s%s, Einstufung %s, Aktion: %s. Geblockt heißt: der Versuch war da; nicht geblockt heißt: er ist durch, das Ziel prüfen.", attack, plural(sg.Count, "Mal", "Mal"), sg.IP, origin(sg.IP), firstNonEmptyStr(ipsSev, "unbekannt"), firstNonEmptyStr(action, "unbekannt")), Evidence: ev}, true
 	case "arp_spoof":
 		macs := sg.Detail
 		if i := strings.IndexByte(macs, ' '); i > 0 {
@@ -74,6 +114,48 @@ func EvaluateSignal(sg Signal) (Finding, bool) {
 func CanaryDetail(port, count int) string {
 	return fmt.Sprintf("Das Gerät hat auf der EX0-Box Port %s angesprochen. Dort läuft kein echter Dienst, und kein normales Gerät sucht ihn: So sehen Scans, Würmer und ein Angreifer aus, der sich im Netz umsieht. %s.",
 		PortLabel(port), plural(count, "Versuch", "Versuche"))
+}
+
+// origin says whether an address is inside or outside.
+func origin(ip string) string {
+	if ip == "" {
+		return ""
+	}
+	if private(ip) {
+		return " (aus dem LAN)"
+	}
+	return " (aus dem Internet)"
+}
+
+func private(ip string) bool {
+	a, err := netip.ParseAddr(ip)
+	return err == nil && (a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast())
+}
+
+// users renders the user list a signal carries in its detail.
+func users(detail string) string {
+	if detail == "" {
+		return ""
+	}
+	return ", Benutzer: " + detail
+}
+
+// splitIPS reads the "attack|severity|action" detail of an IPS signal.
+func splitIPS(detail string) (attack, severity, action string) {
+	parts := strings.SplitN(detail, "|", 3)
+	for len(parts) < 3 {
+		parts = append(parts, "")
+	}
+	return parts[0], parts[1], parts[2]
+}
+
+func firstNonEmptyStr(v ...string) string {
+	for _, x := range v {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
 }
 
 func plural(n int, one, many string) string {

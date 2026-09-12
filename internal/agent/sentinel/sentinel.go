@@ -442,7 +442,7 @@ func (s *Sentinel) observeSYN(srcMAC, src string, port int, now time.Time) {
 	n := c.add(strconv.Itoa(port), now)
 	if n >= scanPorts {
 		c.alarm = true
-		s.record(wire.Signal{Kind: wire.SignalPortScan, IP: src, MAC: srcMAC, Count: n, Detail: c.detail()}, false, now)
+		s.recordScan(wire.Signal{Kind: wire.SignalPortScan, IP: src, MAC: srcMAC, Count: n, Detail: c.detail()}, now)
 	}
 }
 
@@ -456,11 +456,39 @@ func (s *Sentinel) touch(src, srcMAC string, port int, now time.Time) {
 	s.record(wire.Signal{Kind: wire.SignalCanary, IP: src, MAC: srcMAC, Port: port, Count: 1}, true, now)
 }
 
+// Record files signals a connector read from a device's logs (ADR-0018 §7): they
+// travel with the box's own, merged per source and kind, counts adding up.
+func (s *Sentinel) Record(sigs []wire.Signal) {
+	if s == nil {
+		return
+	}
+	now := s.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sg := range sigs {
+		if sg.Kind == "" || sg.DeviceID == "" {
+			continue
+		}
+		s.record(sg, true, now)
+	}
+}
+
+// recordScan is record for a signal whose Detail changes as it grows (the port
+// list of a scan): merged by source, the newest detail wins.
+func (s *Sentinel) recordScan(sg wire.Signal, now time.Time) {
+	detail := sg.Detail
+	sg.Detail = ""
+	s.record(sg, false, now)
+	if cur, ok := s.pending[sg.Kind+"|"+sg.DeviceID+"|"+sg.IP+"|"+sg.MAC+"|"+strconv.Itoa(sg.Port)+"|"]; ok {
+		cur.Detail = detail
+	}
+}
+
 // record files a signal for the next heartbeat. Signals of one key merge: touches
 // add up, counts of a search take the latest value. Beyond the bound the oldest
 // pending signal goes.
 func (s *Sentinel) record(sg wire.Signal, accumulate bool, now time.Time) {
-	key := sg.Kind + "|" + sg.IP + "|" + sg.MAC + "|" + strconv.Itoa(sg.Port)
+	key := sg.Kind + "|" + sg.DeviceID + "|" + sg.IP + "|" + sg.MAC + "|" + strconv.Itoa(sg.Port) + "|" + sg.Detail
 	if cur, ok := s.pending[key]; ok {
 		if accumulate {
 			cur.Count += sg.Count
@@ -471,13 +499,21 @@ func (s *Sentinel) record(sg wire.Signal, accumulate bool, now time.Time) {
 			cur.Detail = sg.Detail
 		}
 		cur.LastAt = now.UTC()
+		if !sg.LastAt.IsZero() && sg.LastAt.After(cur.LastAt) {
+			cur.LastAt = sg.LastAt.UTC()
+		}
 		return
 	}
 	for len(s.pending) >= maxPending && len(s.order) > 0 {
 		delete(s.pending, s.order[0])
 		s.order = s.order[1:]
 	}
-	sg.FirstAt, sg.LastAt = now.UTC(), now.UTC()
+	if sg.FirstAt.IsZero() {
+		sg.FirstAt = now.UTC()
+	}
+	if sg.LastAt.IsZero() {
+		sg.LastAt = now.UTC()
+	}
 	s.pending[key] = &sg
 	s.order = append(s.order, key)
 }
@@ -599,7 +635,7 @@ func (s *Sentinel) Nack() {
 	for _, k := range keys {
 		old := s.inflight[k]
 		if cur, ok := s.pending[k]; ok {
-			if old.Kind == wire.SignalCanary {
+			if additive(old.Kind) {
 				cur.Count += old.Count
 			}
 			cur.FirstAt = old.FirstAt
@@ -610,6 +646,16 @@ func (s *Sentinel) Nack() {
 	}
 	s.order = append(order, s.order...)
 	s.inflight = map[string]*wire.Signal{}
+}
+
+// additive reports whether a kind's Count is a number of events (which add up)
+// rather than a size (which is replaced).
+func additive(kind string) bool {
+	switch kind {
+	case wire.SignalCanary, wire.SignalFGTAdminFail, wire.SignalFGTVPNFail, wire.SignalFGTIPS:
+		return true
+	}
+	return false
 }
 
 // parseSYN decodes an Ethernet+IPv4+TCP frame and reports source MAC, source and

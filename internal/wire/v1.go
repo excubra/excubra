@@ -176,6 +176,10 @@ const (
 	SignalPortScan = "port_scan" // one source knocked on many ports of the box within a minute
 	SignalARPScan  = "arp_scan"  // one source asked for many addresses within a minute
 	SignalARPSpoof = "arp_spoof" // an address changed its MAC: the gateway, or flapping between two
+	// From a FortiGate's logs, read through its connector (the device that sees the WAN):
+	SignalFGTAdminFail = "fgt_admin_fail" // failed admin logins
+	SignalFGTVPNFail   = "fgt_vpn_fail"   // failed SSL-VPN logins
+	SignalFGTIPS       = "fgt_ips"        // an IPS signature matched
 )
 
 // MaxSignals bounds Heartbeat.Signals.
@@ -186,14 +190,15 @@ const MaxSignals = 200
 // Detail names the MACs. Count is touches, ports, addresses or changes, depending
 // on the kind.
 type Signal struct {
-	Kind    string    `json:"kind"`
-	IP      string    `json:"ip,omitempty"`
-	MAC     string    `json:"mac,omitempty"`
-	Port    int       `json:"port,omitempty"` // canary: the decoy port
-	Count   int       `json:"count"`
-	Detail  string    `json:"detail,omitempty"` // port_scan: the ports; arp_spoof: "gateway"/"flapping" and the MACs
-	FirstAt time.Time `json:"first_at"`         // box time
-	LastAt  time.Time `json:"last_at"`
+	Kind     string    `json:"kind"`
+	DeviceID string    `json:"device_id,omitempty"` // set when a connector's device reported it; IP is then the remote source
+	IP       string    `json:"ip,omitempty"`
+	MAC      string    `json:"mac,omitempty"`
+	Port     int       `json:"port,omitempty"` // canary: the decoy port
+	Count    int       `json:"count"`
+	Detail   string    `json:"detail,omitempty"` // port_scan: the ports; arp_spoof: "gateway"/"flapping" and the MACs
+	FirstAt  time.Time `json:"first_at"`         // box time
+	LastAt   time.Time `json:"last_at"`
 }
 
 // BufferInfo is the agent's send buffer state.

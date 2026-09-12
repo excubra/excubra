@@ -778,6 +778,21 @@ func TestSignalsBecomeAlertsAndFindings(t *testing.T) {
 		t.Fatalf("spoof finding on the new device: %v", err)
 	}
 
+	// a signal a connector read from its device's logs hangs on that device, the source stays remote
+	fgt, _, _, err := f.st.UpsertSighting(ctx, "ten_a", "site_a", wire.Sighting{MAC: "00:09:0f:aa:bb:cc", IP: "192.168.1.1", Hostname: "fw-1", LastSeen: f.now}, f.now)
+	must(t, err)
+	f.pub.reset()
+	beat(wire.Heartbeat{Signals: []wire.Signal{{Kind: wire.SignalFGTAdminFail, DeviceID: fgt.ID, IP: "203.0.113.9", Count: 7, Detail: "admin", FirstAt: f.now, LastAt: f.now}}})
+	if got := f.pub.types(); got != "security.alert" {
+		t.Fatalf("log signal event: %q", got)
+	}
+	if fd, err := f.st.OpenFinding(ctx, fgt.ID, "signal.fgt_admin_fail", "203.0.113.9"); err != nil || fd.Severity != "high" {
+		t.Fatalf("finding on the firewall: %+v %v", fd, err)
+	}
+	if _, err := f.st.DeviceByAddress(ctx, "site_a", "", "203.0.113.9"); err == nil {
+		t.Fatal("the remote source became a device of the LAN")
+	}
+
 	// a quiet day resolves the incidents, the switch turns the decoys off
 	f.now = f.now.Add(25 * time.Hour)
 	must(t, f.eng.Tick(ctx))

@@ -27,7 +27,7 @@ func TestIdentify(t *testing.T) {
 		{rules.Service{Product: "OpenSSH", Version: "8.4p1", Banner: "SSH-2.0-OpenSSH_8.4p1 Raspbian-5+deb11u3"}, true, "cpe:2.3:a:openbsd:openssh:8.4:p1:*:*:*:*:*:*", "Debian:11", "1:8.4p1-5+deb11u3"},
 		{rules.Service{Product: "OpenSSH", Version: "9.9", Banner: "SSH-2.0-OpenSSH_9.9"}, true, "cpe:2.3:a:openbsd:openssh:9.9:*:*:*:*:*:*:*", "", ""},
 		{rules.Service{Product: "nginx", Version: "1.24.0"}, true, "cpe:2.3:a:f5:nginx:1.24.0:*:*:*:*:*:*:*", "", ""},
-		{rules.Service{Product: "FortiOS", Version: "7.4.3"}, true, "cpe:2.3:o:fortinet:fortios:7.4.3:*:*:*:*:*:*:*", "", ""},
+		{rules.Service{Product: "FortiOS", Version: "v7.4.3"}, true, "cpe:2.3:o:fortinet:fortios:7.4.3:*:*:*:*:*:*:*", "", ""},
 		{rules.Service{Product: "Apache", Version: ""}, false, "", "", ""},
 		{rules.Service{Product: "Microsoft-IIS", Version: "10.0"}, false, "", "", ""},
 		{rules.Service{Product: "nginx", Version: "1.24.0 (evil)"}, false, "", "", ""},
@@ -94,7 +94,8 @@ func TestLookupMergesTheDatabases(t *testing.T) {
 			osvBody = string(b)
 			_, _ = w.Write([]byte(`{"vulns":[
 				{"id":"DEBIAN-CVE-2024-6387","aliases":["CVE-2024-6387"],"details":"regreSSHion","affected":[{"package":{"ecosystem":"Debian:12","name":"openssh"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1:9.2p1-2+deb12u3"}]}]}]},
-				{"id":"DEBIAN-CVE-2025-0001","aliases":["CVE-2025-0001"],"summary":"Made-up unfixed issue","severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N"}],"affected":[{"package":{"ecosystem":"Debian:12","name":"openssh"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]}
+				{"id":"DEBIAN-CVE-2025-0001","aliases":["CVE-2025-0001"],"summary":"Made-up unfixed issue","severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N"}],"affected":[{"package":{"ecosystem":"Debian:12","name":"openssh"},"ecosystem_specific":{"urgency":"not yet assigned"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]},
+				{"id":"DEBIAN-CVE-2007-2768","summary":"Debian says it does not matter","affected":[{"package":{"ecosystem":"Debian:12","name":"openssh"},"ecosystem_specific":{"urgency":"unimportant"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]}
 			]}`))
 		case "/kev":
 			kevCalls++
@@ -135,8 +136,11 @@ func TestLookupMergesTheDatabases(t *testing.T) {
 		t.Fatalf("detail: %s", f.Detail)
 	}
 	cves := f.Evidence["cves"].([]CVE)
-	if cves[0].ID != "CVE-2024-6387" || !cves[0].Exploited || cves[1].ID != "CVE-2025-0001" || cves[1].Score != 6.4 {
+	if cves[0].ID != "CVE-2024-6387" || !cves[0].Exploited || cves[0].Untriaged || cves[1].ID != "CVE-2025-0001" || cves[1].Score != 6.4 || !cves[1].Untriaged {
 		t.Fatalf("cves: %+v", cves)
+	}
+	if !strings.Contains(f.Detail, "1 davon hat die Distribution noch nicht eingestuft") {
+		t.Fatalf("untriaged note missing: %s", f.Detail)
 	}
 	// fresh: nothing to fetch; a day later it is wanted again
 	if n := s.Refresh(context.Background()); n != 0 {
@@ -170,18 +174,56 @@ func TestFailedLookupsPause(t *testing.T) {
 	s.gapNVD = func(bool) time.Duration { return 0 }
 	services := []rules.Service{{Port: 22, Proto: "tcp", Product: "OpenSSH", Version: "9.2p1"}}
 	_ = s.Findings(services, now)
-	if n := s.Refresh(context.Background()); n != 0 || calls != 2 { // kev + nvd
+	if n := s.Refresh(context.Background()); n != 0 || calls != 3 { // kev (cisa, then nvd) + the query
 		t.Fatalf("refresh: changed=%d calls=%d", n, calls)
 	}
-	if n := s.Refresh(context.Background()); n != 0 || calls != 3 { // kev again, the query paused
+	if n := s.Refresh(context.Background()); n != 0 || calls != 5 { // kev again, the query paused
 		t.Fatalf("paused query retried at once: changed=%d calls=%d", n, calls)
 	}
 	s.Now = func() time.Time { return now.Add(20 * time.Minute) }
 	_ = s.Refresh(context.Background())
-	if calls != 5 {
+	if calls != 8 {
 		t.Fatalf("retry after the pause: calls=%d", calls)
 	}
 	if got := s.Findings(services, now); len(got) != 0 {
 		t.Fatalf("finding without data: %+v", got)
+	}
+}
+
+// A version whose open CVEs are all still unjudged by the distribution is reported
+// as such and never becomes urgent on scores alone; the KEV list falls back to
+// NVD when CISA refuses.
+func TestUntriagedStaysMediumAndKEVFallsBackToNVD(t *testing.T) {
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/kev":
+			w.WriteHeader(403)
+		case r.URL.Path == "/nvd" && strings.Contains(r.URL.RawQuery, "hasKev"):
+			_, _ = w.Write([]byte(`{"totalResults":2,"vulnerabilities":[{"cve":{"id":"CVE-2021-44228"}},{"cve":{"id":"CVE-2024-6387"}}]}`))
+		case r.URL.Path == "/nvd":
+			_, _ = w.Write([]byte(`{"vulnerabilities":[]}`))
+		case r.URL.Path == "/osv":
+			_, _ = w.Write([]byte(`{"vulns":[
+				{"id":"DEBIAN-CVE-2026-59998","severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],"affected":[{"package":{"ecosystem":"Debian:13","name":"openssh"},"ecosystem_specific":{"urgency":"not yet assigned"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]},
+				{"id":"DEBIAN-CVE-2026-59999","affected":[{"package":{"ecosystem":"Debian:13","name":"openssh"},"ecosystem_specific":{"urgency":"not yet assigned"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]}
+			]}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	s := New(nil, nil)
+	s.NVD, s.OSV, s.KEV = srv.URL+"/nvd", srv.URL+"/osv", srv.URL+"/kev"
+	s.Now = func() time.Time { return now }
+	s.gapNVD = func(bool) time.Duration { return 0 }
+	services := []rules.Service{{Port: 22, Proto: "tcp", Name: "ssh", Product: "OpenSSH", Version: "10.0p2", Banner: "SSH-2.0-OpenSSH_10.0p2 Debian-7+deb13u4"}}
+	_ = s.Findings(services, now)
+	if n := s.Refresh(context.Background()); n != 2 || !s.Exploited("CVE-2021-44228") {
+		t.Fatalf("refresh: %d exploited=%v", n, s.Exploited("CVE-2021-44228"))
+	}
+	got := s.Findings(services, now)
+	if len(got) != 1 || got[0].Severity != rules.Medium || !strings.Contains(got[0].Title, "2 gemeldete Schwachstellen, Fix der Distribution steht aus") || got[0].Evidence["untriaged"] != 2 {
+		t.Fatalf("untriaged finding: %+v", got)
 	}
 }
