@@ -51,7 +51,7 @@ func probe(ctx context.Context, dial func(ctx context.Context, network, addr str
 	_ = conn.SetDeadline(time.Now().Add(probeTimeout))
 	switch {
 	case tlsPorts[port]:
-		tc, info := handshake(conn, ip)
+		tc, info := handshake(ctx, conn)
 		if info == nil {
 			return svc, nil // open, but not TLS as expected; leave it at the name
 		}
@@ -87,9 +87,11 @@ func closedOrFiltered(err error) bool {
 // handshake wraps the connection in TLS and reads the certificate. The scan reads
 // the certificate; it does not trust it, and it offers old versions on purpose to
 // learn whether the server still speaks them.
-func handshake(conn net.Conn, ip string) (net.Conn, *wire.TLSInfo) {
+func handshake(ctx context.Context, conn net.Conn) (net.Conn, *wire.TLSInfo) {
 	tc := tls.Client(conn, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS10}) //nolint:gosec // we read the certificate, we do not trust it
-	if err := tc.Handshake(); err != nil {
+	hctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	if err := tc.HandshakeContext(hctx); err != nil {
 		return conn, nil
 	}
 	st := tc.ConnectionState()
@@ -102,7 +104,6 @@ func handshake(conn net.Conn, ip string) (net.Conn, *wire.TLSInfo) {
 			info.DNSNames = info.DNSNames[:8]
 		}
 	}
-	_ = ip
 	return tc, info
 }
 

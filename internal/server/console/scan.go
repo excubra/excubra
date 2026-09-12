@@ -37,7 +37,7 @@ func (s *Server) deviceServices(ctx context.Context, deviceID string) []serviceV
 				row.TLSInfo = &t
 			}
 		}
-		row.Service.TLS = nil
+		row.TLS = nil
 		out = append(out, row)
 	}
 	return out
