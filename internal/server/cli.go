@@ -885,6 +885,9 @@ func remoteCmd(args []string) error {
 func aiCmd(args []string) error {
 	fs := flag.NewFlagSet("excubra server ai", flag.ContinueOnError)
 	envFile := fs.String("env-file", "", "server env file")
+	file := fs.String("file", "-", "import: JSON answer in the agreed shape; - reads stdin")
+	by := fs.String("by", "cli", "import: who wrote it")
+	model := fs.String("model", "session", "import: which model or person")
 	rest, flags := cliArgs(args)
 	if err := fs.Parse(flags); err != nil {
 		return err
@@ -915,15 +918,8 @@ func aiCmd(args []string) error {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", " ")
 		return enc.Encode(pk)
-	case len(rest) >= 2 && rest[0] == "import":
+	case len(rest) == 2 && rest[0] == "import":
 		// import <site_id> [--file result.json] [--by actor] [--model label]: an assessment written outside
-		ifs := flag.NewFlagSet("excubra server ai import", flag.ContinueOnError)
-		file := ifs.String("file", "-", "JSON answer in the agreed shape; - reads stdin")
-		by := ifs.String("by", "cli", "who wrote it")
-		model := ifs.String("model", "session", "which model or person")
-		if err := ifs.Parse(rest[2:]); err != nil {
-			return err
-		}
 		var data []byte
 		if *file == "-" {
 			data, err = io.ReadAll(os.Stdin)

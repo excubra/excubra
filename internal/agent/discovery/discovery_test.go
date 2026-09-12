@@ -224,3 +224,12 @@ func TestParseARPFrame(t *testing.T) {
 		t.Fatal("short frame parsed")
 	}
 }
+
+func TestLinkLocalAddressesAreNotDevices(t *testing.T) {
+	tb := NewTable()
+	tb.See("12:3b:3b:bd:d7:cf", "169.254.222.2", "")
+	tb.See("aa:bb:cc:dd:ee:01", "192.168.1.5", "")
+	if tb.Len() != 1 {
+		t.Fatalf("link-local address became a device: %d entries", tb.Len())
+	}
+}

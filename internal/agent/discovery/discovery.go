@@ -197,6 +197,11 @@ func (t *Table) See(mac, ip, ip6 string) {
 	if mac == "" && ip == "" {
 		return
 	}
+	// link-local addresses are plumbing (the veth pair into the operator namespace,
+	// a client without DHCP), not devices of the customer's network
+	if a, err := netip.ParseAddr(ip); err == nil && a.IsLinkLocalUnicast() {
+		return
+	}
 	if mac != "" {
 		if _, err := net.ParseMAC(mac); err != nil {
 			return
