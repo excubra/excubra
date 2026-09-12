@@ -130,7 +130,7 @@ func TestLookupMergesTheDatabases(t *testing.T) {
 		t.Fatalf("findings: %+v", got)
 	}
 	f := got[0]
-	if f.Rule != "vuln.known" || f.Key != "tcp/22" || f.Severity != rules.High || !strings.Contains(f.Title, "2 bekannte Schwachstellen, eine wird aktiv ausgenutzt") {
+	if f.Rule != "vuln.known" || f.Key != "tcp/22" || f.Severity != rules.High || !strings.Contains(f.Title, "1 bekannte Schwachstelle (1 weitere ungeprüft), eine wird aktiv ausgenutzt") {
 		t.Fatalf("finding: %+v", f)
 	}
 	if !strings.Contains(f.Detail, "CVE-2024-6387 (CVSS 8.1)") || !strings.Contains(f.Detail, "1:9.2p1-2+deb12u3") || strings.Contains(f.Detail, "CVE-2023-51385") {
@@ -265,5 +265,31 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A judged medium CVE next to an unjudged critical one: the distribution's
+// judgement sets the grade, the unjudged one is named but does not alarm.
+func TestUnjudgedScoresDoNotSetTheSeverity(t *testing.T) {
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	s := New(nil, nil)
+	s.Now = func() time.Time { return now }
+	q, _ := Identify(rules.Service{Product: "OpenSSH", Version: "9.2p1", Banner: "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u9"})
+	s.Put(&Result{Key: q.Key(), Product: "OpenSSH", Version: "9.2p1", FetchedAt: now, Judged: resultVersion, CVEs: []CVE{
+		{ID: "CVE-2023-51767", Score: 7.0, Summary: "rowhammer"},
+		{ID: "CVE-2026-60002", Score: 9.4, Untriaged: true, Summary: "client use-after-free"},
+		{ID: "CVE-2026-59999", Untriaged: true},
+	}})
+	got := s.Findings([]rules.Service{{Port: 22, Proto: "tcp", Product: "OpenSSH", Version: "9.2p1", Banner: "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u9"}}, now)
+	if len(got) != 1 || got[0].Severity != rules.High || got[0].Title != "OpenSSH 9.2p1: 1 bekannte Schwachstelle (2 weitere ungeprüft), höchste CVSS 7.0" {
+		t.Fatalf("mixed: %+v", got)
+	}
+	s.Put(&Result{Key: q.Key(), Product: "OpenSSH", Version: "9.2p1", FetchedAt: now, Judged: resultVersion, CVEs: []CVE{
+		{ID: "CVE-2023-51767", Score: 5.5, Summary: "rowhammer"},
+		{ID: "CVE-2026-60002", Score: 9.4, Untriaged: true},
+	}})
+	got = s.Findings([]rules.Service{{Port: 22, Proto: "tcp", Product: "OpenSSH", Version: "9.2p1", Banner: "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u9"}}, now)
+	if len(got) != 1 || got[0].Severity != rules.Medium || !strings.Contains(got[0].Title, "höchste CVSS 5.5") {
+		t.Fatalf("judged medium wins over unjudged critical: %+v", got)
 	}
 }
