@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/excubra/excubra/internal/secretbox"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (ADR-0008)
 )
 
@@ -31,6 +32,8 @@ var ErrNotFound = errors.New("store: not found")
 type Store struct {
 	dir  string
 	main *sql.DB
+	// Secrets seals secret settings at rest (ADR-0009 amendment); nil = plain.
+	Secrets *secretbox.Box
 
 	mu   sync.Mutex
 	days map[string]*sql.DB // "<tenant>/<day>"

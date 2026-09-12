@@ -147,6 +147,13 @@ else
   sed -i "s|^EXCUBRA_OVERLAY_LISTEN=.*|EXCUBRA_OVERLAY_LISTEN=$OVERLAY|" /etc/excubra/server.env
   echo "   kept existing /etc/excubra/server.env (ingest host and overlay updated)"
 fi
+if [ ! -s /etc/excubra/secret.key ]; then
+  (umask 027; openssl rand -base64 32 > /etc/excubra/secret.key)
+  chown root:excubra /etc/excubra/secret.key
+  chmod 0640 /etc/excubra/secret.key
+  echo "   wrote /etc/excubra/secret.key — copy it into the password manager; the backup does not contain it"
+fi
+grep -q "^EXCUBRA_SECRET_KEY_FILE=" /etc/excubra/server.env || printf '\n# seals secrets at rest; keep a copy in the password manager (not in the backup)\nEXCUBRA_SECRET_KEY_FILE=/etc/excubra/secret.key\n' >> /etc/excubra/server.env
 chown root:excubra /etc/excubra/server.env
 chmod 0640 /etc/excubra/server.env
 

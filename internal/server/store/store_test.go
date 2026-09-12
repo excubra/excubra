@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/event"
+	"github.com/excubra/excubra/internal/secretbox"
 	"github.com/excubra/excubra/internal/server/state"
 	"github.com/excubra/excubra/internal/wire"
 )
@@ -460,5 +461,47 @@ func TestRollupsPruneBackup(t *testing.T) {
 	}
 	if rs, _ := r.Rollups(ctx, "ten_a", "host_fw", t0, t0.Add(2*time.Hour)); len(rs) != 2 {
 		t.Fatal("restored day file incomplete")
+	}
+}
+
+// Secret settings are sealed at rest when the store has a key, read back in
+// plain, and plain ones from before a key are sealed once.
+func TestSecretSettingsAreSealed(t *testing.T) {
+	st := open(t)
+	ctx := context.Background()
+	must(t, st.SetSetting(ctx, "netbird.operator.token", "nbp_plain_before_key"))
+	must(t, st.SetSetting(ctx, "channel.stable", "0.7.5"))
+	box, err := secretbox.FromBytes([]byte("test key material"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Secrets = box
+	n, err := st.SealPlainSecrets(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("sealed %d, err %v", n, err)
+	}
+	var raw string
+	if err := st.main.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'netbird.operator.token'`).Scan(&raw); err != nil || !secretbox.Sealed(raw) {
+		t.Fatalf("raw value not sealed: %q %v", raw, err)
+	}
+	if v, err := st.Setting(ctx, "netbird.operator.token"); err != nil || v != "nbp_plain_before_key" {
+		t.Fatalf("read back: %q %v", v, err)
+	}
+	must(t, st.SetSetting(ctx, "ai.api_key", "sk-test"))
+	_ = st.main.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'ai.api_key'`).Scan(&raw)
+	if !secretbox.Sealed(raw) {
+		t.Fatal("a new secret setting was stored in plain")
+	}
+	if v, _ := st.Setting(ctx, "channel.stable"); v != "0.7.5" {
+		t.Fatal("a plain setting changed")
+	}
+	_ = st.main.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'channel.stable'`).Scan(&raw)
+	if secretbox.Sealed(raw) {
+		t.Fatal("a non-secret setting was sealed")
+	}
+	// without the key, a sealed value is an error, not garbage
+	st.Secrets = nil
+	if _, err := st.Setting(ctx, "ai.api_key"); err == nil {
+		t.Fatal("sealed value read without a key")
 	}
 }

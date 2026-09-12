@@ -26,6 +26,7 @@ type Config struct {
 	Feeds            string // end-of-life feed base URL for the version rules (ADR-0018); "" = endoflife.date, "off" disables
 	Vulns            string // "off" disables the CVE matching against NVD, OSV and KEV (ADR-0018 §8)
 	Blocklist        string // "off" disables the DNS blocklist feeds (ADR-0020)
+	SecretKeyFile    string // key that seals secrets at rest: settings and private keys (ADR-0009 amendment); "" = plain
 	SelfUpdate       string // "on": the server installs signed releases of its channel itself (ADR-0006); "off" in containers
 	LogLevel         string
 	LogFormat        string
@@ -78,6 +79,7 @@ func LoadConfig(envFile string, getenv func(string) string) (Config, error) {
 		Feeds:            get("EXCUBRA_FEEDS", ""),
 		Vulns:            get("EXCUBRA_VULNS", ""),
 		Blocklist:        get("EXCUBRA_BLOCKLIST", ""),
+		SecretKeyFile:    get("EXCUBRA_SECRET_KEY_FILE", ""),
 		SelfUpdate:       get("EXCUBRA_SELF_UPDATE", "on"),
 		LogLevel:         get("EXCUBRA_LOG_LEVEL", "info"),
 		LogFormat:        get("EXCUBRA_LOG_FORMAT", "text"),

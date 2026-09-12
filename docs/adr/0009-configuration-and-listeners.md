@@ -87,3 +87,26 @@ faults no test would have: timers that were `enable`d but never started (a backu
 that silently never runs), and a CLI that rejected flags after the positional word
 although its help promised them. Both are fixed in the repository, which is the
 point of having the sequence in a file rather than in a chat log.
+
+## Amendment 2026-09-13: secrets at rest
+
+The database held the NetBird token and API keys in plain text, and the data
+directory the CA's private key — and the backup copies both. A stolen backup
+was therefore a way into every customer LAN. Now `EXCUBRA_SECRET_KEY_FILE`
+names a key (`openssl rand -base64 32`, root:excubra 0640, outside the data
+directory) that seals secret settings (`store.SecretSetting`: keys ending in
+`.token`, `.api_key`, `.key`, `.secret`, `.password`) and the private key files
+of the internal CA and the ingest certificate (`internal/secretbox`,
+AES-256-GCM, values prefixed `enc:v1:`). A running installation seals what it
+finds in plain text once at start. Without the key a backup holds unusable
+tokens and keys, which is the point: the key lives in the password manager,
+not on the disk that is backed up. The restore test passes the key file along.
+Connector credentials were already sealed to the boxes' keys and never
+readable on the server (ADR-0015).
+
+Cleaned up the same day: the demo instance on the overlay was stopped and
+archived, SSH now listens for the operator overlay only (the hosting console
+is the way in when the overlay is down), unattended upgrades reboot at 04:45
+when a kernel asks for it, the stray reusable setup key in the operator stack
+was revoked, and EX0 uses a NetBird service user of its own (role admin)
+instead of the owner's token.
