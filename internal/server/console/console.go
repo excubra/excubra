@@ -23,6 +23,7 @@ import (
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
+	"github.com/excubra/excubra/internal/server/vuln"
 	"github.com/excubra/excubra/internal/version"
 )
 
@@ -51,6 +52,7 @@ type Server struct {
 	Catalog    *catalog.Client        // release catalog, nil when disabled (ADR-0006)
 	SelfUpdate *selfupdate.Controller // this server's own updates, nil in tests
 	Remote     *remote.Service        // remote access through the box, nil in tests
+	Vuln       *vuln.Service          // CVE matching, nil when off
 	AI         *ai.Service            // assessments (ADR-0019), nil in tests
 
 	pages    map[string]*template.Template
@@ -225,6 +227,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/settings/ai", s.auth(s.apiAISettings))
 	mux.Handle("POST /api/settings/ai", s.auth(s.aiSettingsSave))
 	mux.Handle("POST /api/settings/ai/test", s.auth(s.aiSettingsTest))
+	mux.Handle("GET /api/settings/vuln", s.auth(s.apiVulnSettings))
+	mux.Handle("POST /api/settings/vuln", s.auth(s.vulnSettingsSave))
 	mux.Handle("GET /api/sites/{id}/ai", s.auth(s.apiSiteAI))
 	mux.Handle("POST /api/sites/{id}/ai/assess", s.auth(s.siteAIAssess))
 	mux.Handle("POST /api/tenants/{id}/ai", s.auth(s.tenantAISet))

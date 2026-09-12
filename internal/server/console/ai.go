@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/store"
+	"github.com/excubra/excubra/internal/server/vuln"
 )
 
 func (s *Server) apiAISettings(w http.ResponseWriter, r *http.Request) {
@@ -149,4 +151,35 @@ func (s *Server) tenantAISet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.flash(w, r, "KI-Auswertung für diesen Kunden aus. Nichts von diesem Kunden verlässt den Server.", "/tenants/"+tenantID)
+}
+
+// The vulnerability databases (ADR-0018 §8): only an optional NVD key to set,
+// and a look at what is cached.
+func (s *Server) apiVulnSettings(w http.ResponseWriter, r *http.Request) {
+	if s.Vuln == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+	key, _ := s.Store.Setting(r.Context(), vuln.SettingNVDKey)
+	writeJSON(w, http.StatusOK, map[string]any{"available": true, "hasKey": key != ""})
+}
+
+func (s *Server) vulnSettingsSave(w http.ResponseWriter, r *http.Request) {
+	if s.Vuln == nil {
+		s.flashErr(w, r, "Der CVE-Abgleich ist auf diesem Server nicht aktiv.", "/settings")
+		return
+	}
+	key := strings.TrimSpace(r.PostForm.Get("key"))
+	if r.PostForm.Get("clear") == "1" {
+		key = ""
+	} else if key == "" {
+		s.flash(w, r, "Nichts geändert.", "/settings")
+		return
+	}
+	if err := s.Store.SetSetting(r.Context(), vuln.SettingNVDKey, key); err != nil {
+		s.flashErr(w, r, err.Error(), "/settings")
+		return
+	}
+	_ = s.Store.Audit(r.Context(), s.Now(), actor(r), "settings.vuln", "nvd_key", map[bool]string{true: "set", false: "cleared"}[key != ""])
+	s.flash(w, r, "NVD-Schlüssel gespeichert; die Abfragen laufen ab jetzt zehnmal schneller.", "/settings")
 }

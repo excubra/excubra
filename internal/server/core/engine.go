@@ -22,6 +22,7 @@ import (
 	"github.com/excubra/excubra/internal/server/rules"
 	"github.com/excubra/excubra/internal/server/state"
 	"github.com/excubra/excubra/internal/server/store"
+	"github.com/excubra/excubra/internal/server/vuln"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -41,6 +42,8 @@ type Engine struct {
 	Log   *slog.Logger
 	Now   func() time.Time
 	Feed  *feed.Service // end-of-life data for the version rules (ADR-0018); nil means no version findings
+	// Vuln matches identified versions against NVD, OSV and KEV (ADR-0018 §8); nil = off.
+	Vuln *vuln.Service
 
 	mu      sync.Mutex
 	m       *state.Machine
@@ -893,7 +896,9 @@ func (e *Engine) evaluateRules(ctx context.Context, connectorID string, metrics 
 	}
 	found := rules.Evaluate(rules.Input{Kind: c.Kind, Facts: facts, Metrics: metrics, Pinned: c.TLSFingerprint != "", Now: now})
 	if v, _ := facts["version"].(string); v != "" && c.Kind == "fortigate" && c.DeviceID != "" {
-		e.versionFindings(ctx, c.TenantID, c.SiteID, c.DeviceID, []rules.Service{{Proto: "connector", Product: "FortiOS", Version: v, Name: c.Kind}}, now)
+		fw := []rules.Service{{Proto: "connector", Product: "FortiOS", Version: v, Name: c.Kind}}
+		e.versionFindings(ctx, c.TenantID, c.SiteID, c.DeviceID, fw, now)
+		e.vulnFindings(ctx, c.TenantID, c.SiteID, c.DeviceID, fw, now)
 	}
 	current := make([]store.Finding, 0, len(found))
 	for _, f := range found {
@@ -958,6 +963,7 @@ func (e *Engine) absorbScan(ctx context.Context, site store.Site, box store.Box,
 			_ = e.Store.DeleteAck(ctx, "finding", fid)
 		}
 		e.versionFindings(ctx, site.TenantID, site.ID, dev.ID, facts, now)
+		e.vulnFindings(ctx, site.TenantID, site.ID, dev.ID, facts, now)
 	}
 	if rep.Final {
 		fin := now
@@ -1148,6 +1154,30 @@ func (e *Engine) versionFindings(ctx context.Context, tenantID, siteID, deviceID
 	}
 }
 
+// vulnFindings syncs the CVE findings of a device (source "vuln", ADR-0018 §8).
+func (e *Engine) vulnFindings(ctx context.Context, tenantID, siteID, deviceID string, facts []rules.Service, now time.Time) {
+	if e.Vuln == nil {
+		return
+	}
+	found := e.Vuln.Findings(facts, now)
+	current := make([]store.Finding, 0, len(found))
+	for _, f := range found {
+		ev, _ := json.Marshal(f.Evidence)
+		current = append(current, store.Finding{ID: id.New("fnd"), TenantID: tenantID, SiteID: siteID, DeviceID: deviceID, ConnectorID: SourceVuln,
+			Rule: f.Rule, Key: f.Key, Severity: f.Severity, Title: f.Title, Detail: f.Detail, Evidence: ev})
+	}
+	resolved, err := e.Store.SyncDeviceFindings(ctx, deviceID, SourceVuln, current, now)
+	if err != nil {
+		e.Log.Error("vuln findings", "device", deviceID, "err", err)
+	}
+	for _, fid := range resolved {
+		_ = e.Store.DeleteAck(ctx, "finding", fid)
+	}
+}
+
+// SourceVuln is the findings source of the CVE matching.
+const SourceVuln = "vuln"
+
 // ReassessVersions takes a fresh look at every device's services after the feed
 // changed: a line that just reached its end becomes a finding without waiting for
 // the next scan round.
@@ -1155,6 +1185,18 @@ func (e *Engine) ReassessVersions(ctx context.Context) {
 	if e.Feed == nil {
 		return
 	}
+	e.reassessServices(ctx, e.versionFindings)
+}
+
+// ReassessVulns does the same after the vulnerability databases answered.
+func (e *Engine) ReassessVulns(ctx context.Context) {
+	if e.Vuln == nil {
+		return
+	}
+	e.reassessServices(ctx, e.vulnFindings)
+}
+
+func (e *Engine) reassessServices(ctx context.Context, judge func(ctx context.Context, tenantID, siteID, deviceID string, facts []rules.Service, now time.Time)) {
 	svcs, err := e.Store.OpenServices(ctx)
 	if err != nil {
 		return
@@ -1165,7 +1207,7 @@ func (e *Engine) ReassessVersions(ctx context.Context) {
 		if _, ok := byDevice[sv.DeviceID]; !ok {
 			order = append(order, sv.DeviceID)
 		}
-		byDevice[sv.DeviceID] = append(byDevice[sv.DeviceID], rules.Service{Port: sv.Port, Proto: sv.Proto, Name: sv.Name, Product: sv.Product, Version: sv.Version})
+		byDevice[sv.DeviceID] = append(byDevice[sv.DeviceID], rules.Service{Port: sv.Port, Proto: sv.Proto, Name: sv.Name, Product: sv.Product, Version: sv.Version, Banner: sv.Banner})
 	}
 	now := e.Now()
 	e.mu.Lock()
@@ -1175,7 +1217,7 @@ func (e *Engine) ReassessVersions(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		e.versionFindings(ctx, dev.TenantID, dev.SiteID, dev.ID, byDevice[devID], now)
+		judge(ctx, dev.TenantID, dev.SiteID, dev.ID, byDevice[devID], now)
 	}
 }
 

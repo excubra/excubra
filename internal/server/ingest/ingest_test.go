@@ -20,8 +20,10 @@ import (
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/feed"
 	"github.com/excubra/excubra/internal/server/ingest"
+	"github.com/excubra/excubra/internal/server/rules"
 	"github.com/excubra/excubra/internal/server/state"
 	"github.com/excubra/excubra/internal/server/store"
+	"github.com/excubra/excubra/internal/server/vuln"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -643,6 +645,57 @@ func TestVersionsAreJudgedAgainstTheFeed(t *testing.T) {
 	}
 	if got["version.eol/tcp/80"] != "high" || got["version.eol/tcp/8080"] != "high" || len(got) != 2 {
 		t.Fatalf("after the feed changed: %v", got)
+	}
+}
+
+// CVE matching (ADR-0018 §8): a version with known vulnerabilities in the cache
+// becomes a finding of the source "vuln" when the scan reports it, and is
+// re-assessed when the databases answer.
+func TestKnownVulnerabilitiesBecomeFindings(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	boxID, boxClient, _ := f.enroll(f.key.String())
+	must(t, f.eng.AssignBox(ctx, boxID, "site_a", "test"))
+	must(t, f.eng.SetSiteScan(ctx, "site_a", true, "test"))
+	vs := vuln.New(nil, nil)
+	vs.Now = func() time.Time { return f.now }
+	q, _ := vuln.Identify(rules.Service{Product: "OpenSSH", Version: "9.2p1", Banner: "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u2"})
+	vs.Put(&vuln.Result{Key: q.Key(), Product: "OpenSSH", Version: "9.2p1", FetchedAt: f.now, CVEs: []vuln.CVE{{ID: "CVE-2024-6387", Score: 8.1, Exploited: true, Summary: "regreSSHion", Fixed: "1:9.2p1-2+deb12u3"}}})
+	f.eng.Vuln = vs
+	beat := func(hb wire.Heartbeat) {
+		t.Helper()
+		f.now = f.now.Add(60 * time.Second)
+		hb.SentAt, hb.Agent = f.now, wire.AgentInfo{Version: "0.5.1", OS: "linux", Arch: "amd64"}
+		if status, body := f.do(boxClient, "POST", "/v1/heartbeat", hb, nil); status != 200 {
+			t.Fatalf("heartbeat: %d %s", status, body)
+		}
+	}
+	beat(wire.Heartbeat{Discovery: wire.DiscoveryReport{Seen: []wire.Sighting{{MAC: "00:11:22:33:44:77", IP: "192.168.1.52", LastSeen: f.now}}}})
+	beat(wire.Heartbeat{Scan: &wire.ScanReport{Round: "scan_c1", StartedAt: f.now, Final: true, Scanned: 1, Hosts: []wire.ScanHost{{IP: "192.168.1.52", MAC: "00:11:22:33:44:77", Services: []wire.ScanService{
+		{Port: 22, Proto: "tcp", Name: "ssh", Product: "OpenSSH", Version: "9.2p1", Banner: "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u2"},
+	}}}}})
+	open, _ := f.st.OpenFindings(ctx, "ten_a")
+	var got *store.Finding
+	for i := range open {
+		if open[i].ConnectorID == "vuln" {
+			got = &open[i]
+		}
+	}
+	if got == nil || got.Rule != "vuln.known" || got.Key != "tcp/22" || got.Severity != "high" || !strings.Contains(got.Title, "aktiv ausgenutzt") {
+		t.Fatalf("vuln finding: %+v", got)
+	}
+	// the package moves to a fixed revision: the databases say nothing is open → resolved on re-assessment
+	q2, _ := vuln.Identify(rules.Service{Product: "OpenSSH", Version: "9.2p1", Banner: "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3"})
+	vs.Put(&vuln.Result{Key: q2.Key(), Product: "OpenSSH", Version: "9.2p1", FetchedAt: f.now, CVEs: []vuln.CVE{}})
+	beat(wire.Heartbeat{Scan: &wire.ScanReport{Round: "scan_c2", StartedAt: f.now, Final: true, Scanned: 1, Hosts: []wire.ScanHost{{IP: "192.168.1.52", MAC: "00:11:22:33:44:77", Services: []wire.ScanService{
+		{Port: 22, Proto: "tcp", Name: "ssh", Product: "OpenSSH", Version: "9.2p1", Banner: "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3"},
+	}}}}})
+	f.eng.ReassessVulns(ctx)
+	open, _ = f.st.OpenFindings(ctx, "ten_a")
+	for _, fd := range open {
+		if fd.ConnectorID == "vuln" {
+			t.Fatalf("finding survived the fix: %+v", fd)
+		}
 	}
 }
 

@@ -33,6 +33,7 @@ import (
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
+	"github.com/excubra/excubra/internal/server/vuln"
 	"github.com/excubra/excubra/internal/server/webhook"
 	"github.com/excubra/excubra/internal/version"
 )
@@ -240,6 +241,21 @@ func run(envFile string) error {
 		eng.Feed = fd
 		go fd.Run(ctx, 10*time.Minute)
 	}
+	// known vulnerabilities per identified version (ADR-0018 §8): NVD, OSV, KEV,
+	// fetched per product version as the scan sees it, never naming a customer
+	if cfg.Vulns != "off" {
+		vs := vuln.New(st, log)
+		vs.OnRefresh = eng.ReassessVulns
+		eng.Vuln = vs
+		con.Vuln = vs
+		go vs.Run(ctx, 5*time.Minute)
+	}
+	// a restarted server takes a first look at what it already knows, so the feeds
+	// learn what to fetch without waiting for the next scan round
+	go func() {
+		eng.ReassessVersions(ctx)
+		eng.ReassessVulns(ctx)
+	}()
 	go eng.RunTicker(ctx, 10*time.Second)
 	if cfg.ReleaseCatalog != "" && cfg.ReleaseCatalog != "off" {
 		// release metadata from the project's published releases, hourly (ADR-0006)

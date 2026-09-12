@@ -420,6 +420,8 @@ func source(connectorID string) string {
 		return "KI"
 	case "signal":
 		return "Live-Erkennung"
+	case "vuln":
+		return "CVE-Abgleich"
 	case "":
 		return ""
 	}
