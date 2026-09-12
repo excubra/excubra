@@ -67,18 +67,19 @@ type RenewResponse struct {
 
 // Heartbeat is POST /v1/heartbeat, once per minute per box.
 type Heartbeat struct {
-	SentAt        time.Time         `json:"sent_at"`
-	Agent         AgentInfo         `json:"agent"`
-	Box           BoxInfo           `json:"box"`
-	Netbird       NetbirdInfo       `json:"netbird"`
-	ConfigVersion string            `json:"config_version"`
-	ConfigErrors  []string          `json:"config_errors,omitempty"`
-	Notes         []string          `json:"notes,omitempty"` // what the agent wants an operator to see, e.g. a rollback
-	Hosts         []HostReport      `json:"hosts,omitempty"`
-	Discovery     DiscoveryReport   `json:"discovery"`
-	Buffer        BufferInfo        `json:"buffer"`
-	TaskResults   []TaskResult      `json:"task_results,omitempty"` // finished tasks since the last successful heartbeat
-	Connectors    []ConnectorReport `json:"connectors,omitempty"`   // latest reading of every connector (ADR-0015)
+	SentAt          time.Time         `json:"sent_at"`
+	Agent           AgentInfo         `json:"agent"`
+	Box             BoxInfo           `json:"box"`
+	Netbird         NetbirdInfo       `json:"netbird"`
+	NetbirdOperator *NetbirdInfo      `json:"netbird_operator,omitempty"` // second client in the operator's own overlay, if the box has one
+	ConfigVersion   string            `json:"config_version"`
+	ConfigErrors    []string          `json:"config_errors,omitempty"`
+	Notes           []string          `json:"notes,omitempty"` // what the agent wants an operator to see, e.g. a rollback
+	Hosts           []HostReport      `json:"hosts,omitempty"`
+	Discovery       DiscoveryReport   `json:"discovery"`
+	Buffer          BufferInfo        `json:"buffer"`
+	TaskResults     []TaskResult      `json:"task_results,omitempty"` // finished tasks since the last successful heartbeat
+	Connectors      []ConnectorReport `json:"connectors,omitempty"`   // latest reading of every connector (ADR-0015)
 }
 
 // AgentInfo describes the running agent.
@@ -180,15 +181,16 @@ type HeartbeatResponse struct {
 
 // Config is GET /v1/config. Version doubles as ETag.
 type Config struct {
-	Version        string            `json:"version"`
-	Assigned       bool              `json:"assigned"`
-	Intervals      Intervals         `json:"intervals"`
-	Hosts          []HostConfig      `json:"hosts"`
-	Discovery      DiscoveryConfig   `json:"discovery"`
-	NetbirdPending bool              `json:"netbird_pending"`
-	Update         UpdateConfig      `json:"update"`
-	Tasks          []Task            `json:"tasks,omitempty"`      // pending one-shot tasks (ADR-0014)
-	Connectors     []ConnectorConfig `json:"connectors,omitempty"` // devices to read through their API (ADR-0015)
+	Version                string            `json:"version"`
+	Assigned               bool              `json:"assigned"`
+	Intervals              Intervals         `json:"intervals"`
+	Hosts                  []HostConfig      `json:"hosts"`
+	Discovery              DiscoveryConfig   `json:"discovery"`
+	NetbirdPending         bool              `json:"netbird_pending"`
+	NetbirdOperatorPending bool              `json:"netbird_operator_pending,omitempty"` // a key for the operator overlay waits (remote access)
+	Update                 UpdateConfig      `json:"update"`
+	Tasks                  []Task            `json:"tasks,omitempty"`      // pending one-shot tasks (ADR-0014)
+	Connectors             []ConnectorConfig `json:"connectors,omitempty"` // devices to read through their API (ADR-0015)
 }
 
 // Intervals in seconds.
@@ -370,8 +372,16 @@ type UpdateInfo struct {
 	MinAgentVersion string `json:"min_agent_version,omitempty"`
 }
 
-// NetbirdClaimResponse is POST /v1/netbird/claim — delivered exactly once.
+// NetBird profiles a box may hold a key for: the customer's own stack (its VPN and
+// the routing peer for its staff) and the operator's stack (remote access for us).
+const (
+	NetbirdProfileCustomer = "customer"
+	NetbirdProfileOperator = "operator"
+)
+
+// NetbirdClaimResponse is POST /v1/netbird/claim?profile=… — delivered exactly once.
 type NetbirdClaimResponse struct {
+	Profile       string `json:"profile"`
 	ManagementURL string `json:"management_url"`
 	SetupKey      string `json:"setup_key"`
 }

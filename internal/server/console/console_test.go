@@ -41,6 +41,7 @@ type fixture struct {
 	client *http.Client
 	secret string
 	csrf   string
+	con    *console.Server
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -63,7 +64,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{t: t, st: st, eng: eng, secret: auth.NewTOTPSecret()}
+	f := &fixture{t: t, st: st, eng: eng, secret: auth.NewTOTPSecret(), con: con}
 	f.srv = httptest.NewServer(con.Handler())
 	t.Cleanup(f.srv.Close)
 	jar, _ := cookiejar.New(nil)

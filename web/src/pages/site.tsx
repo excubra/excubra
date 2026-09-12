@@ -14,6 +14,7 @@ import { KindIcon } from "@/components/kind-icon"
 import { DeviceCardView } from "@/components/device-card"
 import { BoxTech } from "@/components/box-tech"
 import { TaskMenu } from "@/components/task-menu"
+import { RemoteAccessCard } from "@/components/remote-access"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -149,6 +150,7 @@ export default function SitePage() {
         </TabsContent>
 
         <TabsContent value="technik" className="mt-4">
+          <RemoteAccessCard siteId={id} />
           {d.Box ? <BoxTech box={d.Box} site={d.Site} sites={d.Sites ?? []} tenantNames={d.TenantNames} fingerprint={d.Fingerprint} netbird={d.Netbird} subnets={d.Subnets} onChanged={refresh} /> : (
             <Alert><Radar /><AlertTitle>Keine Box an diesem Standort</AlertTitle><AlertDescription>Unter <Link className="underline" to="/boxes">Boxen</Link> eine enrollte Box diesem Standort zuordnen.</AlertDescription></Alert>
           )}

@@ -43,12 +43,13 @@ type Agent struct {
 	log    *slog.Logger
 	now    func() time.Time
 
-	checker *checks.Runner
-	disc    *discovery.Discovery
-	netbird *Netbird
-	upd     *update.Updater
-	conn    *connect.Runner
-	sealKey *ecdh.PrivateKey
+	checker   *checks.Runner
+	disc      *discovery.Discovery
+	netbird   *Netbird
+	netbirdOp *Netbird // the operator's overlay, remote access (may be absent on the box)
+	upd       *update.Updater
+	conn      *connect.Runner
+	sealKey   *ecdh.PrivateKey
 
 	cfgMu        sync.RWMutex
 	cfg          wire.Config
@@ -76,6 +77,8 @@ type Agent struct {
 	taskResults []wire.TaskResult
 	tasksWG     sync.WaitGroup // tests wait for running tasks
 	baseCtx     context.Context
+
+	opMissingNoted bool // "operator daemon not installed" was said for this config
 }
 
 // Run is the agent main loop. It returns when ctx ends, or ErrRestart after a
@@ -148,6 +151,7 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 		checker:    checks.NewRunner(checks.NewPinger()),
 		disc:       discovery.New(log),
 		netbird:    NewNetbird(st.Dir),
+		netbirdOp:  NewNetbirdOperator(st.Dir),
 		upd:        upd,
 		rounds:     map[string][]wire.Round{},
 		updateNow:  make(chan struct{}, 1),
@@ -344,18 +348,19 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		queued += len(r.Rounds)
 	}
 	hb := wire.Heartbeat{
-		SentAt:        a.now().UTC(),
-		Agent:         wire.AgentInfo{Version: version.Version, UptimeS: uptimeSeconds(), BootID: bootID(), OS: runtime.GOOS, Arch: runtime.GOARCH, SealKey: a.sealPublic()},
-		Box:           boxInfo(a.st.Dir),
-		Netbird:       a.netbird.Status(ctx),
-		ConfigVersion: cfgVersion,
-		ConfigErrors:  cfgErrors,
-		Notes:         notes,
-		Hosts:         reports,
-		Discovery:     wire.DiscoveryReport{Seen: sightings},
-		Buffer:        wire.BufferInfo{Queued: queued, Dropped: dropped},
-		TaskResults:   results,
-		Connectors:    conns,
+		SentAt:          a.now().UTC(),
+		Agent:           wire.AgentInfo{Version: version.Version, UptimeS: uptimeSeconds(), BootID: bootID(), OS: runtime.GOOS, Arch: runtime.GOARCH, SealKey: a.sealPublic()},
+		Box:             boxInfo(a.st.Dir),
+		Netbird:         a.netbird.Status(ctx),
+		NetbirdOperator: a.operatorStatus(ctx),
+		ConfigVersion:   cfgVersion,
+		ConfigErrors:    cfgErrors,
+		Notes:           notes,
+		Hosts:           reports,
+		Discovery:       wire.DiscoveryReport{Seen: sightings},
+		Buffer:          wire.BufferInfo{Queued: queued, Dropped: dropped},
+		TaskResults:     results,
+		Connectors:      conns,
 	}
 	hb.Box.ClockOffsetMS = a.clockOffset
 
@@ -403,9 +408,13 @@ func (a *Agent) heartbeat(ctx context.Context) {
 
 	a.cfgMu.RLock()
 	stale := resp.ConfigVersion != a.cfg.Version || a.now().Sub(a.cfgPulledAt) > a.configMaxAge
+	opPending := a.cfg.NetbirdOperatorPending
 	a.cfgMu.RUnlock()
 	if stale {
 		a.pullConfig(ctx)
+	} else if opPending {
+		// the key waits until the daemon exists; try again every heartbeat, not only on a new config
+		a.claimNetbird(ctx, a.netbirdOp)
 	}
 }
 
@@ -434,8 +443,20 @@ func (a *Agent) pullConfig(ctx context.Context) {
 	}
 	a.log.Info("config applied", "version", cfg.Version, "hosts", len(cfg.Hosts), "discovery", cfg.Discovery.Mode, "assigned", cfg.Assigned)
 	if cfg.NetbirdPending {
-		a.claimNetbird(ctx)
+		a.claimNetbird(ctx, a.netbird)
 	}
+	if cfg.NetbirdOperatorPending {
+		a.claimNetbird(ctx, a.netbirdOp)
+	}
+}
+
+// operatorStatus reports the second client when the box has one.
+func (a *Agent) operatorStatus(ctx context.Context) *wire.NetbirdInfo {
+	if a.netbirdOp == nil || !a.netbirdOp.Installed() {
+		return nil
+	}
+	st := a.netbirdOp.Status(ctx)
+	return &st
 }
 
 func (a *Agent) applyConfig(cfg wire.Config) {
@@ -464,6 +485,7 @@ func (a *Agent) applyConfig(cfg wire.Config) {
 		}
 	}
 	a.roundsMu.Unlock()
+	a.opMissingNoted = false
 
 	a.startTasks(cfg.Tasks)
 	if a.conn != nil { // unit tests build agents without a runner
@@ -596,22 +618,36 @@ func clamp(d, lo, hi, def time.Duration) time.Duration {
 	return d
 }
 
-func (a *Agent) claimNetbird(ctx context.Context) {
+// claimNetbird fetches the pending key of a profile exactly once and connects that
+// daemon. A box without the operator daemon says so instead of burning the key.
+func (a *Agent) claimNetbird(ctx context.Context, nb *Netbird) {
+	if !nb.Installed() {
+		if nb.Profile == wire.NetbirdProfileOperator && !a.opMissingNoted {
+			a.opMissingNoted = true
+			a.note("netbird operator daemon is not installed on this box; remote access needs image/provision-box.sh")
+		}
+		return
+	}
 	cctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	claim, ok, err := a.client.ClaimNetbird(cctx)
+	claim, ok, err := a.client.ClaimNetbird(cctx, nb.Profile)
 	cancel()
 	if err != nil {
-		a.log.Warn("netbird claim failed", "err", err)
+		a.log.Warn("netbird claim failed", "profile", nb.Profile, "err", err)
 		return
 	}
 	if !ok {
 		return
 	}
-	if err := a.netbird.Up(ctx, claim.ManagementURL, claim.SetupKey); err != nil {
-		a.note("netbird up failed: " + err.Error())
+	if err := nb.Up(ctx, claim.ManagementURL, claim.SetupKey); err != nil {
+		a.note("netbird " + nb.Profile + " up failed: " + err.Error())
 		return
 	}
-	a.log.Info("netbird connected", "management", claim.ManagementURL)
+	a.log.Info("netbird connected", "profile", nb.Profile, "management", claim.ManagementURL)
+	if nb.Profile == wire.NetbirdProfileOperator {
+		a.cfgMu.Lock()
+		a.cfg.NetbirdOperatorPending = false // claimed; the server's next config says the same
+		a.cfgMu.Unlock()
+	}
 }
 
 // ---- renewal and update ------------------------------------------------------------------

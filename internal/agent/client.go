@@ -112,9 +112,9 @@ func (c *Client) Config(ctx context.Context, etag string) (cfg wire.Config, notM
 
 // ClaimNetbird fetches the NetBird setup key exactly once. A missing key is not an
 // error the caller needs to retry: it means the operator has not set one.
-func (c *Client) ClaimNetbird(ctx context.Context) (wire.NetbirdClaimResponse, bool, error) {
+func (c *Client) ClaimNetbird(ctx context.Context, profile string) (wire.NetbirdClaimResponse, bool, error) {
 	var resp wire.NetbirdClaimResponse
-	err := c.do(ctx, http.MethodPost, "/v1/netbird/claim", nil, &resp, nil)
+	err := c.do(ctx, http.MethodPost, "/v1/netbird/claim?profile="+profile, nil, &resp, nil)
 	var se *ServerError
 	if errors.As(err, &se) && (se.Code == wire.ErrNothingPending || se.Code == wire.ErrNotAssigned) {
 		return wire.NetbirdClaimResponse{}, false, nil

@@ -28,6 +28,7 @@ import (
 	"github.com/excubra/excubra/internal/server/console"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/ingest"
+	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/server/webhook"
@@ -213,6 +214,9 @@ func run(envFile string) error {
 		su.NoteRollback(rolledBack)
 	}
 	con.SelfUpdate = su
+	rem := remote.New(st, log)
+	con.Remote = rem
+	go rem.Run(ctx, 30*time.Second)
 	if cfg.SelfUpdate == "on" {
 		go func() {
 			if err := su.Run(ctx); err != nil {

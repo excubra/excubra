@@ -167,6 +167,33 @@ EOF
   # takes effect at the next restart, until then the running daemon's socket is adjusted live
   if [ -S /var/run/netbird.sock ]; then chgrp excubra-agent /var/run/netbird.sock && chmod 0660 /var/run/netbird.sock; fi
 fi
+# A second NetBird daemon for the operator's own overlay (EX0 remote access): its own
+# config, socket, interface and port, so the box can be a peer in the customer's
+# stack and in ours at the same time. The agent connects it with the key EX0 hands
+# over; nothing is configured here.
+if command -v netbird >/dev/null; then
+  echo "== netbird operator daemon (remote access)"
+  install -d -m 0700 /var/lib/netbird-operator
+  cat > /etc/systemd/system/netbird-operator.service <<'EOF'
+[Unit]
+Description=NetBird client for the operator overlay (EX0 remote access)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/netbird service run --config /var/lib/netbird-operator/config.json --daemon-addr unix:///var/run/netbird-operator.sock --log-file console
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 20); do [ -S /var/run/netbird-operator.sock ] && chgrp excubra-agent /var/run/netbird-operator.sock && chmod 0660 /var/run/netbird-operator.sock && exit 0; sleep 0.5; done; exit 0'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now netbird-operator >/dev/null 2>&1 || true
+  if [ -S /var/run/netbird-operator.sock ]; then chgrp excubra-agent /var/run/netbird-operator.sock && chmod 0660 /var/run/netbird-operator.sock; fi
+fi
+
 if [ -n "$NETBIRD_SETUP_KEY" ] && command -v netbird >/dev/null; then
   echo "== netbird up (hand-provisioned box)"
   umask 077; printf '%s' "$NETBIRD_SETUP_KEY" > /root/.nb-setup-key

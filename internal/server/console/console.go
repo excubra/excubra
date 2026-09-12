@@ -19,6 +19,7 @@ import (
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/core"
+	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/version"
@@ -48,6 +49,7 @@ type Server struct {
 	IngestPt   int
 	Catalog    *catalog.Client        // release catalog, nil when disabled (ADR-0006)
 	SelfUpdate *selfupdate.Controller // this server's own updates, nil in tests
+	Remote     *remote.Service        // remote access through the box, nil in tests
 
 	pages    map[string]*template.Template
 	partials *template.Template
@@ -209,6 +211,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/boxes/{id}/netbird", s.auth(s.boxNetbird))
 	mux.Handle("POST /api/boxes/{id}/revoke", s.auth(s.boxRevoke))
 	mux.Handle("POST /api/boxes/{id}/delete", s.auth(s.boxDelete))
+	mux.Handle("GET /api/sites/{id}/remote", s.auth(s.apiSiteRemote))
+	mux.Handle("POST /api/sites/{id}/remote/enable", s.auth(s.remoteEnable))
+	mux.Handle("POST /api/sites/{id}/remote/disable", s.auth(s.remoteDisable))
+	mux.Handle("POST /api/sites/{id}/remote/remove", s.auth(s.remoteRemove))
+	mux.Handle("GET /api/settings/netbird", s.auth(s.apiRemoteSettings))
+	mux.Handle("POST /api/settings/netbird", s.auth(s.remoteSettingsSave))
+	mux.Handle("POST /api/settings/netbird/test", s.auth(s.remoteSettingsTest))
 	mux.Handle("GET /api/findings", s.auth(s.apiFindings))
 	mux.Handle("GET /api/devices/{id}/findings", s.auth(s.apiDeviceFindings))
 	mux.Handle("GET /api/devices/{id}/connectors", s.auth(s.apiDeviceConnectors))
