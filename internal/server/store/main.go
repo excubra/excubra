@@ -1919,6 +1919,39 @@ type Feed struct {
 	Body      []byte
 }
 
+// Vuln is a cached vulnerability lookup (ADR-0018 §8).
+type Vuln struct {
+	Key       string
+	FetchedAt time.Time
+	Body      []byte
+}
+
+// SetVuln stores a lookup's result.
+func (s *Store) SetVuln(ctx context.Context, key string, body []byte, at time.Time) error {
+	_, err := s.main.ExecContext(ctx, `INSERT INTO vulns (key, fetched_at, body) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET fetched_at = excluded.fetched_at, body = excluded.body`, key, ts(at), string(body))
+	return wrap("set vuln", err)
+}
+
+// Vulns returns every cached lookup.
+func (s *Store) Vulns(ctx context.Context) ([]Vuln, error) {
+	rows, err := s.main.QueryContext(ctx, `SELECT key, fetched_at, body FROM vulns ORDER BY key`)
+	if err != nil {
+		return nil, wrap("vulns", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Vuln
+	for rows.Next() {
+		var v Vuln
+		var at, body string
+		if err := rows.Scan(&v.Key, &at, &body); err != nil {
+			return nil, wrap("vulns", err)
+		}
+		v.FetchedAt, v.Body = parseTS(at), []byte(body)
+		out = append(out, v)
+	}
+	return out, wrap("vulns", rows.Err())
+}
+
 // SetFeed stores a product's data.
 func (s *Store) SetFeed(ctx context.Context, slug string, body []byte, at time.Time) error {
 	_, err := s.main.ExecContext(ctx, `INSERT INTO feeds (slug, fetched_at, body) VALUES (?, ?, ?) ON CONFLICT (slug) DO UPDATE SET fetched_at = excluded.fetched_at, body = excluded.body`, slug, ts(at), string(body))

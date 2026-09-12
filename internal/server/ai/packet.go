@@ -234,6 +234,8 @@ func source(connectorID string) string {
 		return "ai"
 	case "signal":
 		return "live_detection"
+	case "vuln":
+		return "cve"
 	}
 	return "connector"
 }

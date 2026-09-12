@@ -1,6 +1,6 @@
 # ADR-0018: The continuous service scan — inside from the box, outside from an outpost
 
-Status: accepted · Date: 2026-09-12 · Replaces the "no port scan" rule of ADR-0007 (decision E20) · §7 live detection added 2026-09-12 (decision E22)
+Status: accepted · Date: 2026-09-12 · Replaces the "no port scan" rule of ADR-0007 (decision E20) · §7 live detection and §8 CVE matching added 2026-09-12 (decision E22)
 
 ## Context
 
@@ -95,6 +95,25 @@ wants. The tool is now the product: open, announced, with the customer's consent
    share — the decoys are the answer to that, because a scanner that reaches the
    subnet reaches the box.
 
+8. **Known vulnerabilities per version** (`internal/server/vuln`). Every version
+   the scan or a connector identifies is matched against the public databases:
+   NVD by CPE for the upstream view (OpenSSH, nginx, Apache httpd, mail and FTP
+   servers, databases, FortiOS, RouterOS — a curated map; Windows and IIS are
+   not judged this way, their version string never changes with a patch), OSV for
+   the distribution's package where the banner names it (`Debian-2+deb12u9`,
+   `Ubuntu-3ubuntu13.19` → the package version in `Debian:12` or
+   `Ubuntu:24.04:LTS`): OSV knows which fixes were backported, so only what the
+   distribution still lists as open survives, and the fixing package version
+   comes with it. CISA's KEV list marks what is exploited in the wild. One
+   finding per service (`vuln.known`, source `vuln`): urgent when a CVE is
+   exploited or scored 7 or more, otherwise medium, low below 4; the detail names
+   the three that matter and the fix. Results are cached in `vulns`, fetched
+   only for versions a customer actually runs, refreshed daily, paused a quarter
+   hour after a failure; the request names a product and a version, never a
+   customer. NVD allows five requests per half minute without a key and fifty
+   with one (`vuln.nvd_key`, console → Einstellungen). `EXCUBRA_VULNS=off`
+   switches it off.
+
 ## Rejected
 
 - **Syslog as the first step**: needs a receiver port and device settings per
@@ -107,6 +126,11 @@ wants. The tool is now the product: open, announced, with the customer's consent
   service to keep safe on a box that must never be the way in.
 - **A promiscuous tap of the whole LAN**: sees more on a hub, nothing more on a
   switch, and turns the box into a sniffer of customer traffic.
+- **Judging distribution packages by upstream CVEs alone**: Debian's 9.2p1 with
+  the regreSSHion fix backported would be blamed for it forever; that is the
+  false positive every scanner is known for, and OSV answers it exactly.
+- **Mirroring NVD**: gigabytes for a few dozen product versions; the cache holds
+  what the customers run and nothing else.
 - **Exploit checks or credential guessing on the box**: the box must never do harm
   (ADR-0007); it tells, it does not try.
 
