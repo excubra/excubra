@@ -471,10 +471,14 @@ func (s *Sentinel) Record(sigs []wire.Signal) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, sg := range sigs {
-		if sg.Kind == "" {
+		switch sg.Kind {
+		case "":
 			continue
+		case wire.SignalDNSDGA:
+			s.recordScan(sg, now) // its detail is a sample of names that changes as it grows
+		default:
+			s.record(sg, additive(sg.Kind), now)
 		}
-		s.record(sg, additive(sg.Kind), now)
 	}
 }
 
