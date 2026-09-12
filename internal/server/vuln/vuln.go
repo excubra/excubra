@@ -362,6 +362,9 @@ func (s *Service) fetch(ctx context.Context, q Query) (*Result, error) {
 		if cves[i].Exploited != cves[j].Exploited {
 			return cves[i].Exploited
 		}
+		if cves[i].Untriaged != cves[j].Untriaged {
+			return !cves[i].Untriaged // what the distribution judged comes before what it has not looked at
+		}
 		if cves[i].Score != cves[j].Score {
 			return cves[i].Score > cves[j].Score
 		}
@@ -760,6 +763,8 @@ func finding(sv rules.Service, q Query, r *Result) rules.Finding {
 	if sv.Port > 0 {
 		key = fmt.Sprintf("%s/%d", firstNonEmpty(sv.Proto, "tcp"), sv.Port)
 	}
+	// the severity comes from what the distribution judged (and from anything
+	// exploited); what it has not looked at yet counts but does not alarm
 	var exploited []string
 	maxScore, scored, untriaged := 0.0, false, 0
 	for _, c := range r.CVEs {
@@ -768,6 +773,7 @@ func finding(sv rules.Service, q Query, r *Result) rules.Finding {
 		}
 		if c.Untriaged {
 			untriaged++
+			continue
 		}
 		if c.Score > 0 {
 			scored = true
@@ -776,6 +782,7 @@ func finding(sv rules.Service, q Query, r *Result) rules.Finding {
 			}
 		}
 	}
+	judged := len(r.CVEs) - untriaged
 	sev := rules.Low
 	switch {
 	case len(exploited) > 0 || maxScore >= 7:
@@ -783,21 +790,22 @@ func finding(sv rules.Service, q Query, r *Result) rules.Finding {
 	case maxScore >= 4 || !scored:
 		sev = rules.Medium
 	}
-	allUntriaged := untriaged == len(r.CVEs)
-	if allUntriaged && len(exploited) == 0 && sev == rules.High {
-		sev = rules.Medium // reported, not judged, nothing to install: watch, do not panic
-	}
 	label := q.Product + " " + q.Version
-	title := fmt.Sprintf("%s: %s", label, count(len(r.CVEs), "bekannte Schwachstelle", "bekannte Schwachstellen"))
-	if allUntriaged {
+	var title string
+	switch {
+	case judged == 0:
 		title = fmt.Sprintf("%s: %s, Fix der Distribution steht aus", label, count(len(r.CVEs), "gemeldete Schwachstelle", "gemeldete Schwachstellen"))
+	case untriaged > 0:
+		title = fmt.Sprintf("%s: %s (%d weitere ungeprüft)", label, count(judged, "bekannte Schwachstelle", "bekannte Schwachstellen"), untriaged)
+	default:
+		title = fmt.Sprintf("%s: %s", label, count(len(r.CVEs), "bekannte Schwachstelle", "bekannte Schwachstellen"))
 	}
 	switch {
 	case len(exploited) == 1:
 		title += ", eine wird aktiv ausgenutzt"
 	case len(exploited) > 1:
 		title += fmt.Sprintf(", %d werden aktiv ausgenutzt", len(exploited))
-	case maxScore > 0 && !allUntriaged:
+	case maxScore > 0:
 		title += fmt.Sprintf(", höchste CVSS %.1f", maxScore)
 	}
 	var b strings.Builder
