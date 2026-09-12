@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"github.com/excubra/excubra/internal/id"
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/seal"
+	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/remote"
@@ -284,6 +286,17 @@ func tenantCmd(args []string) error {
 		_ = st.Audit(ctx, time.Now(), "cli", "tenant.add", tid, rest[2])
 		fmt.Println(tid)
 		return nil
+	case len(rest) == 3 && rest[0] == "ai" && (rest[2] == store.AIScopeOff || rest[2] == store.AIScopeFacts):
+		// what the AI may see for this tenant (ADR-0019)
+		if _, err := st.Tenant(ctx, rest[1]); err != nil {
+			return err
+		}
+		if err := st.SetTenantAI(ctx, rest[1], rest[2]); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "tenant.ai", rest[1], rest[2])
+		fmt.Printf("ai scope of %s: %s\n", rest[1], rest[2])
+		return nil
 	case len(rest) == 1 && rest[0] == "list":
 		ts, err := st.Tenants(ctx)
 		if err != nil {
@@ -294,7 +307,7 @@ func tenantCmd(args []string) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("usage: excubra server tenant add <slug> <name> | list")
+	return fmt.Errorf("usage: excubra server tenant add <slug> <name> | list | ai <tenant_id> off|facts")
 }
 
 func siteCmd(args []string) error {
@@ -864,4 +877,46 @@ func remoteCmd(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("usage: excubra server remote test | status | peers | reconcile | enable <site_id> <cidr> | disable <site_id>")
+}
+
+// aiCmd runs an assessment from the shell, or checks the provider.
+func aiCmd(args []string) error {
+	fs := flag.NewFlagSet("excubra server ai", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "server env file")
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
+		return err
+	}
+	st, cfg, err := cliStore(*envFile)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	loc, _ := time.LoadLocation(cfg.Timezone)
+	svc := ai.New(st, nil, loc)
+	switch {
+	case len(rest) == 1 && rest[0] == "test":
+		reply, err := svc.Test(ctx)
+		if err != nil {
+			return err
+		}
+		set := svc.Settings(ctx)
+		fmt.Printf("%s %s answers: %s\n", set.Provider, set.Model, reply)
+		return nil
+	case len(rest) == 2 && rest[0] == "assess":
+		brief, err := svc.Assess(ctx, rest[1], "cli")
+		if err != nil {
+			return err
+		}
+		var r ai.Result
+		_ = json.Unmarshal(brief.Body, &r)
+		fmt.Printf("risk=%s model=%s sent=%dB got=%dB in %dms\n%s\n", brief.Risk, brief.Model, brief.PromptBytes, brief.ResponseBytes, brief.DurationMS, brief.Summary)
+		for i, p := range r.Priorities {
+			fmt.Printf("%d. [%s] %s — %s\n", i+1, p.Severity, p.Title, p.Action)
+		}
+		fmt.Printf("%d findings from the model\n", len(r.Findings))
+		return nil
+	}
+	return fmt.Errorf("usage: excubra server ai test | assess <site_id>")
 }

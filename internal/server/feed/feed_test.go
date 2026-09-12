@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,5 +91,19 @@ func TestFindingsFromTheCacheAndTheFetchLoop(t *testing.T) {
 	}
 	if Slug("Apache") != "apache-http-server" || Slug("FortiGate") != "fortios" || Slug("lighttpd") != "" {
 		t.Fatal("slugs")
+	}
+}
+
+func TestIISVersionNamesTheWindowsServer(t *testing.T) {
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	s := New(nil, nil)
+	s.Now = func() time.Time { return now }
+	s.Put(&Product{Slug: "windows-server", FetchedAt: now, Cycles: []Cycle{{Cycle: "2025", Latest: "10.0.26100", EOL: "2034-10-10"}, {Cycle: "2012", Latest: "6.2.9200", EOL: "2023-10-10"}}})
+	got := s.Findings([]rules.Service{{Port: 80, Proto: "tcp", Product: "Microsoft-IIS", Version: "8.0"}, {Port: 443, Proto: "tcp", Product: "Microsoft-IIS", Version: "10.0"}}, now)
+	if len(got) != 1 || got[0].Rule != "version.eol" || !strings.Contains(got[0].Title, "Windows Server 2012") {
+		t.Fatalf("iis: %+v", got)
+	}
+	if slug, v := derive("nginx", "1.24.0"); slug != "nginx" || v != "1.24.0" {
+		t.Fatal("derive passes other products through")
 	}
 }

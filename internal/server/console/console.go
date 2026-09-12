@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/remote"
@@ -50,6 +51,7 @@ type Server struct {
 	Catalog    *catalog.Client        // release catalog, nil when disabled (ADR-0006)
 	SelfUpdate *selfupdate.Controller // this server's own updates, nil in tests
 	Remote     *remote.Service        // remote access through the box, nil in tests
+	AI         *ai.Service            // assessments (ADR-0019), nil in tests
 
 	pages    map[string]*template.Template
 	partials *template.Template
@@ -220,6 +222,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/settings/netbird/test", s.auth(s.remoteSettingsTest))
 	mux.Handle("GET /api/findings", s.auth(s.apiFindings))
 	mux.Handle("GET /api/devices/{id}/findings", s.auth(s.apiDeviceFindings))
+	mux.Handle("GET /api/settings/ai", s.auth(s.apiAISettings))
+	mux.Handle("POST /api/settings/ai", s.auth(s.aiSettingsSave))
+	mux.Handle("POST /api/settings/ai/test", s.auth(s.aiSettingsTest))
+	mux.Handle("GET /api/sites/{id}/ai", s.auth(s.apiSiteAI))
+	mux.Handle("POST /api/sites/{id}/ai/assess", s.auth(s.siteAIAssess))
+	mux.Handle("POST /api/tenants/{id}/ai", s.auth(s.tenantAISet))
 	mux.Handle("GET /api/sites/{id}/scan", s.auth(s.apiSiteScan))
 	mux.Handle("POST /api/sites/{id}/scan", s.auth(s.siteScanSet))
 	mux.Handle("GET /api/devices/{id}/connectors", s.auth(s.apiDeviceConnectors))

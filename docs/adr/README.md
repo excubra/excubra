@@ -32,3 +32,4 @@ Rules:
 | [0016](0016-remote-access-through-the-box.md) | Remote access through the box: the customer LAN in the operator's overlay |
 | [0017](0017-zero-touch-box.md) | A box needs nobody after it is plugged in: site-bound keys, self-reported LAN, automatic remote access |
 | [0018](0018-service-scan.md) | The continuous service scan: inside from the box, outside from an outpost (replaces the no-port-scan rule) |
+| [0019](0019-ai-assessment.md) | The AI reads and proposes, a person decides: exchangeable provider, per-tenant scope, audited |

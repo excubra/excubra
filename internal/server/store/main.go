@@ -31,14 +31,14 @@ func (s *Store) CreateTenant(ctx context.Context, t Tenant) error {
 func (s *Store) Tenant(ctx context.Context, tenantID string) (Tenant, error) {
 	var t Tenant
 	var created string
-	err := s.main.QueryRowContext(ctx, `SELECT id, name, created_at FROM tenants WHERE id = ?`, tenantID).Scan(&t.ID, &t.Name, &created)
+	err := s.main.QueryRowContext(ctx, `SELECT id, name, created_at, ai_scope FROM tenants WHERE id = ?`, tenantID).Scan(&t.ID, &t.Name, &created, &t.AIScope)
 	t.CreatedAt = parseTS(created)
 	return t, wrap("tenant", err)
 }
 
 // Tenants returns all tenants by name.
 func (s *Store) Tenants(ctx context.Context) ([]Tenant, error) {
-	rows, err := s.main.QueryContext(ctx, `SELECT id, name, created_at FROM tenants ORDER BY name`)
+	rows, err := s.main.QueryContext(ctx, `SELECT id, name, created_at, ai_scope FROM tenants ORDER BY name`)
 	if err != nil {
 		return nil, wrap("tenants", err)
 	}
@@ -47,7 +47,7 @@ func (s *Store) Tenants(ctx context.Context) ([]Tenant, error) {
 	for rows.Next() {
 		var t Tenant
 		var created string
-		if err := rows.Scan(&t.ID, &t.Name, &created); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &created, &t.AIScope); err != nil {
 			return nil, wrap("tenants", err)
 		}
 		t.CreatedAt = parseTS(created)
@@ -1903,4 +1903,61 @@ func (s *Store) Feeds(ctx context.Context) ([]Feed, error) {
 // versions when the feed changed.
 func (s *Store) OpenServices(ctx context.Context) ([]Service, error) {
 	return s.services(ctx, `SELECT `+serviceCols+` FROM services WHERE gone_at IS NULL ORDER BY device_id, port`)
+}
+
+// ---- AI (ADR-0019) ------------------------------------------------------------------------
+
+// SetTenantAI sets what the AI may see for a tenant.
+func (s *Store) SetTenantAI(ctx context.Context, tenantID, scope string) error {
+	if scope != AIScopeOff && scope != AIScopeFacts {
+		return errors.New("store: ai scope must be off or facts")
+	}
+	return s.exec1(ctx, "set tenant ai", `UPDATE tenants SET ai_scope = ? WHERE id = ?`, scope, tenantID)
+}
+
+// SetAIBrief stores an assessment.
+func (s *Store) SetAIBrief(ctx context.Context, b AIBrief) error {
+	if len(b.Body) == 0 {
+		b.Body = json.RawMessage("{}")
+	}
+	_, err := s.main.ExecContext(ctx, `INSERT INTO ai_briefs (id, site_id, tenant_id, at, provider, model, risk, summary, body, prompt_bytes, response_bytes, duration_ms, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		b.ID, b.SiteID, b.TenantID, ts(b.At), b.Provider, b.Model, b.Risk, b.Summary, string(b.Body), b.PromptBytes, b.ResponseBytes, b.DurationMS, b.RequestedBy)
+	return wrap("set ai brief", err)
+}
+
+const aiBriefCols = `id, site_id, tenant_id, at, provider, model, risk, summary, body, prompt_bytes, response_bytes, duration_ms, requested_by`
+
+func scanAIBrief(sc interface{ Scan(...any) error }) (AIBrief, error) {
+	var b AIBrief
+	var at, body string
+	err := sc.Scan(&b.ID, &b.SiteID, &b.TenantID, &at, &b.Provider, &b.Model, &b.Risk, &b.Summary, &body, &b.PromptBytes, &b.ResponseBytes, &b.DurationMS, &b.RequestedBy)
+	b.At, b.Body = parseTS(at), json.RawMessage(body)
+	return b, err
+}
+
+// AIBriefs lists a site's assessments, newest first.
+func (s *Store) AIBriefs(ctx context.Context, siteID string, limit int) ([]AIBrief, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.main.QueryContext(ctx, `SELECT `+aiBriefCols+` FROM ai_briefs WHERE site_id = ? ORDER BY at DESC LIMIT ?`, siteID, limit)
+	if err != nil {
+		return nil, wrap("ai briefs", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []AIBrief
+	for rows.Next() {
+		b, err := scanAIBrief(rows)
+		if err != nil {
+			return nil, wrap("ai briefs", err)
+		}
+		out = append(out, b)
+	}
+	return out, wrap("ai briefs", rows.Err())
+}
+
+// PruneAIBriefs keeps the newest n briefs per site.
+func (s *Store) PruneAIBriefs(ctx context.Context, siteID string, keep int) error {
+	_, err := s.main.ExecContext(ctx, `DELETE FROM ai_briefs WHERE site_id = ? AND id NOT IN (SELECT id FROM ai_briefs WHERE site_id = ? ORDER BY at DESC LIMIT ?)`, siteID, siteID, keep)
+	return wrap("prune ai briefs", err)
 }

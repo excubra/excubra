@@ -23,6 +23,7 @@ import (
 	"github.com/excubra/excubra/internal/agent/update"
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/console"
@@ -215,6 +216,9 @@ func run(envFile string) error {
 		su.NoteRollback(rolledBack)
 	}
 	con.SelfUpdate = su
+	aiSvc := ai.New(st, log, loc)
+	con.AI = aiSvc
+	go aiSvc.Run(ctx)
 	rem := remote.New(st, log)
 	con.Remote = rem
 	go rem.Run(ctx, 30*time.Second)

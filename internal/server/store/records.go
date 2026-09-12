@@ -15,6 +15,30 @@ type Tenant struct {
 	ID        string
 	Name      string
 	CreatedAt time.Time
+	AIScope   string // what the AI may see for this tenant: off | facts (ADR-0019)
+}
+
+// AI scopes.
+const (
+	AIScopeOff   = "off"
+	AIScopeFacts = "facts" // inventory, services, findings, events, connector facts — no raw logs
+)
+
+// AIBrief is one assessment the AI wrote for a site.
+type AIBrief struct {
+	ID            string
+	SiteID        string
+	TenantID      string
+	At            time.Time
+	Provider      string
+	Model         string
+	Risk          string // hoch | mittel | niedrig
+	Summary       string
+	Body          json.RawMessage // the model's structured answer
+	PromptBytes   int
+	ResponseBytes int
+	DurationMS    int
+	RequestedBy   string
 }
 
 // Site is a location of a tenant; boxes and hosts belong to a site.
