@@ -73,15 +73,17 @@ func (s *Store) CreateSite(ctx context.Context, st Site) error {
 func (s *Store) Site(ctx context.Context, siteID string) (Site, error) {
 	var st Site
 	var created string
-	var scan, canary int
-	err := s.main.QueryRowContext(ctx, `SELECT id, tenant_id, name, created_at, scan_enabled, canary_enabled FROM sites WHERE id = ?`, siteID).Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan, &canary)
-	st.CreatedAt, st.ScanEnabled, st.CanaryEnabled = parseTS(created), scan != 0, canary != 0
+	var scan, canary, dnsOn, dnsBlock int
+	var ups string
+	err := s.main.QueryRowContext(ctx, `SELECT id, tenant_id, name, created_at, scan_enabled, canary_enabled, dns_enabled, dns_block, dns_upstreams FROM sites WHERE id = ?`, siteID).Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan, &canary, &dnsOn, &dnsBlock, &ups)
+	st.CreatedAt, st.ScanEnabled, st.CanaryEnabled, st.DNSEnabled, st.DNSBlock = parseTS(created), scan != 0, canary != 0, dnsOn != 0, dnsBlock != 0
+	_ = json.Unmarshal([]byte(ups), &st.DNSUpstreams)
 	return st, wrap("site", err)
 }
 
 // Sites returns all sites, or those of one tenant when tenantID is not empty.
 func (s *Store) Sites(ctx context.Context, tenantID string) ([]Site, error) {
-	q := `SELECT id, tenant_id, name, created_at, scan_enabled, canary_enabled FROM sites`
+	q := `SELECT id, tenant_id, name, created_at, scan_enabled, canary_enabled, dns_enabled, dns_block, dns_upstreams FROM sites`
 	var args []any
 	if tenantID != "" {
 		q += ` WHERE tenant_id = ?`
@@ -96,11 +98,13 @@ func (s *Store) Sites(ctx context.Context, tenantID string) ([]Site, error) {
 	for rows.Next() {
 		var st Site
 		var created string
-		var scan, canary int
-		if err := rows.Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan, &canary); err != nil {
+		var scan, canary, dnsOn, dnsBlock int
+		var ups string
+		if err := rows.Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan, &canary, &dnsOn, &dnsBlock, &ups); err != nil {
 			return nil, wrap("sites", err)
 		}
-		st.CreatedAt, st.ScanEnabled, st.CanaryEnabled = parseTS(created), scan != 0, canary != 0
+		st.CreatedAt, st.ScanEnabled, st.CanaryEnabled, st.DNSEnabled, st.DNSBlock = parseTS(created), scan != 0, canary != 0, dnsOn != 0, dnsBlock != 0
+		_ = json.Unmarshal([]byte(ups), &st.DNSUpstreams)
 		out = append(out, st)
 	}
 	return out, wrap("sites", rows.Err())
@@ -114,16 +118,22 @@ func (s *Store) RenameSite(ctx context.Context, siteID, name string) error {
 // ---- boxes -----------------------------------------------------------------------
 
 const boxCols = `id, site_id, name, hw_id, agent_version, os, arch, cert_serial, cert_not_after, channel, discovery_mode, discovery_subnets,
-	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip, lan, public_ip, role, canary`
+	netbird_status, netbird_ip, disk_total_bytes, disk_free_bytes, uptime_s, last_seen, enrolled_at, revoked_at, seal_key, netbird_op_status, netbird_op_ip, lan, public_ip, role, canary, dns, lan_ip`
 
 func scanBox(sc interface{ Scan(...any) error }) (Box, error) {
 	var b Box
 	var site, revoked sql.NullString
-	var notAfter, enrolled, subnets, lastSeen, lan, canary string
+	var notAfter, enrolled, subnets, lastSeen, lan, canary, dns string
 	err := sc.Scan(&b.ID, &site, &b.Name, &b.HWID, &b.AgentVersion, &b.OS, &b.Arch, &b.CertSerial, &notAfter, &b.Channel, &b.DiscoveryMode, &subnets,
-		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP, &lan, &b.PublicIP, &b.Role, &canary)
+		&b.NetbirdStatus, &b.NetbirdIP, &b.DiskTotalBytes, &b.DiskFreeBytes, &b.UptimeS, &lastSeen, &enrolled, &revoked, &b.SealKey, &b.NetbirdOpStatus, &b.NetbirdOpIP, &lan, &b.PublicIP, &b.Role, &canary, &dns, &b.LANIP)
 	_ = json.Unmarshal([]byte(lan), &b.LAN)
 	_ = json.Unmarshal([]byte(canary), &b.Canary)
+	if dns != "" {
+		var r wire.DNSReport
+		if json.Unmarshal([]byte(dns), &r) == nil {
+			b.DNS = &r
+		}
+	}
 	b.SiteID = site.String
 	b.CertNotAfter = parseTS(notAfter)
 	b.LastSeen = parseTS(lastSeen)
@@ -146,7 +156,7 @@ func (s *Store) CreateBox(ctx context.Context, b Box) error {
 		b.Role = RoleBox
 	}
 	lanJSON, _ := json.Marshal(nonNil(b.LAN))
-	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
+	_, err := s.main.ExecContext(ctx, `INSERT INTO boxes (`+boxCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '', '')`,
 		b.ID, nullIfEmpty(b.SiteID), b.Name, b.HWID, b.AgentVersion, b.OS, b.Arch, b.CertSerial, ts(b.CertNotAfter), b.Channel, b.DiscoveryMode, string(subnets),
 		b.NetbirdStatus, b.NetbirdIP, b.DiskTotalBytes, b.DiskFreeBytes, b.UptimeS, ts(b.LastSeen), ts(b.EnrolledAt), tsp(b.RevokedAt), b.SealKey, b.NetbirdOpStatus, b.NetbirdOpIP, string(lanJSON), b.PublicIP, b.Role)
 	return wrap("create box", err)
@@ -164,9 +174,15 @@ func (s *Store) UpdateBoxHeartbeat(ctx context.Context, boxID string, hb wire.He
 		canary = []int{}
 	}
 	canaryJSON, _ := json.Marshal(canary)
+	if hb.DNS != nil {
+		dnsJSON, _ := json.Marshal(hb.DNS)
+		return s.exec1(ctx, "update box heartbeat", `UPDATE boxes SET agent_version = ?, os = ?, arch = ?, netbird_status = ?, netbird_ip = ?,
+			disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ?, canary = ?, lan_ip = ?, dns = ? WHERE id = ?`,
+			hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), string(canaryJSON), hb.Box.LANIP, string(dnsJSON), boxID)
+	}
 	return s.exec1(ctx, "update box heartbeat", `UPDATE boxes SET agent_version = ?, os = ?, arch = ?, netbird_status = ?, netbird_ip = ?,
-		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ?, canary = ? WHERE id = ?`,
-		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), string(canaryJSON), boxID)
+		disk_total_bytes = ?, disk_free_bytes = ?, uptime_s = ?, last_seen = ?, netbird_op_status = ?, netbird_op_ip = ?, lan = ?, canary = ?, lan_ip = ? WHERE id = ?`,
+		hb.Agent.Version, hb.Agent.OS, hb.Agent.Arch, hb.Netbird.Status, hb.Netbird.IP, hb.Box.DiskTotalBytes, hb.Box.DiskFreeBytes, hb.Agent.UptimeS, ts(at), opStatus, opIP, string(lanJSON), string(canaryJSON), hb.Box.LANIP, boxID)
 }
 
 // SetBoxDiscovery sets the discovery mode and the additional subnets to sweep.
@@ -1772,6 +1788,79 @@ func (s *Store) SetSiteScan(ctx context.Context, siteID string, enabled bool) er
 // SetSiteCanary switches a site's decoy ports and live signals (ADR-0018 §7).
 func (s *Store) SetSiteCanary(ctx context.Context, siteID string, enabled bool) error {
 	return s.exec1(ctx, "set site canary", `UPDATE sites SET canary_enabled = ? WHERE id = ?`, boolInt(enabled), siteID)
+}
+
+// SetSiteDNS switches a site's DNS sensor (ADR-0020).
+func (s *Store) SetSiteDNS(ctx context.Context, siteID string, enabled, block bool, upstreams []string) error {
+	js, _ := json.Marshal(nonNil(upstreams))
+	return s.exec1(ctx, "set site dns", `UPDATE sites SET dns_enabled = ?, dns_block = ?, dns_upstreams = ? WHERE id = ?`, boolInt(enabled), boolInt(block), string(js), siteID)
+}
+
+// SetBlocklist replaces the DNS blocklist.
+func (s *Store) SetBlocklist(ctx context.Context, rows []BlockedDomain, at time.Time) error {
+	tx, err := s.main.BeginTx(ctx, nil)
+	if err != nil {
+		return wrap("set blocklist", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM blocklist`); err != nil {
+		return wrap("set blocklist", err)
+	}
+	for _, r := range rows {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO blocklist (domain, source, added) VALUES (?, ?, ?)`, r.Domain, r.Source, ts(at)); err != nil {
+			return wrap("set blocklist", err)
+		}
+	}
+	return wrap("set blocklist", tx.Commit())
+}
+
+// Blocklist returns the stored list and when it was fetched.
+func (s *Store) Blocklist(ctx context.Context) ([]BlockedDomain, time.Time, error) {
+	rows, err := s.main.QueryContext(ctx, `SELECT domain, source, added FROM blocklist ORDER BY domain`)
+	if err != nil {
+		return nil, time.Time{}, wrap("blocklist", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []BlockedDomain
+	var at time.Time
+	for rows.Next() {
+		var d BlockedDomain
+		var added string
+		if err := rows.Scan(&d.Domain, &d.Source, &added); err != nil {
+			return nil, time.Time{}, wrap("blocklist", err)
+		}
+		if t := parseTS(added); t.After(at) {
+			at = t
+		}
+		out = append(out, d)
+	}
+	return out, at, wrap("blocklist", rows.Err())
+}
+
+// AddDNSDay adds a report's counters to the site's totals of the day.
+func (s *Store) AddDNSDay(ctx context.Context, siteID string, day time.Time, r wire.DNSReport) error {
+	_, err := s.main.ExecContext(ctx, `INSERT INTO dns_days (site_id, day, queries, blocked, nxdomain, failed) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (site_id, day) DO UPDATE SET queries = queries + excluded.queries, blocked = blocked + excluded.blocked, nxdomain = nxdomain + excluded.nxdomain, failed = failed + excluded.failed`,
+		siteID, day.Format("2006-01-02"), r.Queries, r.Blocked, r.NXDomain, r.Failed)
+	return wrap("add dns day", err)
+}
+
+// DNSDays returns a site's daily totals, newest first, at most n.
+func (s *Store) DNSDays(ctx context.Context, siteID string, n int) ([]DNSDay, error) {
+	rows, err := s.main.QueryContext(ctx, `SELECT site_id, day, queries, blocked, nxdomain, failed FROM dns_days WHERE site_id = ? ORDER BY day DESC LIMIT ?`, siteID, n)
+	if err != nil {
+		return nil, wrap("dns days", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []DNSDay
+	for rows.Next() {
+		var d DNSDay
+		if err := rows.Scan(&d.SiteID, &d.Day, &d.Queries, &d.Blocked, &d.NXDomain, &d.Failed); err != nil {
+			return nil, wrap("dns days", err)
+		}
+		out = append(out, d)
+	}
+	return out, wrap("dns days", rows.Err())
 }
 
 // OpenFinding returns the open finding of a device under rule and key, or ErrNotFound.

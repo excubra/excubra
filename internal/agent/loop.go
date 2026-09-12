@@ -16,6 +16,7 @@ import (
 	"github.com/excubra/excubra/internal/agent/checks"
 	"github.com/excubra/excubra/internal/agent/connect"
 	"github.com/excubra/excubra/internal/agent/discovery"
+	"github.com/excubra/excubra/internal/agent/dnswatch"
 	"github.com/excubra/excubra/internal/agent/scan"
 	"github.com/excubra/excubra/internal/agent/sentinel"
 	"github.com/excubra/excubra/internal/agent/update"
@@ -53,6 +54,7 @@ type Agent struct {
 	conn      *connect.Runner
 	scan      *scan.Scanner      // the service scan of the LAN (ADR-0018)
 	sent      *sentinel.Sentinel // decoy ports and live signals (ADR-0018 §7)
+	dns       *dnswatch.Watch    // the DNS sensor (ADR-0020)
 	sealKey   *ecdh.PrivateKey
 
 	cfgMu        sync.RWMutex
@@ -181,6 +183,10 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 	a.sent = sentinel.New(log)
 	a.disc.ARP = a.sent.ObserveARP
 	a.conn.OnSignals = a.sent.Record
+	a.dns = dnswatch.New(log, st.Dir)
+	a.dns.Fetch = client.Blocklist
+	a.dns.Signals = a.sent.Record
+	a.dns.Note = a.note
 	a.hbInterval, a.checkEvery, a.configMaxAge = 60*time.Second, 30*time.Second, 15*time.Minute
 	a.doneTasks, a.taskResults = st.LoadTasks()
 	for _, id := range a.doneTasks {
@@ -199,6 +205,7 @@ func (a *Agent) run(ctx context.Context) error {
 	go a.conn.Run(ctx)
 	go a.scan.Run(ctx)
 	go a.sent.Run(ctx)
+	go a.dns.Run(ctx)
 	go a.checkLoop(ctx)
 
 	hb := time.NewTimer(5 * time.Second)
@@ -366,6 +373,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	}
 	box := boxInfo(a.st.Dir)
 	box.LAN = lanPrefixes()
+	box.LANIP = lanAddress()
 	box.Canary = a.sent.Armed()
 	hb := wire.Heartbeat{
 		SentAt:          a.now().UTC(),
@@ -383,6 +391,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		Connectors:      conns,
 		Scan:            a.scan.Drain(),
 		Signals:         a.sent.Drain(),
+		DNS:             a.dns.Drain(),
 	}
 	hb.Box.ClockOffsetMS = a.clockOffset
 
@@ -394,6 +403,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		a.disc.Table.Nack()
 		a.scan.Nack()
 		a.sent.Nack()
+		a.dns.Nack()
 		if a.conn != nil {
 			a.conn.Nack()
 		}
@@ -421,6 +431,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	a.disc.Table.Ack()
 	a.scan.Ack()
 	a.sent.Ack()
+	a.dns.Ack()
 	if a.conn != nil {
 		a.conn.Ack()
 	}
@@ -496,6 +507,9 @@ func (a *Agent) applyConfig(cfg wire.Config) {
 	ccfg, cerrs := sentinel.ParseConfig(cfg.Canary)
 	errs = append(errs, cerrs...)
 	a.sent.Apply(ccfg)
+	dcfg2, derrs2 := dnswatch.ParseConfig(cfg.DNS)
+	errs = append(errs, derrs2...)
+	a.dns.Apply(dcfg2)
 
 	a.cfgMu.Lock()
 	a.cfg = cfg

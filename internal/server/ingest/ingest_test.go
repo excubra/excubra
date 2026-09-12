@@ -17,6 +17,7 @@ import (
 
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/server/blocklist"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/feed"
 	"github.com/excubra/excubra/internal/server/ingest"
@@ -723,6 +724,104 @@ func TestConnectorVersionsAreReassessed(t *testing.T) {
 	fd, err := f.st.OpenFinding(ctx, fw.ID, "vuln.known", "connector")
 	if err != nil || fd.Severity != "medium" || !strings.Contains(fd.Title, "FortiOS 7.4.12") {
 		t.Fatalf("firmware finding: %+v %v", fd, err)
+	}
+}
+
+// The DNS sensor (ADR-0020): off by default; switched on, the config carries the
+// switches and the list version, the box fetches the list with an ETag, its
+// report lands on the box row and in the day's totals, and what it saw becomes
+// findings on the asking device.
+func TestDNSSensorConfigListAndReport(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	boxID, boxClient, _ := f.enroll(f.key.String())
+	must(t, f.eng.AssignBox(ctx, boxID, "site_a", "test"))
+	bl := blocklist.New(nil, nil)
+	bl.Now = func() time.Time { return f.now }
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/hosts" {
+			_, _ = w.Write([]byte("127.0.0.1 evil.test\n"))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	bl.URLhaus, bl.ThreatFox = srv.URL+"/hosts", ""
+	f.eng.Blocklist = bl
+	beat := func(hb wire.Heartbeat) {
+		t.Helper()
+		f.now = f.now.Add(60 * time.Second)
+		hb.SentAt, hb.Agent = f.now, wire.AgentInfo{Version: "0.7.0", OS: "linux", Arch: "amd64"}
+		if status, body := f.do(boxClient, "POST", "/v1/heartbeat", hb, nil); status != 200 {
+			t.Fatalf("heartbeat: %d %s", status, body)
+		}
+	}
+	_, body := f.do(boxClient, "GET", "/v1/config", nil, nil)
+	var cfg wire.Config
+	_ = json.Unmarshal(body, &cfg)
+	if cfg.DNS.Enabled {
+		t.Fatal("dns sensor on without anyone switching it on")
+	}
+	if status, _ := f.do(boxClient, "GET", "/v1/blocklist", nil, nil); status != 204 {
+		t.Fatalf("empty list must be 204, got %d", status)
+	}
+	if _, err := bl.Refresh(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	must(t, f.eng.SetSiteDNS(ctx, "site_a", true, true, []string{"9.9.9.9:53"}, "test"))
+	_, body = f.do(boxClient, "GET", "/v1/config", nil, nil)
+	_ = json.Unmarshal(body, &cfg)
+	if !cfg.DNS.Enabled || !cfg.DNS.Block || len(cfg.DNS.Upstreams) != 1 || cfg.DNS.ListVersion != bl.Version() || cfg.DNS.ListVersion == "" {
+		t.Fatalf("dns config: %+v", cfg.DNS)
+	}
+	status, list := f.do(boxClient, "GET", "/v1/blocklist", nil, nil)
+	if status != 200 || string(list) != "evil.test\n" {
+		t.Fatalf("blocklist: %d %q", status, list)
+	}
+	if status, _ := f.do(boxClient, "GET", "/v1/blocklist", nil, map[string]string{"If-None-Match": `"` + bl.Version() + `"`}); status != 304 {
+		t.Fatalf("known version must be 304, got %d", status)
+	}
+
+	// the box reports: listening, a few queries; the client device asked for a listed domain
+	beat(wire.Heartbeat{Discovery: wire.DiscoveryReport{Seen: []wire.Sighting{{MAC: "00:11:22:33:44:88", IP: "192.168.1.60", LastSeen: f.now}}}})
+	f.pub.reset()
+	beat(wire.Heartbeat{
+		Box:     wire.BoxInfo{LANIP: "192.168.1.9"},
+		DNS:     &wire.DNSReport{Listening: "192.168.1.9:53", ListVersion: bl.Version(), ListSize: 1, Upstream: "9.9.9.9:53", Queries: 120, Blocked: 1, NXDomain: 4, Clients: 7},
+		Signals: []wire.Signal{{Kind: wire.SignalDNSBlock, IP: "192.168.1.60", Count: 1, Detail: "evil.test|www.evil.test|blocked", FirstAt: f.now, LastAt: f.now}},
+	})
+	box, err := f.st.Box(ctx, boxID)
+	must(t, err)
+	if box.DNS == nil || box.DNS.Listening != "192.168.1.9:53" || box.DNS.Queries != 120 || box.LANIP != "192.168.1.9" {
+		t.Fatalf("box report: %+v lan=%s", box.DNS, box.LANIP)
+	}
+	days, err := f.st.DNSDays(ctx, "site_a", 5)
+	must(t, err)
+	if len(days) != 1 || days[0].Queries != 120 || days[0].Blocked != 1 || days[0].NXDomain != 4 {
+		t.Fatalf("day totals: %+v", days)
+	}
+	if got := f.pub.types(); got != "security.alert" {
+		t.Fatalf("events: %q", got)
+	}
+	dev, err := f.st.DeviceByAddress(ctx, "site_a", "", "192.168.1.60")
+	must(t, err)
+	fd, err := f.st.OpenFinding(ctx, dev.ID, "signal.dns_block", "evil.test")
+	if err != nil || fd.Severity != "high" || !strings.Contains(fd.Title, "evil.test") {
+		t.Fatalf("dns finding: %+v %v", fd, err)
+	}
+	// a second report adds to the day, a box that reports nothing keeps its last report
+	beat(wire.Heartbeat{DNS: &wire.DNSReport{Listening: "192.168.1.9:53", Queries: 30}})
+	beat(wire.Heartbeat{})
+	days, _ = f.st.DNSDays(ctx, "site_a", 5)
+	box, _ = f.st.Box(ctx, boxID)
+	if days[0].Queries != 150 || box.DNS == nil || box.DNS.Queries != 30 {
+		t.Fatalf("after more reports: %+v %+v", days, box.DNS)
+	}
+	must(t, f.eng.SetSiteDNS(ctx, "site_a", false, false, nil, "test"))
+	_, body = f.do(boxClient, "GET", "/v1/config", nil, nil)
+	_ = json.Unmarshal(body, &cfg)
+	if cfg.DNS.Enabled {
+		t.Fatal("dns still on after switching it off")
 	}
 }
 

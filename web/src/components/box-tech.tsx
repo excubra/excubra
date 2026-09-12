@@ -52,7 +52,7 @@ export function BoxTech({ box, site, sites, tenantNames, fingerprint, netbird, s
           <Row k="Zertifikat" mono>{box.CertSerial}<div className="font-sans text-xs text-muted-foreground">gültig bis {fmtDateTime(box.CertNotAfter)}, verlängert sich selbst</div></Row>
           <Row k="CA-Fingerprint" mono>{fingerprint}</Row>
           <Row k="Siegelschlüssel"><SealFingerprint sealKey={box.SealKey ?? ""} className="text-[13px]" /><div className="text-xs text-muted-foreground">Zugangsdaten für Geräte-APIs werden im Browser für diesen Schlüssel versiegelt.</div></Row>
-          <Row k="LAN der Box">{box.LAN?.length ? <span className="font-mono text-[13px]">{box.LAN.join(", ")}</span> : <span className="text-muted-foreground">noch nicht gemeldet</span>}</Row>
+          <Row k="LAN der Box">{box.LAN?.length ? <span className="font-mono text-[13px]">{box.LAN.join(", ")}{box.LANIP ? ` · Adresse ${box.LANIP}` : ""}</span> : <span className="text-muted-foreground">noch nicht gemeldet</span>}</Row>
           <Row k="Discovery">{box.DiscoveryMode === "sweep" ? "passiv + ARP-Sweep alle 15 min im eigenen Netz" : "nur passiv"}{box.DiscoverySubnets?.length ? ` · ICMP-Sweep: ${box.DiscoverySubnets.join(", ")}` : ""}</Row>
           <Row k="Köder-Ports">{box.Canary?.length ? <span className="font-mono text-[13px]">{box.Canary.join(", ")}</span> : <span className="text-muted-foreground">keine offen (Live-Erkennung aus, oder Agent vor 0.5)</span>}</Row>
           <Separator />

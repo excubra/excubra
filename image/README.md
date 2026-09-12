@@ -91,7 +91,8 @@ written yet); until then a Pi is provisioned like a mini PC over SSH.
 - Debian security updates automatically, reboot window 04:45
 - chrony, Europe/Berlin, persistent journald capped at 256 MB (SSD-friendly)
 - sshd keys-only; ufw: inbound nothing but the five decoy ports of the live detection
-  (445, 3389, 23, 1433, 5900 — the agent accepts, waits and closes; ADR-0018 §7), or
+  (445, 3389, 23, 1433, 5900 — the agent accepts, waits and closes; ADR-0018 §7) and
+  port 53 for the DNS sensor (answers only where a site switched it on; ADR-0020), or
   22 too with `--ssh-lan`, plus the two rules for the operator namespace's veth pair
 - `net.ipv4.ping_group_range` open so the agent pings without raw-socket rights
   (it falls back to a raw socket via CAP_NET_RAW if that sysctl is missing)

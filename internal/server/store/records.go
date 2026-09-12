@@ -51,6 +51,11 @@ type Site struct {
 	// CanaryEnabled switches the box's decoy ports and live signals (ADR-0018 §7);
 	// on by default.
 	CanaryEnabled bool
+	// The DNS sensor (ADR-0020): off until the router points at the box; Block
+	// answers listed domains with NXDOMAIN; Upstreams override the box's own.
+	DNSEnabled   bool
+	DNSBlock     bool
+	DNSUpstreams []string
 }
 
 // Box is an enrolled device. SiteID is empty until the console assigns it.
@@ -90,6 +95,26 @@ type Box struct {
 	Role string
 	// Canary lists the decoy ports the box reported as armed (ADR-0018 §7).
 	Canary []int
+	// DNS is the sensor's last report (ADR-0020), nil when it never sent one.
+	DNS *wire.DNSReport
+	// LANIP is the box's own address in the LAN, as it reports it.
+	LANIP string
+}
+
+// BlockedDomain is one entry of the DNS blocklist.
+type BlockedDomain struct {
+	Domain string
+	Source string
+}
+
+// DNSDay is a site's DNS totals of one day.
+type DNSDay struct {
+	SiteID   string
+	Day      string
+	Queries  int
+	Blocked  int
+	NXDomain int
+	Failed   int
 }
 
 // EnrollmentKey is a one-time key; only the hash of the secret is stored.

@@ -367,6 +367,22 @@ func siteCmd(args []string) error {
 		_ = st.Audit(ctx, time.Now(), "cli", "site.scan", rest[1], rest[2])
 		fmt.Printf("scan %s for %s; the box picks it up with its next config pull\n", rest[2], rest[1])
 		return nil
+	case len(rest) == 3 && rest[0] == "dns" && (rest[2] == "on" || rest[2] == "off" || rest[2] == "block" || rest[2] == "report"):
+		// the DNS sensor (ADR-0020): on = reporting, block = reporting and blocking
+		site, err := st.Site(ctx, rest[1])
+		if err != nil {
+			return err
+		}
+		enabled, block := rest[2] != "off", rest[2] == "block"
+		if rest[2] == "report" {
+			enabled, block = true, false
+		}
+		if err := st.SetSiteDNS(ctx, rest[1], enabled, block, site.DNSUpstreams); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "site.dns", rest[1], rest[2])
+		fmt.Printf("dns %s for %s; the box picks it up with its next config pull\n", rest[2], rest[1])
+		return nil
 	case len(rest) == 3 && rest[0] == "canary" && (rest[2] == "on" || rest[2] == "off"):
 		// the live detection switch (ADR-0018 §7): decoy ports and signals
 		if _, err := st.Site(ctx, rest[1]); err != nil {
@@ -379,7 +395,7 @@ func siteCmd(args []string) error {
 		fmt.Printf("canary %s for %s; the box picks it up with its next config pull\n", rest[2], rest[1])
 		return nil
 	}
-	return fmt.Errorf("usage: excubra server site add <tenant_id> <slug> <name> | list | scan <site_id> on|off | canary <site_id> on|off")
+	return fmt.Errorf("usage: excubra server site add <tenant_id> <slug> <name> | list | scan <site_id> on|off | canary <site_id> on|off | dns <site_id> on|off|block|report")
 }
 
 // boxCmd: excubra server box list | assign <box_id> <site_id> | unassign <box_id>

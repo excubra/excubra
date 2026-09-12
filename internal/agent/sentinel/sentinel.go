@@ -460,8 +460,9 @@ func (s *Sentinel) touch(src, srcMAC string, port int, now time.Time) {
 	s.record(wire.Signal{Kind: wire.SignalCanary, IP: src, MAC: srcMAC, Port: port, Count: 1}, true, now)
 }
 
-// Record files signals a connector read from a device's logs (ADR-0018 §7): they
-// travel with the box's own, merged per source and kind, counts adding up.
+// Record files signals another sensor produced (a connector reading a device's
+// logs, the DNS sensor): they travel with the box's own, merged per source and
+// kind, counts adding up.
 func (s *Sentinel) Record(sigs []wire.Signal) {
 	if s == nil {
 		return
@@ -470,10 +471,10 @@ func (s *Sentinel) Record(sigs []wire.Signal) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, sg := range sigs {
-		if sg.Kind == "" || sg.DeviceID == "" {
+		if sg.Kind == "" {
 			continue
 		}
-		s.record(sg, true, now)
+		s.record(sg, additive(sg.Kind), now)
 	}
 }
 
@@ -656,7 +657,7 @@ func (s *Sentinel) Nack() {
 // rather than a size (which is replaced).
 func additive(kind string) bool {
 	switch kind {
-	case wire.SignalCanary, wire.SignalFGTAdminFail, wire.SignalFGTVPNFail, wire.SignalFGTIPS:
+	case wire.SignalCanary, wire.SignalFGTAdminFail, wire.SignalFGTVPNFail, wire.SignalFGTIPS, wire.SignalDNSBlock:
 		return true
 	}
 	return false

@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,6 +67,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/config", s.box(s.config))
 	mux.Handle("POST /v1/netbird/claim", s.box(s.netbirdClaim))
 	mux.Handle("GET /v1/update", s.box(s.update))
+	mux.Handle("GET /v1/blocklist", s.box(s.blocklist))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) })
 	return mux
 }
@@ -289,6 +291,25 @@ func (s *Server) netbirdClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.Store.Audit(r.Context(), s.Now(), "ingest", "netbird.claim", b.ID, profile+" "+k.ManagementURL)
 	writeJSON(w, http.StatusOK, wire.NetbirdClaimResponse{Profile: profile, ManagementURL: k.ManagementURL, SetupKey: k.SetupKey})
+}
+
+// blocklist serves the DNS blocklist (ADR-0020): one domain per line, with its
+// version as ETag; 304 when the box has that version, 204 when there is none.
+func (s *Server) blocklist(w http.ResponseWriter, r *http.Request) {
+	body, version := s.Engine.Blocklist.Body()
+	if version == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	etag := `"` + version + `"`
+	w.Header().Set("ETag", etag)
+	if strings.TrimSpace(r.Header.Get("If-None-Match")) == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	_, _ = w.Write(body)
 }
 
 // update serves release metadata for the box's channel, or 204.

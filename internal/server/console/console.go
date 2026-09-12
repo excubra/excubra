@@ -18,6 +18,7 @@ import (
 
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/ai"
+	"github.com/excubra/excubra/internal/server/blocklist"
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/remote"
@@ -53,6 +54,7 @@ type Server struct {
 	SelfUpdate *selfupdate.Controller // this server's own updates, nil in tests
 	Remote     *remote.Service        // remote access through the box, nil in tests
 	Vuln       *vuln.Service          // CVE matching, nil when off
+	Blocklist  *blocklist.Service     // the DNS sensors' list, nil when off
 	AI         *ai.Service            // assessments (ADR-0019), nil in tests
 
 	pages    map[string]*template.Template
@@ -235,6 +237,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/sites/{id}/scan", s.auth(s.apiSiteScan))
 	mux.Handle("POST /api/sites/{id}/scan", s.auth(s.siteScanSet))
 	mux.Handle("POST /api/sites/{id}/canary", s.auth(s.siteCanarySet))
+	mux.Handle("GET /api/sites/{id}/dns", s.auth(s.apiSiteDNS))
+	mux.Handle("POST /api/sites/{id}/dns", s.auth(s.siteDNSSet))
+	mux.Handle("GET /api/settings/dns", s.auth(s.apiDNSSettings))
+	mux.Handle("POST /api/settings/dns", s.auth(s.dnsSettingsSave))
 	mux.Handle("GET /api/devices/{id}/connectors", s.auth(s.apiDeviceConnectors))
 	mux.Handle("POST /api/devices/{id}/connectors", s.auth(s.connectorCreate))
 	mux.Handle("POST /api/connectors/{id}/secret", s.auth(s.connectorSecret))

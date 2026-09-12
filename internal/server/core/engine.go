@@ -19,6 +19,7 @@ import (
 
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/id"
+	"github.com/excubra/excubra/internal/server/blocklist"
 	"github.com/excubra/excubra/internal/server/feed"
 	"github.com/excubra/excubra/internal/server/rules"
 	"github.com/excubra/excubra/internal/server/state"
@@ -45,6 +46,8 @@ type Engine struct {
 	Feed  *feed.Service // end-of-life data for the version rules (ADR-0018); nil means no version findings
 	// Vuln matches identified versions against NVD, OSV and KEV (ADR-0018 §8); nil = off.
 	Vuln *vuln.Service
+	// Blocklist is what the DNS sensors watch for (ADR-0020); nil = off.
+	Blocklist *blocklist.Service
 
 	mu      sync.Mutex
 	m       *state.Machine
@@ -464,6 +467,11 @@ func (e *Engine) Heartbeat(ctx context.Context, box store.Box, hb wire.Heartbeat
 		if len(hb.Signals) > 0 && box.Role != store.RoleOutpost {
 			events = append(events, e.absorbSignals(ctx, site, box, hb.Signals, now)...)
 		}
+		if hb.DNS != nil && hb.DNS.Queries+hb.DNS.Blocked+hb.DNS.Failed > 0 {
+			if err := e.Store.AddDNSDay(ctx, site.ID, now, *hb.DNS); err != nil {
+				e.Log.Error("dns totals", "site", site.ID, "err", err)
+			}
+		}
 	}
 	e.publish(ctx, events)
 
@@ -559,6 +567,9 @@ func (e *Engine) config(ctx context.Context, box store.Box) (wire.Config, error)
 				cfg.Scan = wire.ScanConfig{Enabled: true, IntervalS: 24 * 3600, MaxPPS: 20}
 			}
 			cfg.Canary = wire.CanaryConfig{Enabled: site.CanaryEnabled}
+			if site.DNSEnabled {
+				cfg.DNS = wire.DNSConfig{Enabled: true, Block: site.DNSBlock, Upstreams: site.DNSUpstreams, ListVersion: e.Blocklist.Version()}
+			}
 		}
 		if box.Role == store.RoleOutpost {
 			// an outpost looks at the sites' public addresses every hour
@@ -1057,7 +1068,7 @@ func (e *Engine) absorbSignals(ctx context.Context, site store.Site, box store.B
 // life of a finding) rather than a size.
 func additiveSignal(kind string) bool {
 	switch kind {
-	case wire.SignalCanary, wire.SignalFGTAdminFail, wire.SignalFGTVPNFail, wire.SignalFGTIPS:
+	case wire.SignalCanary, wire.SignalFGTAdminFail, wire.SignalFGTVPNFail, wire.SignalFGTIPS, wire.SignalDNSBlock:
 		return true
 	}
 	return false
@@ -1071,6 +1082,13 @@ func signalInfo(sg wire.Signal) string {
 	case wire.SignalFGTIPS:
 		attack, _, _ := strings.Cut(sg.Detail, "|")
 		return fmt.Sprintf("%s von %s, %d×", attack, sg.IP, sg.Count)
+	case wire.SignalDNSBlock:
+		listed, _, _ := strings.Cut(sg.Detail, "|")
+		return fmt.Sprintf("%s von %s, %d×", listed, sg.IP, sg.Count)
+	case wire.SignalDNSDGA:
+		return fmt.Sprintf("%d Namen in fünf Minuten von %s", sg.Count, sg.IP)
+	case wire.SignalDNSTunnel:
+		return fmt.Sprintf("%s von %s, %d Anfragen", sg.Detail, sg.IP, sg.Count)
 	case wire.SignalCanary:
 		return fmt.Sprintf("Port %s, %d×", rules.PortLabel(sg.Port), sg.Count)
 	case wire.SignalPortScan:
@@ -1284,6 +1302,30 @@ func (e *Engine) SetSiteScan(ctx context.Context, siteID string, enabled bool, a
 		state = "on"
 	}
 	return e.audit(ctx, actor, "site.scan", siteID, state)
+}
+
+// SetSiteDNS switches a site's DNS sensor (ADR-0020); the box picks it up with
+// its next config pull.
+func (e *Engine) SetSiteDNS(ctx context.Context, siteID string, enabled, block bool, upstreams []string, actor string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	site, ok := e.sites[siteID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if err := e.Store.SetSiteDNS(ctx, siteID, enabled, block, upstreams); err != nil {
+		return err
+	}
+	site.DNSEnabled, site.DNSBlock, site.DNSUpstreams = enabled, block, upstreams
+	e.sites[siteID] = site
+	state := "off"
+	switch {
+	case enabled && block:
+		state = "on, blocking"
+	case enabled:
+		state = "on, reporting"
+	}
+	return e.audit(ctx, actor, "site.dns", siteID, state)
 }
 
 // SetSiteCanary switches a site's decoy ports and live signals (ADR-0018 §7).
