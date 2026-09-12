@@ -28,7 +28,7 @@ import (
 // Sources and settings.
 const (
 	DefaultURLhaus   = "https://urlhaus.abuse.ch/downloads/hostfile/"
-	DefaultThreatFox = "https://threatfox.abuse.ch/export/csv/recent/"
+	DefaultThreatFox = "https://threatfox.abuse.ch/export/csv/domains/recent/"
 	// SettingExtra holds the operator's own domains, one per line.
 	SettingExtra = "dns.block_extra"
 	Fresh        = 24 * time.Hour
@@ -305,7 +305,9 @@ func parseThreatFox(b []byte) []string {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		rec, err := csv.NewReader(strings.NewReader(line)).Read()
+		rd := csv.NewReader(strings.NewReader(line))
+		rd.TrimLeadingSpace, rd.LazyQuotes = true, true // the export separates with ", "
+		rec, err := rd.Read()
 		if err != nil || len(rec) < 4 {
 			continue
 		}

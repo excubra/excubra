@@ -23,6 +23,7 @@ func TestSourcesAreParsedMergedAndVersioned(t *testing.T) {
 "2026-09-12 10:00:00","2","http://dl.example:8080/payload.exe","url","payload_delivery","x","y","Emotet","","50","","","0","r"
 "2026-09-12 10:00:00","3","203.0.113.5:443","ip:port","botnet_cc","x","y","z","","50","","","0","r"
 "2026-09-12 10:00:00","4","evil.test","domain","botnet_cc","x","y","z","","50","","","0","r"
+"2026-09-12 10:00:00", "5", "spaced.example", "domain", "botnet_cc", "x", "y", "z", "", "50", "", "", "0", "r"
 `))
 		default:
 			w.WriteHeader(404)
@@ -36,11 +37,11 @@ func TestSourcesAreParsedMergedAndVersioned(t *testing.T) {
 		t.Fatalf("refresh: changed=%v err=%v calls=%d", changed, err, calls)
 	}
 	body, version := s.Body()
-	if string(body) != "bad.example\nc2.example\ndl.example\nevil.test\n" || len(version) != 16 {
+	if string(body) != "bad.example\nc2.example\ndl.example\nevil.test\nspaced.example\n" || len(version) != 16 {
 		t.Fatalf("body %q version %q", body, version)
 	}
 	st := s.Status()
-	if st.Domains != 4 || st.Sources["urlhaus"] != 2 || st.Sources["threatfox"] != 2 {
+	if st.Domains != 5 || st.Sources["urlhaus"] != 2 || st.Sources["threatfox"] != 3 {
 		t.Fatalf("status: %+v", st)
 	}
 	if src, ok := s.Contains("www.evil.test"); !ok || src != "urlhaus" {

@@ -346,14 +346,20 @@ func siteCmd(args []string) error {
 			return err
 		}
 		for _, s := range ss {
-			scan, canary := "scan=off", "canary=off"
+			scan, canary, dns := "scan=off", "canary=off", "dns=off"
 			if s.ScanEnabled {
 				scan = "scan=on"
 			}
 			if s.CanaryEnabled {
 				canary = "canary=on"
 			}
-			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", s.ID, s.TenantID, s.Name, scan, canary)
+			switch {
+			case s.DNSEnabled && s.DNSBlock:
+				dns = "dns=block"
+			case s.DNSEnabled:
+				dns = "dns=report"
+			}
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", s.ID, s.TenantID, s.Name, scan, canary, dns)
 		}
 		return nil
 	case len(rest) == 3 && rest[0] == "scan" && (rest[2] == "on" || rest[2] == "off"):
