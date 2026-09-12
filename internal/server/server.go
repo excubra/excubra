@@ -57,6 +57,8 @@ func Main(args []string) error {
 		return updateCmd(args)
 	case "setting":
 		return settingCmd(args)
+	case "remote":
+		return remoteCmd(args)
 	case "backup":
 		return backupCmd(args)
 	case "prune":
