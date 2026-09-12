@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,14 +73,15 @@ func (s *Store) CreateSite(ctx context.Context, st Site) error {
 func (s *Store) Site(ctx context.Context, siteID string) (Site, error) {
 	var st Site
 	var created string
-	err := s.main.QueryRowContext(ctx, `SELECT id, tenant_id, name, created_at FROM sites WHERE id = ?`, siteID).Scan(&st.ID, &st.TenantID, &st.Name, &created)
-	st.CreatedAt = parseTS(created)
+	var scan int
+	err := s.main.QueryRowContext(ctx, `SELECT id, tenant_id, name, created_at, scan_enabled FROM sites WHERE id = ?`, siteID).Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan)
+	st.CreatedAt, st.ScanEnabled = parseTS(created), scan != 0
 	return st, wrap("site", err)
 }
 
 // Sites returns all sites, or those of one tenant when tenantID is not empty.
 func (s *Store) Sites(ctx context.Context, tenantID string) ([]Site, error) {
-	q := `SELECT id, tenant_id, name, created_at FROM sites`
+	q := `SELECT id, tenant_id, name, created_at, scan_enabled FROM sites`
 	var args []any
 	if tenantID != "" {
 		q += ` WHERE tenant_id = ?`
@@ -94,10 +96,11 @@ func (s *Store) Sites(ctx context.Context, tenantID string) ([]Site, error) {
 	for rows.Next() {
 		var st Site
 		var created string
-		if err := rows.Scan(&st.ID, &st.TenantID, &st.Name, &created); err != nil {
+		var scan int
+		if err := rows.Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan); err != nil {
 			return nil, wrap("sites", err)
 		}
-		st.CreatedAt = parseTS(created)
+		st.CreatedAt, st.ScanEnabled = parseTS(created), scan != 0
 		out = append(out, st)
 	}
 	return out, wrap("sites", rows.Err())
@@ -1586,4 +1589,212 @@ func (s *Store) FindingCounts(ctx context.Context) (map[string]int, error) {
 func (s *Store) PruneFindings(ctx context.Context, before time.Time) error {
 	_, err := s.main.ExecContext(ctx, `DELETE FROM findings WHERE resolved_at IS NOT NULL AND resolved_at < ?`, ts(before))
 	return wrap("prune findings", err)
+}
+
+// ---- services and scan rounds (ADR-0018) ------------------------------------------------
+
+const serviceCols = `device_id, port, proto, name, product, version, banner, title, tls, first_seen, last_seen, gone_at`
+
+func scanService(sc interface{ Scan(...any) error }) (Service, error) {
+	var v Service
+	var tlsJSON, first, last string
+	var gone sql.NullString
+	err := sc.Scan(&v.DeviceID, &v.Port, &v.Proto, &v.Name, &v.Product, &v.Version, &v.Banner, &v.Title, &tlsJSON, &first, &last, &gone)
+	if tlsJSON != "" {
+		v.TLS = json.RawMessage(tlsJSON)
+	}
+	v.FirstSeen, v.LastSeen, v.GoneAt = parseTS(first), parseTS(last), parseTSP(gone)
+	return v, err
+}
+
+// DeviceByAddress finds a site's device by MAC, else by IPv4 address.
+func (s *Store) DeviceByAddress(ctx context.Context, siteID, mac, ip string) (Device, error) {
+	if mac != "" {
+		d, err := scanDevice(s.main.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE site_id = ? AND mac = ?`, siteID, strings.ToLower(mac)))
+		if err == nil {
+			return d, nil
+		}
+	}
+	if ip == "" {
+		return Device{}, ErrNotFound
+	}
+	d, err := scanDevice(s.main.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE site_id = ? AND ip = ? ORDER BY last_seen DESC LIMIT 1`, siteID, ip))
+	return d, wrap("device by address", err)
+}
+
+// UpsertServices records what one round saw on a device: listed services are
+// current (first_seen kept, or reset when they had gone), everything else the
+// device had is marked gone. It returns what appeared and what disappeared.
+func (s *Store) UpsertServices(ctx context.Context, deviceID string, svcs []Service, now time.Time) (added, gone []Service, err error) {
+	tx, err := s.main.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, wrap("upsert services", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	before := map[string]Service{}
+	rows, err := tx.QueryContext(ctx, `SELECT `+serviceCols+` FROM services WHERE device_id = ?`, deviceID)
+	if err != nil {
+		return nil, nil, wrap("upsert services", err)
+	}
+	for rows.Next() {
+		v, err := scanService(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, nil, wrap("upsert services", err)
+		}
+		before[v.Proto+"/"+strconv.Itoa(v.Port)] = v
+	}
+	_ = rows.Close()
+	seen := map[string]bool{}
+	for _, v := range svcs {
+		if v.Proto == "" {
+			v.Proto = "tcp"
+		}
+		key := v.Proto + "/" + strconv.Itoa(v.Port)
+		seen[key] = true
+		tlsJSON := ""
+		if len(v.TLS) > 0 {
+			tlsJSON = string(v.TLS)
+		}
+		old, had := before[key]
+		if !had || old.GoneAt != nil {
+			added = append(added, v)
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO services (`+serviceCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+			ON CONFLICT (device_id, port, proto) DO UPDATE SET
+				name = excluded.name, product = excluded.product, version = excluded.version, banner = excluded.banner, title = excluded.title, tls = excluded.tls,
+				last_seen = excluded.last_seen,
+				first_seen = CASE WHEN services.gone_at IS NULL THEN services.first_seen ELSE excluded.first_seen END,
+				gone_at = NULL`,
+			deviceID, v.Port, v.Proto, v.Name, v.Product, v.Version, v.Banner, v.Title, tlsJSON, ts(now), ts(now))
+		if err != nil {
+			return nil, nil, wrap("upsert services", err)
+		}
+	}
+	for key, old := range before {
+		if !seen[key] && old.GoneAt == nil {
+			gone = append(gone, old)
+			if _, err := tx.ExecContext(ctx, `UPDATE services SET gone_at = ? WHERE device_id = ? AND port = ? AND proto = ?`, ts(now), deviceID, old.Port, old.Proto); err != nil {
+				return nil, nil, wrap("upsert services", err)
+			}
+		}
+	}
+	return added, gone, wrap("upsert services", tx.Commit())
+}
+
+// ServicesForDevice lists a device's services, open first, by port; gone ones follow.
+func (s *Store) ServicesForDevice(ctx context.Context, deviceID string) ([]Service, error) {
+	return s.services(ctx, `SELECT `+serviceCols+` FROM services WHERE device_id = ? ORDER BY gone_at IS NOT NULL, port`, deviceID)
+}
+
+// OpenServicesForSite lists every open service of a site's devices.
+func (s *Store) OpenServicesForSite(ctx context.Context, siteID string) ([]Service, error) {
+	return s.services(ctx, `SELECT `+serviceCols+` FROM services WHERE gone_at IS NULL AND device_id IN (SELECT id FROM devices WHERE site_id = ?) ORDER BY device_id, port`, siteID)
+}
+
+func (s *Store) services(ctx context.Context, q string, args ...any) ([]Service, error) {
+	rows, err := s.main.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, wrap("services", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Service
+	for rows.Next() {
+		v, err := scanService(rows)
+		if err != nil {
+			return nil, wrap("services", err)
+		}
+		out = append(out, v)
+	}
+	return out, wrap("services", rows.Err())
+}
+
+// SetScanRound inserts or updates a round.
+func (s *Store) SetScanRound(ctx context.Context, r ScanRound) error {
+	_, err := s.main.ExecContext(ctx, `INSERT INTO scan_rounds (id, box_id, site_id, started_at, finished_at, hosts, services, errors) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET finished_at = excluded.finished_at, hosts = excluded.hosts, services = excluded.services, errors = excluded.errors`,
+		r.ID, r.BoxID, r.SiteID, ts(r.StartedAt), tsp(r.FinishedAt), r.Hosts, r.Services, r.Errors)
+	return wrap("set scan round", err)
+}
+
+// ScanRound returns one round.
+func (s *Store) ScanRound(ctx context.Context, id string) (ScanRound, error) {
+	var r ScanRound
+	var started string
+	var finished sql.NullString
+	err := s.main.QueryRowContext(ctx, `SELECT id, box_id, site_id, started_at, finished_at, hosts, services, errors FROM scan_rounds WHERE id = ?`, id).
+		Scan(&r.ID, &r.BoxID, &r.SiteID, &started, &finished, &r.Hosts, &r.Services, &r.Errors)
+	r.StartedAt, r.FinishedAt = parseTS(started), parseTSP(finished)
+	return r, wrap("scan round", err)
+}
+
+// ScanRounds lists a site's rounds, newest first.
+func (s *Store) ScanRounds(ctx context.Context, siteID string, limit int) ([]ScanRound, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.main.QueryContext(ctx, `SELECT id, box_id, site_id, started_at, finished_at, hosts, services, errors FROM scan_rounds WHERE site_id = ? ORDER BY started_at DESC LIMIT ?`, siteID, limit)
+	if err != nil {
+		return nil, wrap("scan rounds", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ScanRound
+	for rows.Next() {
+		var r ScanRound
+		var started string
+		var finished sql.NullString
+		if err := rows.Scan(&r.ID, &r.BoxID, &r.SiteID, &started, &finished, &r.Hosts, &r.Services, &r.Errors); err != nil {
+			return nil, wrap("scan rounds", err)
+		}
+		r.StartedAt, r.FinishedAt = parseTS(started), parseTSP(finished)
+		out = append(out, r)
+	}
+	return out, wrap("scan rounds", rows.Err())
+}
+
+// SetSiteScan switches the service scan of a site on or off.
+func (s *Store) SetSiteScan(ctx context.Context, siteID string, enabled bool) error {
+	return s.exec1(ctx, "set site scan", `UPDATE sites SET scan_enabled = ? WHERE id = ?`, boolInt(enabled), siteID)
+}
+
+// SyncDeviceFindings is SyncFindings for findings that come from a source other
+// than a connector (the scan): scoped to one device and that source, so syncing
+// one device never resolves another's.
+func (s *Store) SyncDeviceFindings(ctx context.Context, deviceID, source string, current []Finding, now time.Time) ([]string, error) {
+	tx, err := s.main.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, wrap("sync device findings", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	keys := make([]any, 0, len(current))
+	for _, f := range current {
+		if len(f.Evidence) == 0 {
+			f.Evidence = json.RawMessage("{}")
+		}
+		keys = append(keys, f.Rule+"/"+f.Key)
+		_, err := tx.ExecContext(ctx, `INSERT INTO findings (`+findingCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+			ON CONFLICT (device_id, rule, key) DO UPDATE SET
+				connector_id = excluded.connector_id, severity = excluded.severity, title = excluded.title, detail = excluded.detail, evidence = excluded.evidence,
+				last_seen = excluded.last_seen,
+				first_seen = CASE WHEN findings.resolved_at IS NULL THEN findings.first_seen ELSE excluded.first_seen END,
+				resolved_at = NULL`,
+			f.ID, f.TenantID, f.SiteID, deviceID, source, f.Rule, f.Key, f.Severity, f.Title, f.Detail, string(f.Evidence), ts(now), ts(now))
+		if err != nil {
+			return nil, wrap("sync device findings", err)
+		}
+	}
+	where := ` WHERE device_id = ? AND connector_id = ? AND resolved_at IS NULL`
+	args := []any{deviceID, source}
+	if len(keys) > 0 {
+		where += ` AND (rule || '/' || key) NOT IN (?` + strings.Repeat(", ?", len(keys)-1) + `)` //nolint:gosec // placeholders only; the values are bound
+		args = append(args, keys...)
+	}
+	resolved, err := idsOf(tx.QueryContext(ctx, `SELECT id FROM findings`+where, args...))
+	if err != nil {
+		return nil, wrap("sync device findings", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE findings SET resolved_at = ?`+where, append([]any{ts(now)}, args...)...); err != nil {
+		return nil, wrap("sync device findings", err)
+	}
+	return resolved, wrap("sync device findings", tx.Commit())
 }

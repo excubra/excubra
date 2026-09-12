@@ -15,6 +15,7 @@ import { DeviceCardView } from "@/components/device-card"
 import { BoxTech } from "@/components/box-tech"
 import { TaskMenu } from "@/components/task-menu"
 import { RemoteAccessCard } from "@/components/remote-access"
+import { ScanCard } from "@/components/scan-card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -149,7 +150,8 @@ export default function SitePage() {
           <DataTable columns={evCols} data={d.Events ?? []} search={(r) => `${r.type} ${r.Title} ${r.Info}`} rowClass={(r) => r.Class === "down" ? "border-l-2 border-l-destructive" : ""} emptyTitle="Alles ruhig" emptyText="Kein Ereignis in den letzten 24 Stunden." footer={<Link className="underline" to={`/events?site=${d.Site.ID}`}>Alle Ereignisse dieses Standorts</Link>} />
         </TabsContent>
 
-        <TabsContent value="technik" className="mt-4">
+        <TabsContent value="technik" className="mt-4 flex flex-col gap-4">
+          <ScanCard siteId={id} />
           <RemoteAccessCard siteId={id} />
           {d.Box ? <BoxTech box={d.Box} site={d.Site} sites={d.Sites ?? []} tenantNames={d.TenantNames} fingerprint={d.Fingerprint} netbird={d.Netbird} subnets={d.Subnets} onChanged={refresh} /> : (
             <Alert><Radar /><AlertTitle>Keine Box an diesem Standort</AlertTitle><AlertDescription>Unter <Link className="underline" to="/boxes">Boxen</Link> eine enrollte Box diesem Standort zuordnen.</AlertDescription></Alert>

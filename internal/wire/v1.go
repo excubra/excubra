@@ -80,6 +80,7 @@ type Heartbeat struct {
 	Buffer          BufferInfo        `json:"buffer"`
 	TaskResults     []TaskResult      `json:"task_results,omitempty"` // finished tasks since the last successful heartbeat
 	Connectors      []ConnectorReport `json:"connectors,omitempty"`   // latest reading of every connector (ADR-0015)
+	Scan            *ScanReport       `json:"scan,omitempty"`         // a chunk of the last service scan round (ADR-0018)
 }
 
 // AgentInfo describes the running agent.
@@ -194,6 +195,66 @@ type Config struct {
 	Update                 UpdateConfig      `json:"update"`
 	Tasks                  []Task            `json:"tasks,omitempty"`      // pending one-shot tasks (ADR-0014)
 	Connectors             []ConnectorConfig `json:"connectors,omitempty"` // devices to read through their API (ADR-0015)
+	Scan                   ScanConfig        `json:"scan"`                 // the service scan of the site's LAN (ADR-0018)
+}
+
+// ScanConfig is the box's service scan (ADR-0018, decision E20): switched on per
+// site, on a schedule, rate-limited. The box enumerates and reads banners; it never
+// exploits and never tries a credential.
+type ScanConfig struct {
+	Enabled   bool     `json:"enabled"`
+	IntervalS int      `json:"interval_s,omitempty"` // a full round this often; default a day, at least an hour
+	MaxPPS    int      `json:"max_pps,omitempty"`    // connection attempts per second; default 20, at most 50
+	Ports     []int    `json:"ports,omitempty"`      // empty: the built-in list
+	Exclude   []string `json:"exclude,omitempty"`    // addresses or networks never touched
+}
+
+// Limits of a scan report chunk.
+const (
+	MaxScanHosts    = 50  // hosts per heartbeat; a round is sent in chunks
+	MaxScanServices = 64  // services per host
+	MaxScanBanner   = 200 // characters of banner or title kept
+)
+
+// ScanReport is one chunk of a scan round: the hosts the box scanned with every
+// service it found on them. A host with no services says "nothing listens there".
+// Final marks the last chunk of the round.
+type ScanReport struct {
+	Round     string     `json:"round"`
+	StartedAt time.Time  `json:"started_at"`
+	Hosts     []ScanHost `json:"hosts"`
+	Final     bool       `json:"final"`
+	Scanned   int        `json:"scanned"` // hosts the round attempted, on the final chunk
+	Errors    int        `json:"errors,omitempty"`
+}
+
+// ScanHost is one scanned device.
+type ScanHost struct {
+	IP       string        `json:"ip"`
+	MAC      string        `json:"mac,omitempty"`
+	Services []ScanService `json:"services"`
+}
+
+// ScanService is one listening service as the scan saw it.
+type ScanService struct {
+	Port    int      `json:"port"`
+	Proto   string   `json:"proto"`             // tcp
+	Name    string   `json:"name,omitempty"`    // ssh, http, https, rdp, smb …
+	Product string   `json:"product,omitempty"` // OpenSSH, nginx, Microsoft-IIS …
+	Version string   `json:"version,omitempty"`
+	Banner  string   `json:"banner,omitempty"` // first line the service said, or the HTTP Server header
+	Title   string   `json:"title,omitempty"`  // HTML title of a web service
+	TLS     *TLSInfo `json:"tls,omitempty"`
+}
+
+// TLSInfo is what the scan learned from a TLS handshake.
+type TLSInfo struct {
+	Subject    string    `json:"subject"`
+	Issuer     string    `json:"issuer"`
+	NotAfter   time.Time `json:"not_after"`
+	SelfSigned bool      `json:"self_signed"`
+	Version    string    `json:"version"` // the highest version the server negotiated
+	DNSNames   []string  `json:"dns_names,omitempty"`
 }
 
 // Intervals in seconds.

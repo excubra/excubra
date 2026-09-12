@@ -16,6 +16,7 @@ import (
 	"github.com/excubra/excubra/internal/agent/checks"
 	"github.com/excubra/excubra/internal/agent/connect"
 	"github.com/excubra/excubra/internal/agent/discovery"
+	"github.com/excubra/excubra/internal/agent/scan"
 	"github.com/excubra/excubra/internal/agent/update"
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/seal"
@@ -49,6 +50,7 @@ type Agent struct {
 	netbirdOp *Netbird // the operator's overlay, remote access (may be absent on the box)
 	upd       *update.Updater
 	conn      *connect.Runner
+	scan      *scan.Scanner // the service scan of the LAN (ADR-0018)
 	sealKey   *ecdh.PrivateKey
 
 	cfgMu        sync.RWMutex
@@ -166,6 +168,14 @@ func newAgent(st *State, log *slog.Logger, upd *update.Updater) (*Agent, error) 
 	a.sealKey = key
 	a.conn = connect.New(log, func(sealed string) ([]byte, error) { return seal.Open(key, sealed) })
 	a.conn.Seal = func(plain []byte) (string, error) { return seal.Seal(seal.Public(key), plain) }
+	a.scan = scan.New(log, func() []scan.Target {
+		addrs := a.disc.Table.Addresses()
+		out := make([]scan.Target, 0, len(addrs))
+		for _, ad := range addrs {
+			out = append(out, scan.Target{IP: ad.IP, MAC: ad.MAC})
+		}
+		return out
+	})
 	a.hbInterval, a.checkEvery, a.configMaxAge = 60*time.Second, 30*time.Second, 15*time.Minute
 	a.doneTasks, a.taskResults = st.LoadTasks()
 	for _, id := range a.doneTasks {
@@ -182,6 +192,7 @@ func (a *Agent) run(ctx context.Context) error {
 	a.baseCtx = ctx
 	go a.disc.Run(ctx)
 	go a.conn.Run(ctx)
+	go a.scan.Run(ctx)
 	go a.checkLoop(ctx)
 
 	hb := time.NewTimer(5 * time.Second)
@@ -363,6 +374,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		Buffer:          wire.BufferInfo{Queued: queued, Dropped: dropped},
 		TaskResults:     results,
 		Connectors:      conns,
+		Scan:            a.scan.Drain(),
 	}
 	hb.Box.ClockOffsetMS = a.clockOffset
 
@@ -372,6 +384,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	if err != nil {
 		a.putRounds(reports)
 		a.disc.Table.Nack()
+		a.scan.Nack()
 		if a.conn != nil {
 			a.conn.Nack()
 		}
@@ -397,6 +410,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		return
 	}
 	a.disc.Table.Ack()
+	a.scan.Ack()
 	if a.conn != nil {
 		a.conn.Ack()
 	}
@@ -466,6 +480,9 @@ func (a *Agent) applyConfig(cfg wire.Config) {
 	dcfg, derrs := discovery.ParseConfig(cfg.Discovery)
 	errs = append(errs, derrs...)
 	a.disc.Apply(dcfg)
+	scfg, serrs := scan.ParseConfig(cfg.Scan)
+	errs = append(errs, serrs...)
+	a.scan.Apply(scfg)
 
 	a.cfgMu.Lock()
 	a.cfg = cfg

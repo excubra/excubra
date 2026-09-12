@@ -30,3 +30,5 @@ Rules:
 | [0014](0014-box-tasks.md) | Box tasks: a closed list, pulled with the config, run once |
 | [0015](0015-connectors-and-sealed-credentials.md) | Connectors read devices from the box; credentials are sealed to the box |
 | [0016](0016-remote-access-through-the-box.md) | Remote access through the box: the customer LAN in the operator's overlay |
+| [0017](0017-zero-touch-box.md) | A box needs nobody after it is plugged in: site-bound keys, self-reported LAN, automatic remote access |
+| [0018](0018-service-scan.md) | The continuous service scan: inside from the box, outside from an outpost (replaces the no-port-scan rule) |

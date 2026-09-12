@@ -330,11 +330,26 @@ func siteCmd(args []string) error {
 			return err
 		}
 		for _, s := range ss {
-			fmt.Printf("%s\t%s\t%s\n", s.ID, s.TenantID, s.Name)
+			scan := "scan=off"
+			if s.ScanEnabled {
+				scan = "scan=on"
+			}
+			fmt.Printf("%s\t%s\t%s\t%s\n", s.ID, s.TenantID, s.Name, scan)
 		}
 		return nil
+	case len(rest) == 3 && rest[0] == "scan" && (rest[2] == "on" || rest[2] == "off"):
+		// the service scan switch (ADR-0018); the running server reads it fresh for every config
+		if _, err := st.Site(ctx, rest[1]); err != nil {
+			return err
+		}
+		if err := st.SetSiteScan(ctx, rest[1], rest[2] == "on"); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "site.scan", rest[1], rest[2])
+		fmt.Printf("scan %s for %s; the box picks it up with its next config pull\n", rest[2], rest[1])
+		return nil
 	}
-	return fmt.Errorf("usage: excubra server site add <tenant_id> <slug> <name> | list")
+	return fmt.Errorf("usage: excubra server site add <tenant_id> <slug> <name> | list | scan <site_id> on|off")
 }
 
 // boxCmd: excubra server box list | assign <box_id> <site_id> | unassign <box_id>
