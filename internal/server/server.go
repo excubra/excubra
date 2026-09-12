@@ -61,6 +61,8 @@ func Main(args []string) error {
 		return remoteCmd(args)
 	case "ai":
 		return aiCmd(args)
+	case "mcp":
+		return mcpCmd(args)
 	case "backup":
 		return backupCmd(args)
 	case "prune":

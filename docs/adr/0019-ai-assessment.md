@@ -37,6 +37,17 @@ decided per tenant, and the model must never act.
 5. **What it never does:** run anything, draft a job that a box would execute, or
    see a credential. Job drafts wait for E16 (signed operator jobs).
 
+6. **A session model is a provider too.** Until an API key and the contracts are
+   in place, an assistant in a session does the reading: `excubra server ai packet
+   <site>` prints the situation, `excubra server ai import <site>` stores an answer
+   in the agreed shape — as a brief with provider `session`, findings under `ki`,
+   audited like the model's. `excubra server mcp` serves the same over the Model
+   Context Protocol on stdin/stdout, started through SSH from a machine in the
+   operator overlay (`claude mcp add ex0 -- ssh root@<server> excubra server mcp`),
+   so nothing new listens anywhere: tools to read tenants, sites, devices,
+   services, findings, events, the situation, and to save an assessment. It
+   acknowledges nothing and changes nothing else — the planner role.
+
 ## Rejected
 
 - **Ollama Cloud as the first provider**: young service, thinner contractual
