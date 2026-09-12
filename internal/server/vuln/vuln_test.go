@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/server/rules"
+	"github.com/excubra/excubra/internal/server/store"
 )
 
 func TestIdentify(t *testing.T) {
@@ -225,5 +226,44 @@ func TestUntriagedStaysMediumAndKEVFallsBackToNVD(t *testing.T) {
 	got := s.Findings(services, now)
 	if len(got) != 1 || got[0].Severity != rules.Medium || !strings.Contains(got[0].Title, "2 gemeldete Schwachstellen, Fix der Distribution steht aus") || got[0].Evidence["untriaged"] != 2 {
 		t.Fatalf("untriaged finding: %+v", got)
+	}
+}
+
+// A cached result built by an older judgement is not trusted after an upgrade:
+// it is fetched again.
+func TestOldJudgementsAreFetchedAgain(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	ctx := context.Background()
+	old, _ := json.Marshal(Result{Product: "OpenSSH", Version: "9.2p1", CVEs: []CVE{{ID: "CVE-2007-2768"}}, Judged: resultVersion - 1})
+	must(t, st.SetVuln(ctx, "cpe|cpe:2.3:a:openbsd:openssh:9.2:p1:*:*:*:*:*:*", old, now))
+	fresh, _ := json.Marshal(Result{Product: "nginx", Version: "1.24.0", CVEs: []CVE{}, Judged: resultVersion})
+	must(t, st.SetVuln(ctx, "cpe|cpe:2.3:a:f5:nginx:1.24.0:*:*:*:*:*:*:*,cpe:2.3:a:nginx:nginx:1.24.0:*:*:*:*:*:*:*", fresh, now))
+	s := New(st, nil)
+	s.Now = func() time.Time { return now }
+	if _, ok := s.cache["cpe|cpe:2.3:a:openbsd:openssh:9.2:p1:*:*:*:*:*:*"]; ok {
+		t.Fatal("an old judgement was loaded")
+	}
+	if _, ok := s.cache["cpe|cpe:2.3:a:f5:nginx:1.24.0:*:*:*:*:*:*:*,cpe:2.3:a:nginx:nginx:1.24.0:*:*:*:*:*:*:*"]; !ok {
+		t.Fatal("a current judgement was dropped")
+	}
+	_ = s.Findings([]rules.Service{{Port: 22, Proto: "tcp", Product: "OpenSSH", Version: "9.2p1"}}, now)
+	s.mu.Lock()
+	_, wanted := s.want["cpe|cpe:2.3:a:openbsd:openssh:9.2:p1:*:*:*:*:*:*"]
+	s.mu.Unlock()
+	if !wanted {
+		t.Fatal("the old result is not wanted again")
+	}
+}
+
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }
