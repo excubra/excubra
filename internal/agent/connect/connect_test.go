@@ -56,7 +56,7 @@ func fakeFortiGate(t *testing.T, sessions float64) *httptest.Server {
 			})
 		case "/api/v2/log/memory/event/vpn":
 			body = env([]map[string]any{})
-		case "/api/v2/log/memory/utm/ips":
+		case "/api/v2/log/memory/ips/signature": // utm/ips answers 404 on this release; the reader finds this one
 			body = env([]map[string]any{{"eventtime": strconv.FormatInt(started.Add(-30*time.Second).UnixNano(), 10), "attack": "Apache.Log4j.Error.Log.Remote.Code.Execution", "severity": "critical", "action": "dropped", "srcip": "198.51.100.7"}})
 		default:
 			w.WriteHeader(http.StatusNotFound)
