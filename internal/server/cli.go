@@ -792,6 +792,23 @@ func remoteCmd(args []string) error {
 		}
 		fmt.Printf("operator stack %s: ok, %d groups (technicians=%s, lans=%s, boxes=%s)\n", set.URL, n, set.TechGroup, set.LANGroup, set.BoxGroup)
 		return nil
+	case len(rest) == 3 && rest[0] == "enable":
+		ra, err := svc.Enable(ctx, rest[1], rest[2], "cli")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\t%s\tstate=%s\t%s\n", ra.SiteID, ra.CIDR, ra.State, ra.Detail)
+		return nil
+	case len(rest) == 2 && rest[0] == "disable":
+		ra, err := svc.Disable(ctx, rest[1], "cli")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\t%s\tstate=%s\n", ra.SiteID, ra.CIDR, ra.State)
+		return nil
+	case len(rest) == 1 && rest[0] == "reconcile":
+		svc.Reconcile(ctx)
+		fallthrough
 	case len(rest) == 1 && rest[0] == "status":
 		rows, err := st.RemoteAccesses(ctx)
 		if err != nil {
@@ -806,5 +823,5 @@ func remoteCmd(args []string) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("usage: excubra server remote test | status")
+	return fmt.Errorf("usage: excubra server remote test | status | reconcile | enable <site_id> <cidr> | disable <site_id>")
 }
