@@ -51,7 +51,7 @@ var slugs = map[string]string{
 	"nginx": "nginx", "apache": "apache-http-server", "apache httpd": "apache-http-server", "mariadb": "mariadb", "mysql": "mysql",
 	"postgresql": "postgresql", "postgres": "postgresql", "fortios": "fortios", "fortigate": "fortios", "proxmox ve": "proxmox-ve", "proxmox": "proxmox-ve",
 	"postfix": "postfix", "dovecot": "dovecot", "exim": "exim", "haproxy": "haproxy", "tomcat": "tomcat", "apache tomcat": "tomcat", "redis": "redis",
-	"mongodb": "mongodb", "elasticsearch": "elasticsearch", "routeros": "routeros", "mikrotik": "routeros", "opnsense": "opnsense", "truenas": "truenas",
+	"mongodb": "mongodb", "elasticsearch": "elasticsearch", "routeros": "routeros", "mikrotik": "routeros", "opnsense": "opnsense", "truenas": "truenas", //nolint:misspell // RouterOS is the product's name
 	"nextcloud": "nextcloud", "gitlab": "gitlab", "zabbix": "zabbix", "grafana": "grafana", "php": "php", "openssl": "openssl", "docker": "docker-engine",
 	"windows server": "windows-server", "debian": "debian", "ubuntu": "ubuntu",
 }
