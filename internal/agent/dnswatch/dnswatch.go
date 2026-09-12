@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/excubra/excubra/internal/agent/guard"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -346,6 +347,7 @@ func (w *Watch) serveUDP(ctx context.Context, pc net.PacketConn) {
 		}
 		go func() {
 			defer func() { <-w.sem }()
+			defer guard.Recover(w.Log, "dns query over udp")
 			if resp := w.handle(ctx, msg, hostOf(addr), "udp"); resp != nil {
 				_, _ = pc.WriteTo(resp, addr)
 			}
@@ -367,6 +369,7 @@ func (w *Watch) serveTCP(ctx context.Context, ln net.Listener) {
 		}
 		go func() {
 			defer func() { <-w.sem; _ = conn.Close() }()
+			defer guard.Recover(w.Log, "dns query over tcp")
 			src := hostOf(conn.RemoteAddr())
 			for {
 				_ = conn.SetDeadline(time.Now().Add(tcpIdle))
@@ -420,8 +423,17 @@ func writeTCP(wr io.Writer, msg []byte) error {
 }
 
 // handle answers one query: from the blocklist, from an upstream, or with an
-// error when nothing answers. src is the client's address.
+// error when nothing answers. src is the client's address. Only the private
+// ranges are served: a box that is ever reachable from the internet must not
+// be an open resolver (a query from outside gets no answer at all, so there is
+// nothing to amplify).
 func (w *Watch) handle(ctx context.Context, msg []byte, src, network string) []byte {
+	if !servedAddress(src) {
+		w.mu.Lock()
+		w.pending.Refused++
+		w.mu.Unlock()
+		return nil
+	}
 	q, err := parseQuestion(msg)
 	if err != nil {
 		return nil
@@ -471,6 +483,17 @@ func (w *Watch) handle(ctx context.Context, msg []byte, src, network string) []b
 		w.tunnel(src, q.Name, now)
 	}
 	return resp
+}
+
+// servedAddress reports whether a client is one the sensor answers: private,
+// loopback or link-local addresses only.
+func servedAddress(src string) bool {
+	a, err := netip.ParseAddr(src)
+	if err != nil {
+		return false
+	}
+	a = a.Unmap()
+	return a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast()
 }
 
 // upstreams picks the resolvers: the config's, else the box's own that are not
@@ -692,6 +715,7 @@ func (w *Watch) Nack() {
 		w.pending.Blocked += r.Blocked
 		w.pending.NXDomain += r.NXDomain
 		w.pending.Failed += r.Failed
+		w.pending.Refused += r.Refused
 		if r.Clients > len(w.seen) {
 			// distinctness across the two intervals is lost; keep the larger count
 			for i := len(w.seen); i < r.Clients; i++ {

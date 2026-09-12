@@ -102,7 +102,7 @@ export interface TLSInfo { subject: string; issuer: string; not_after: string; s
 export interface ServiceRow { DeviceID: string; Port: number; Proto: string; Name: string; Product: string; Version: string; Banner: string; Title: string; TLSInfo: TLSInfo | null; FirstSeen: string; LastSeen: string; GoneAt: string | null; New: boolean }
 export interface ScanRound { ID: string; BoxID: string; SiteID: string; StartedAt: string; FinishedAt: string | null; Hosts: number; Services: number; Errors: number; External: boolean }
 export interface WanView { ip: string; deviceId: string; last: ScanRound | null; services: number; findings: number; outpost: boolean }
-export interface DNSReport { listening?: string; error?: string; list_version?: string; list_size: number; upstream?: string; queries: number; blocked: number; nxdomain: number; failed: number; clients: number }
+export interface DNSReport { listening?: string; error?: string; list_version?: string; list_size: number; upstream?: string; queries: number; blocked: number; nxdomain: number; failed: number; clients: number; refused?: number }
 export interface DNSDay { SiteID: string; Day: string; Queries: number; Blocked: number; NXDomain: number; Failed: number }
 export interface BlocklistStatus { version: string; domains: number; fetchedAt: string; sources: Record<string, number> }
 export interface SiteDNS { enabled: boolean; block: boolean; upstreams: string[]; hasBox: boolean; boxIp: string; report: DNSReport | null; reportAt: string | null; days: DNSDay[]; findings: number; list: BlocklistStatus; listOff: boolean; reinstall?: string; boxSsh?: string }

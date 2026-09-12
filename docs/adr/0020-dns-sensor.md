@@ -50,7 +50,13 @@ device's questions pass through, if the router says so, is a resolver we run.
    ETag; the config names the version, the box fetches when it differs and keeps
    the list on disk across restarts. No addresses, no single labels, no
    localhost.
-5. **What the console shows**: the switch, the blocking switch, the upstreams,
+5. **Never an open resolver, never a crash.** Only private, loopback and
+   link-local sources are served; a query from anywhere else gets no answer at
+   all (counted as refused), so a box that is ever reachable from the internet
+   cannot be used to amplify an attack on someone else. Every query, decoy
+   connection and captured frame is handled behind a recover (`internal/agent/guard`):
+   a packet that trips a parser is dropped and logged, the agent goes on.
+6. **What the console shows**: the switch, the blocking switch, the upstreams,
    the box's report (listening address, list version and size, the upstream in
    use, an error when port 53 could not be opened), the day's totals per site
    (`dns_days`), and open findings. Port 53 needs `CAP_NET_BIND_SERVICE`, which

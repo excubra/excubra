@@ -228,6 +228,34 @@ func TestForwardsBlocksAndReports(t *testing.T) {
 	}
 }
 
+// A query from outside the private ranges gets no answer at all: the box is
+// never an open resolver, whatever the firewall lets through.
+func TestOutsideSourcesAreNotServed(t *testing.T) {
+	up := newUpstream(t)
+	w, _, _, sigs, _ := sensor(t, Config{Enabled: true, Upstreams: []string{up.addr}})
+	if resp := w.handle(context.Background(), query(1, "example.test", 1), "203.0.113.9", "udp"); resp != nil {
+		t.Fatalf("answered an outside source: %x", resp)
+	}
+	if resp := w.handle(context.Background(), query(2, "example.test", 1), "192.168.1.20", "udp"); resp == nil {
+		t.Fatal("did not answer a LAN source")
+	}
+	if resp := w.handle(context.Background(), query(3, "example.test", 1), "::ffff:10.0.0.7", "udp"); resp == nil {
+		t.Fatal("did not answer a mapped private source")
+	}
+	rep := w.Drain()
+	if rep.Refused != 1 || rep.Queries != 2 || up.seen != 2 {
+		t.Fatalf("report: %+v upstream=%d", rep, up.seen)
+	}
+	if len(*sigs) != 0 {
+		t.Fatalf("signals: %+v", *sigs)
+	}
+	for src, want := range map[string]bool{"127.0.0.1": true, "169.254.10.4": true, "100.64.0.9": false, "8.8.8.8": false, "fd00::1": true, "2001:db8::1": false, "": false} {
+		if got := servedAddress(src); got != want {
+			t.Errorf("servedAddress(%s) = %v", src, got)
+		}
+	}
+}
+
 func TestFailoverAndLoopGuard(t *testing.T) {
 	up := newUpstream(t)
 	dead := "[::1]:1"
