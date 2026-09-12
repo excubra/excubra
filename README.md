@@ -58,6 +58,19 @@ excubra server box task <box_id> update     # ask one box to check now
 excubra server update now                   # let this server check now
 ```
 
+## Assistant
+
+`excubra server mcp` serves EX0 over the Model Context Protocol on stdin/stdout:
+tenants, sites, devices and their services, findings, events, the situation of a
+site, and a tool that stores an assessment written by the assistant. Start it
+through SSH from a machine in the operator overlay, so nothing new listens:
+
+```
+claude mcp add --scope user ex0 -- ssh -o BatchMode=yes root@<server> excubra server mcp --actor <you>
+```
+
+It reads and proposes; it acknowledges nothing and executes nothing (ADR-0019).
+
 ## Licence
 
 Apache License 2.0 — see [LICENSE](LICENSE).

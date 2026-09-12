@@ -251,6 +251,50 @@ func (s *Service) Assess(ctx context.Context, siteID, actor string) (store.AIBri
 	return brief, nil
 }
 
+// Packet builds the situation of a site as the model would see it — for a person
+// or a session model that does the reading itself (the pilot before an API key).
+func (s *Service) Packet(ctx context.Context, siteID string) (Packet, error) {
+	site, err := s.Store.Site(ctx, siteID)
+	if err != nil {
+		return Packet{}, err
+	}
+	tenant, err := s.Store.Tenant(ctx, site.TenantID)
+	if err != nil {
+		return Packet{}, err
+	}
+	pk, _ := s.packet(ctx, tenant, site)
+	return pk, nil
+}
+
+// Import stores an assessment somebody else wrote from the packet — a session
+// model, a person — the same way Assess stores the model's: sanitised, as a brief,
+// its device-bound findings under the source "ki", audited.
+func (s *Service) Import(ctx context.Context, siteID, actor, provider, model string, r Result, promptBytes int) (store.AIBrief, error) {
+	site, err := s.Store.Site(ctx, siteID)
+	if err != nil {
+		return store.AIBrief{}, err
+	}
+	tenant, err := s.Store.Tenant(ctx, site.TenantID)
+	if err != nil {
+		return store.AIBrief{}, err
+	}
+	_, devices := s.packet(ctx, tenant, site)
+	r = sanitize(r, devices)
+	body, _ := json.Marshal(r)
+	brief := store.AIBrief{ID: id.New("brief"), SiteID: siteID, TenantID: tenant.ID, At: s.Now(), Provider: firstNonEmpty(provider, "session"), Model: firstNonEmpty(model, "session"), Risk: r.Risk, Summary: r.Summary, Body: body,
+		PromptBytes: promptBytes, ResponseBytes: len(body), RequestedBy: actor}
+	if err := s.Store.SetAIBrief(ctx, brief); err != nil {
+		return brief, err
+	}
+	_ = s.Store.PruneAIBriefs(ctx, siteID, keepBriefs)
+	s.syncFindings(ctx, tenant, site, r, devices, brief.Model)
+	_ = s.Store.Audit(ctx, s.Now(), actor, "ai.import", siteID, fmt.Sprintf("provider=%s model=%s risk=%s priorities=%d findings=%d", brief.Provider, brief.Model, r.Risk, len(r.Priorities), len(r.Findings)))
+	return brief, nil
+}
+
+// ParseResult reads a model's JSON answer, tolerating fences and text around it.
+func ParseResult(text string) (Result, error) { return parseResult(text) }
+
 // syncFindings turns the model's device-bound findings into findings of source
 // "ki": one sync per device of the packet, so old ones resolve.
 func (s *Service) syncFindings(ctx context.Context, tenant store.Tenant, site store.Site, r Result, devices map[string]bool, model string) {

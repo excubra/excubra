@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,6 +21,7 @@ import (
 	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/catalog"
+	"github.com/excubra/excubra/internal/server/mcp"
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
@@ -904,6 +906,43 @@ func aiCmd(args []string) error {
 		set := svc.Settings(ctx)
 		fmt.Printf("%s %s answers: %s\n", set.Provider, set.Model, reply)
 		return nil
+	case len(rest) == 2 && rest[0] == "packet":
+		// the situation as the model would see it, for a person or a session model
+		pk, err := svc.Packet(ctx, rest[1])
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", " ")
+		return enc.Encode(pk)
+	case len(rest) >= 2 && rest[0] == "import":
+		// import <site_id> [--file result.json] [--by actor] [--model label]: an assessment written outside
+		ifs := flag.NewFlagSet("excubra server ai import", flag.ContinueOnError)
+		file := ifs.String("file", "-", "JSON answer in the agreed shape; - reads stdin")
+		by := ifs.String("by", "cli", "who wrote it")
+		model := ifs.String("model", "session", "which model or person")
+		if err := ifs.Parse(rest[2:]); err != nil {
+			return err
+		}
+		var data []byte
+		if *file == "-" {
+			data, err = io.ReadAll(os.Stdin)
+		} else {
+			data, err = os.ReadFile(*file) //nolint:gosec // the operator names the file
+		}
+		if err != nil {
+			return err
+		}
+		r, err := ai.ParseResult(string(data))
+		if err != nil {
+			return fmt.Errorf("ai import: %w", err)
+		}
+		brief, err := svc.Import(ctx, rest[1], *by, "session", *model, r, 0)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("brief %s stored: risk=%s priorities=%d findings=%d\n", brief.ID, brief.Risk, len(r.Priorities), len(r.Findings))
+		return nil
 	case len(rest) == 2 && rest[0] == "assess":
 		brief, err := svc.Assess(ctx, rest[1], "cli")
 		if err != nil {
@@ -918,5 +957,25 @@ func aiCmd(args []string) error {
 		fmt.Printf("%d findings from the model\n", len(r.Findings))
 		return nil
 	}
-	return fmt.Errorf("usage: excubra server ai test | assess <site_id>")
+	return fmt.Errorf("usage: excubra server ai test | assess <site_id> | packet <site_id> | import <site_id> [--file f.json] [--by who] [--model label]")
+}
+
+// mcpCmd serves EX0 over the Model Context Protocol on stdin/stdout — started
+// through SSH from a machine in the operator overlay, nothing new listens.
+func mcpCmd(args []string) error {
+	fs := flag.NewFlagSet("excubra server mcp", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "server env file")
+	actor := fs.String("actor", "mcp", "who the assistant acts for, in audits")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	st, cfg, err := cliStore(*envFile)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	loc, _ := time.LoadLocation(cfg.Timezone)
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	srv := &mcp.Server{Store: st, AI: ai.New(st, log, loc), Log: log, Now: time.Now, Actor: *actor}
+	return srv.Serve(context.Background(), os.Stdin, os.Stdout)
 }
