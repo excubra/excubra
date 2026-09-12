@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -711,4 +712,55 @@ func updateCmd(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("usage: excubra server update status | now | channel <stable|canary|off>")
+}
+
+// settingCmd: excubra server setting get <key> | set <key> <value|-> (- reads the
+// value from stdin, so a token from a password manager never shows in a process
+// list or a shell history).
+func settingCmd(args []string) error {
+	fs := flag.NewFlagSet("excubra server setting", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "server env file")
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
+		return err
+	}
+	st, _, err := cliStore(*envFile)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	switch {
+	case len(rest) == 2 && rest[0] == "get":
+		v, err := st.Setting(ctx, rest[1])
+		if err != nil {
+			return err
+		}
+		if strings.Contains(rest[1], "token") || strings.Contains(rest[1], "secret") {
+			if v == "" {
+				fmt.Println("(unset)")
+			} else {
+				fmt.Println("(set, not shown)")
+			}
+			return nil
+		}
+		fmt.Println(v)
+		return nil
+	case len(rest) == 3 && rest[0] == "set":
+		v := rest[2]
+		if v == "-" {
+			b, err := io.ReadAll(io.LimitReader(os.Stdin, 64<<10))
+			if err != nil {
+				return err
+			}
+			v = strings.TrimSpace(string(b))
+		}
+		if err := st.SetSetting(ctx, rest[1], v); err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, time.Now(), "cli", "setting.set", rest[1], "")
+		fmt.Printf("%s set\n", rest[1])
+		return nil
+	}
+	return fmt.Errorf("usage: excubra server setting get <key> | set <key> <value|->")
 }
