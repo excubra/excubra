@@ -5,6 +5,7 @@ package discovery
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -24,20 +25,9 @@ import (
 // lanInterface picks the interface of the default IPv4 route from /proc/net/route,
 // which is what "the box's LAN" means on a single-homed device.
 func lanInterface() (*net.Interface, netip.Prefix, error) {
-	b, err := os.ReadFile("/proc/net/route")
+	name, _, err := defaultRoute()
 	if err != nil {
 		return nil, netip.Prefix{}, err
-	}
-	var name string
-	for _, line := range strings.Split(string(b), "\n")[1:] {
-		f := strings.Fields(line)
-		if len(f) >= 2 && f[1] == "00000000" {
-			name = f[0]
-			break
-		}
-	}
-	if name == "" {
-		return nil, netip.Prefix{}, errors.New("no default route")
 	}
 	ifi, err := net.InterfaceByName(name)
 	if err != nil {
@@ -59,6 +49,37 @@ func lanInterface() (*net.Interface, netip.Prefix, error) {
 	return nil, netip.Prefix{}, fmt.Errorf("interface %s has no IPv4 address", name)
 }
 
+// defaultRoute reads the IPv4 default route: its interface and its gateway (which
+// /proc/net/route stores as little-endian hex).
+func defaultRoute() (string, netip.Addr, error) {
+	b, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return "", netip.Addr{}, err
+	}
+	for _, line := range strings.Split(string(b), "\n")[1:] {
+		f := strings.Fields(line)
+		if len(f) >= 3 && f[1] == "00000000" {
+			var gw netip.Addr
+			if raw, err := hex.DecodeString(f[2]); err == nil && len(raw) == 4 {
+				gw = netip.AddrFrom4([4]byte{raw[3], raw[2], raw[1], raw[0]})
+			}
+			return f[0], gw, nil
+		}
+	}
+	return "", netip.Addr{}, errors.New("no default route")
+}
+
+// LANInterface returns the interface of the default route with its IPv4 prefix,
+// and DefaultGateway the address the default route points at — what the sentinel
+// needs to know which frames are its own and which address is the gateway.
+func LANInterface() (*net.Interface, netip.Prefix, error) { return lanInterface() }
+
+// DefaultGateway returns the IPv4 gateway of the default route, if any.
+func DefaultGateway() (netip.Addr, bool) {
+	_, gw, err := defaultRoute()
+	return gw, err == nil && gw.IsValid() && !gw.IsUnspecified()
+}
+
 // htons converts to network byte order for the AF_PACKET protocol field. Every
 // Linux target we build (amd64, arm64) is little-endian.
 func htons(v uint16) uint16 { return v<<8 | v>>8 }
@@ -75,9 +96,9 @@ func arpSocket(ifi *net.Interface) (int, error) {
 	return fd, nil
 }
 
-// platformPassive reads ARP frames on the LAN interface until ctx ends and reports
-// every sender. It never transmits.
-func platformPassive(ctx context.Context, see func(mac, ip, ip6 string)) error {
+// platformPassive reads ARP frames on the LAN interface until ctx ends, reports
+// every sender to the table and every frame to the observer. It never transmits.
+func platformPassive(ctx context.Context, see func(mac, ip, ip6 string), observe func(ARPFrame)) error {
 	ifi, _, err := lanInterface()
 	if err != nil {
 		return err
@@ -101,8 +122,15 @@ func platformPassive(ctx context.Context, see func(mac, ip, ip6 string)) error {
 			}
 			return err
 		}
-		if mac, ip, ok := parseARPPortable(buf[:n]); ok {
-			see(mac, ip, "")
+		fr, ok := parseARP(buf[:n])
+		if !ok {
+			continue
+		}
+		if fr.SenderIP != "0.0.0.0" && fr.SenderMAC != "00:00:00:00:00:00" {
+			see(fr.SenderMAC, fr.SenderIP, "")
+		}
+		if observe != nil {
+			observe(fr)
 		}
 	}
 	return ctx.Err()

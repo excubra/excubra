@@ -16,6 +16,7 @@ import { BoxTech } from "@/components/box-tech"
 import { TaskMenu } from "@/components/task-menu"
 import { RemoteAccessCard } from "@/components/remote-access"
 import { ScanCard } from "@/components/scan-card"
+import { CanaryCard } from "@/components/canary-card"
 import { AICard } from "@/components/ai-card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -157,6 +158,7 @@ export default function SitePage() {
         </TabsContent>
 
         <TabsContent value="technik" className="mt-4 flex flex-col gap-4">
+          <CanaryCard siteId={id} />
           <ScanCard siteId={id} />
           <RemoteAccessCard siteId={id} />
           {d.Box ? <BoxTech box={d.Box} site={d.Site} sites={d.Sites ?? []} tenantNames={d.TenantNames} fingerprint={d.Fingerprint} netbird={d.Netbird} subnets={d.Subnets} onChanged={refresh} /> : (

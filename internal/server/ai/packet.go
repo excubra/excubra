@@ -232,6 +232,8 @@ func source(connectorID string) string {
 		return "version_feed"
 	case "ki":
 		return "ai"
+	case "signal":
+		return "live_detection"
 	}
 	return "connector"
 }

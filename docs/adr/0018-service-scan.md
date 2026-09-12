@@ -1,6 +1,6 @@
 # ADR-0018: The continuous service scan — inside from the box, outside from an outpost
 
-Status: accepted · Date: 2026-09-12 · Replaces the "no port scan" rule of ADR-0007 (decision E20)
+Status: accepted · Date: 2026-09-12 · Replaces the "no port scan" rule of ADR-0007 (decision E20) · §7 live detection added 2026-09-12 (decision E22)
 
 ## Context
 
@@ -62,13 +62,51 @@ wants. The tool is now the product: open, announced, with the customer's consent
    device is re-assessed without waiting for the next round. `EXCUBRA_FEEDS=off`
    switches it off; a different base URL points at a mirror.
 
+7. **Live detection sits on the box** (`internal/agent/sentinel`, decision E22).
+   The scan finds open doors; this finds someone trying them, within the minute.
+   Three sources, none of them sends a packet:
+   - **Decoy ports.** The box listens on 445, 3389, 23, 1433 and 5900 (SMB, RDP,
+     telnet, MSSQL, VNC): what ransomware, worms and a hand on the keyboard look
+     for first, and what no healthy device asks a monitoring box for. A listener
+     accepts, waits three seconds and closes; nothing answers a byte of protocol,
+     so there is nothing to exploit. 22 is never a decoy.
+   - **A SYN watcher.** An `AF_PACKET` socket with a classic BPF filter keeps only
+     TCP SYNs addressed to the box. A packet socket sees a frame before the
+     firewall does, so a knock the firewall drops still counts. A decoy hit is a
+     `canary` signal; eight distinct ports from one source within a minute is a
+     `port_scan`.
+   - **ARP.** The passive discovery listener hands every ARP frame to the
+     sentinel. A hundred distinct addresses asked by one MAC within a minute is
+     an `arp_scan`; the gateway's address claimed by a second MAC is an
+     `arp_spoof` at once, any other address only when it flaps three times in ten
+     minutes (a new DHCP lease is one change, not a fight).
+   Signals travel in the heartbeat (at most 200, oldest dropped first, acknowledged
+   like sightings). The server hangs a finding on the source device (source
+   `signal`, rules `signal.canary|port_scan|arp_scan|arp_spoof`, all urgent — a
+   healthy LAN produces none of them; the one legitimate producer, an inventory
+   or monitoring tool, is known and acknowledged once) and publishes one
+   `security.alert` event when a finding opens; the same signal again only grows
+   the count. A signal that has been quiet for a day resolves on its own: these
+   are incidents, not states. The switch is `sites.canary_enabled`, on by default
+   — a box that listens harms nobody; the provisioning opens the decoy ports in
+   ufw and gives the agent `CAP_NET_BIND_SERVICE` for the two below 1024. An
+   outpost has no decoys. What the box does not see: a SYN scan of *other*
+   devices (it is not in their path), and anything on a switch port it does not
+   share — the decoys are the answer to that, because a scanner that reaches the
+   subnet reaches the box.
+
 ## Rejected
 
 - **Syslog as the first step**: needs a receiver port and device settings per
   vendor; deferred (V5).
 - **A connector per device as the detection path**: upkeep without end.
 - **Watching the perimeter knock**: every internet connection is scanned all day;
-  the signal is in the open door, not in the knocking.
+  the signal is in the open door, not in the knocking. Inside the LAN the
+  opposite holds, which is why §7 counts every knock there.
+- **Decoys that speak the protocol (a full honeypot)**: more signal, but a
+  service to keep safe on a box that must never be the way in.
+- **A promiscuous tap of the whole LAN**: sees more on a hub, nothing more on a
+  switch, and turns the box into a sniffer of customer traffic.
 - **Exploit checks or credential guessing on the box**: the box must never do harm
   (ADR-0007); it tells, it does not try.
 
@@ -79,5 +117,11 @@ wants. The tool is now the product: open, announced, with the customer's consent
   slower than any real attacker.
 - Discovery still decides what exists; the scan only asks known devices. Unknown
   devices get their first scan one round after they appear.
+- The box has open ports now (§7). They are fake and silent, but a port scan of
+  the customer's network shows them; the customer knows why (the contract) and
+  the console shows which ports are armed.
+- Windows network discovery and security tools touch 445 on every host they
+  find. They do not find the box (it announces nothing), but a tool that walks
+  the subnet will, once — that finding is the operator's to acknowledge.
 - ADR-0007's discovery limits (no ARP storms, sweep rate caps) stay in force; only
   its port-scan sentence is replaced.

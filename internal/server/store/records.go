@@ -48,6 +48,9 @@ type Site struct {
 	Name        string
 	CreatedAt   time.Time
 	ScanEnabled bool // the service scan runs on this site (ADR-0018)
+	// CanaryEnabled switches the box's decoy ports and live signals (ADR-0018 §7);
+	// on by default.
+	CanaryEnabled bool
 }
 
 // Box is an enrolled device. SiteID is empty until the console assigns it.
@@ -85,6 +88,8 @@ type Box struct {
 	// Role is "box" (in a customer LAN) or "outpost" (in our infrastructure, scans
 	// the sites' public addresses; ADR-0018)
 	Role string
+	// Canary lists the decoy ports the box reported as armed (ADR-0018 §7).
+	Canary []int
 }
 
 // EnrollmentKey is a one-time key; only the hash of the secret is stored.

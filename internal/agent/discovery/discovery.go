@@ -386,11 +386,13 @@ type Discovery struct {
 	Table *Table
 	OUI   *OUI
 	Names *Names
+	// ARP, when set, gets every ARP frame the passive listener reads (the sentinel).
+	ARP func(ARPFrame)
 
 	mu  sync.Mutex
 	cfg Config
 	// platform hooks, replaced in tests
-	passive   func(ctx context.Context, see func(mac, ip, ip6 string)) error
+	passive   func(ctx context.Context, see func(mac, ip, ip6 string), observe func(ARPFrame)) error
 	arpSweep  func(ctx context.Context, maxPPS int, see func(mac, ip, ip6 string)) error
 	icmpSweep func(ctx context.Context, prefixes []netip.Prefix, maxPPS int, see func(mac, ip, ip6 string)) error
 	neighbors func(see func(mac, ip, ip6 string)) error
@@ -442,7 +444,7 @@ func (d *Discovery) Run(ctx context.Context) {
 func (d *Discovery) runPassive(ctx context.Context) {
 	backoff := 5 * time.Second
 	for {
-		err := d.passive(ctx, d.Table.See)
+		err := d.passive(ctx, d.Table.See, d.observe)
 		if ctx.Err() != nil {
 			return
 		}
@@ -459,6 +461,13 @@ func (d *Discovery) runPassive(ctx context.Context) {
 		if backoff < 5*time.Minute {
 			backoff *= 2
 		}
+	}
+}
+
+// observe hands a frame to the ARP observer, if there is one.
+func (d *Discovery) observe(f ARPFrame) {
+	if d.ARP != nil {
+		d.ARP(f)
 	}
 }
 

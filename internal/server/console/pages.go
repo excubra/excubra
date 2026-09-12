@@ -385,7 +385,7 @@ func (s *Server) buildSite(ctx context.Context, siteID, tab, rng string) (siteDa
 		if ev.SiteID != "" && ev.SiteID != site.ID {
 			continue
 		}
-		re := recentEvent{Event: ev, TenantName: d.Tenant.Name, SiteName: site.Name, Class: eventClass(ev.Type), Title: eventTitle(ev), Info: eventInfo(ev)}
+		re := recentEvent{Event: ev, TenantName: d.Tenant.Name, SiteName: site.Name, Class: eventClass(ev), Title: eventTitle(ev), Info: eventInfo(ev)}
 		if re.Class == "down" {
 			d.Red++
 		}
@@ -577,7 +577,7 @@ func (s *Server) eventsPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, ev := range evs {
-			re := recentEvent{Event: ev, TenantName: t.Name, Class: eventClass(ev.Type), Title: eventTitle(ev), Info: eventInfo(ev)}
+			re := recentEvent{Event: ev, TenantName: t.Name, Class: eventClass(ev), Title: eventTitle(ev), Info: eventInfo(ev)}
 			if site, ok := sm[ev.SiteID]; ok {
 				re.SiteName = site.Name
 			}

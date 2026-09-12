@@ -48,13 +48,13 @@ export interface Me { user: string; csrf: string; version: string; now: string; 
 export interface BoxState { ID: string; Status: string; LastHeartbeat: string; SilentSince: string; AgentVersion: string }
 export interface BoxRow {
   ID: string; SiteID: string; Name: string; HWID: string; AgentVersion: string; OS: string; Arch: string; CertSerial: string; CertNotAfter: string
-  Channel: string; DiscoveryMode: string; DiscoverySubnets: string[] | null; NetbirdStatus: string; NetbirdIP: string; NetbirdOpStatus?: string; NetbirdOpIP?: string; LAN?: string[] | null
+  Channel: string; DiscoveryMode: string; DiscoverySubnets: string[] | null; NetbirdStatus: string; NetbirdIP: string; NetbirdOpStatus?: string; NetbirdOpIP?: string; LAN?: string[] | null; Canary?: number[] | null
   DiskTotalBytes: number; DiskFreeBytes: number; UptimeS: number; LastSeen: string; EnrolledAt: string; RevokedAt: string | null
   SealKey?: string
   State: BoxState; SiteName: string; TenantName: string; Assigned: boolean
 }
 export interface Tenant { ID: string; Name: string; CreatedAt: string; AIScope?: string }
-export interface Site { ID: string; TenantID: string; Name: string; CreatedAt: string; ScanEnabled?: boolean }
+export interface Site { ID: string; TenantID: string; Name: string; CreatedAt: string; ScanEnabled?: boolean; CanaryEnabled?: boolean }
 export interface HostState { Observed: string; Reported: string; Failures: number; Successes: number; Since: string; LastBoxTime?: string }
 export interface HostRow {
   ID: string; TenantID: string; SiteID: string; BoxID: string; DeviceID: string; Name: string; Address: string; MAC: string; Vendor: string
@@ -102,7 +102,7 @@ export interface TLSInfo { subject: string; issuer: string; not_after: string; s
 export interface ServiceRow { DeviceID: string; Port: number; Proto: string; Name: string; Product: string; Version: string; Banner: string; Title: string; TLSInfo: TLSInfo | null; FirstSeen: string; LastSeen: string; GoneAt: string | null; New: boolean }
 export interface ScanRound { ID: string; BoxID: string; SiteID: string; StartedAt: string; FinishedAt: string | null; Hosts: number; Services: number; Errors: number; External: boolean }
 export interface WanView { ip: string; deviceId: string; last: ScanRound | null; services: number; findings: number; outpost: boolean }
-export interface SiteScan { enabled: boolean; hasBox: boolean; last: ScanRound | null; rounds: ScanRound[] | null; services: number; devices: number; findings: number; wan: WanView | null }
+export interface SiteScan { enabled: boolean; hasBox: boolean; canary: boolean; armed: number[] | null; signals: number; last: ScanRound | null; rounds: ScanRound[] | null; services: number; devices: number; findings: number; wan: WanView | null }
 export interface DeviceDetail { device: DeviceCard; tenant: Tenant; site: Site; host: HostCard | null; events: EventRow[] | null; services: ServiceRow[] | null; logsNote: string }
 export interface BoxesData { Unassigned: BoxRow[] | null; Assigned: BoxRow[] | null }
 export interface BoxTask { ID: string; BoxID: string; Kind: string; IssuedAt: string; IssuedBy: string; ExpiresAt: string; DoneAt: string | null; OK: boolean | null; Detail: string }

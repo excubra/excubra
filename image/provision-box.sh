@@ -134,6 +134,9 @@ elif ufw --force reset >/dev/null 2>&1; then
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
   if [ "$SSH_LAN" = 1 ]; then ufw allow 22/tcp comment 'ssh (pilot, LAN)' >/dev/null; fi
+  # the decoy ports of the live detection (ADR-0018 §7): they must look open; the agent
+  # behind them accepts, waits and closes — no service, no answer
+  for p in 445 3389 23 1433 5900; do ufw allow "$p/tcp" comment 'EX0 decoy port' >/dev/null; done
   ufw --force enable >/dev/null || echo "   (ufw konnte nicht aktiviert werden — Container ohne Netfilter-Rechte; die Box hat ohnehin keinen offenen Port)"
 else
   echo "   (ufw nicht verfügbar — Container; die Box hat ohnehin keinen offenen Port)"

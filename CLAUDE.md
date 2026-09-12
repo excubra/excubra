@@ -42,8 +42,10 @@ Reports — das ist Phase 2 und darf durch das Design nur nicht verbaut werden.
   Overlay-Listener. Kein gemeinsamer Handler, keine Umleitung.
 - Mandant wird aus dem Client-Zertifikat abgeleitet, nie aus dem Payload.
   Enrollment-Keys einmalig; Zuordnung nur serverseitig in der Konsole.
-- Kein Portscan im Code, auch nicht hinter einem Flag. Discovery-Modi: `passive`, `sweep`.
-- Agent unprivilegiert (CAP_NET_RAW), darf nie schaden: Ringpuffer Drop-Oldest, blockiert
+- Discovery-Modi: `passive`, `sweep`. Der Dienst-Scan (ADR-0018, E20) ist je Standort
+  geschaltet, gedrosselt, liest nur; nie Exploits, nie Zugangsdaten. Die Live-Erkennung
+  (ADR-0018 §7) öffnet Köder-Ports, antwortet nichts und sendet nichts.
+- Agent unprivilegiert (CAP_NET_RAW, CAP_NET_BIND_SERVICE), darf nie schaden: Ringpuffer Drop-Oldest, blockiert
   nie eine Anwendung, keine lokale Config-Datei (nur Key/Zertifikat + State-Verzeichnis).
 - Updates nur signiert (Public Key einkompiliert); der Server kann nicht signieren.
   Atomarer Tausch, Health-Check, Rollback.

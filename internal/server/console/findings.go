@@ -128,6 +128,8 @@ func (s *Server) findingSource(ctx context.Context, connectorID string, kinds ma
 		return "Außenansicht"
 	case "version":
 		return "Versionsabgleich"
+	case "signal":
+		return "Live-Erkennung"
 	case "":
 		return ""
 	}

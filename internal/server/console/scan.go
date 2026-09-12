@@ -48,6 +48,9 @@ func (s *Server) deviceServices(ctx context.Context, deviceID string) []serviceV
 type scanView struct {
 	Enabled  bool              `json:"enabled"`
 	HasBox   bool              `json:"hasBox"`
+	Canary   bool              `json:"canary"`  // the live detection switch (ADR-0018 §7)
+	Armed    []int             `json:"armed"`   // decoy ports the box reports as listening
+	Signals  int               `json:"signals"` // open findings from the live detection
 	Last     *store.ScanRound  `json:"last"`
 	Rounds   []store.ScanRound `json:"rounds"`
 	Services int               `json:"services"` // open services on the site's devices
@@ -73,9 +76,12 @@ func (s *Server) apiSiteScan(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, statusFor(err))
 		return
 	}
-	v := scanView{Enabled: site.ScanEnabled}
+	v := scanView{Enabled: site.ScanEnabled, Canary: site.CanaryEnabled, Armed: []int{}}
 	if box, err := s.siteBox(ctx, siteID); err == nil && box != nil {
 		v.HasBox = true
+		if box.Canary != nil {
+			v.Armed = box.Canary
+		}
 	}
 	wan := &wanView{}
 	if boxes, err := s.Store.Boxes(ctx, siteID); err == nil {
@@ -131,6 +137,8 @@ func (s *Server) apiSiteScan(w http.ResponseWriter, r *http.Request) {
 				v.Findings++
 			case "wan":
 				wan.Findings++
+			case "signal":
+				v.Signals++
 			}
 		}
 	}
@@ -153,4 +161,19 @@ func (s *Server) siteScanSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.flash(w, r, "Schwachstellen-Scan abgeschaltet. Gefundene Dienste und Findings bleiben stehen, bis eine neue Runde läuft.", back)
+}
+
+func (s *Server) siteCanarySet(w http.ResponseWriter, r *http.Request) {
+	siteID := r.PathValue("id")
+	back := "/sites/" + siteID + "?tab=technik"
+	enabled := r.PostForm.Get("enabled") == "1"
+	if err := s.Engine.SetSiteCanary(r.Context(), siteID, enabled, actor(r)); err != nil {
+		s.fail(w, r, err, statusFor(err))
+		return
+	}
+	if enabled {
+		s.flash(w, r, "Live-Erkennung eingeschaltet. Die Box öffnet ihre Köder-Ports mit dem nächsten Heartbeat und meldet ab dann, wer anklopft.", back)
+		return
+	}
+	s.flash(w, r, "Live-Erkennung abgeschaltet. Die Box schließt ihre Köder-Ports; offene Findings bleiben, bis sie quittiert sind oder einen Tag still waren.", back)
 }
