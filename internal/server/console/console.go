@@ -220,6 +220,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/settings/netbird/test", s.auth(s.remoteSettingsTest))
 	mux.Handle("GET /api/findings", s.auth(s.apiFindings))
 	mux.Handle("GET /api/devices/{id}/findings", s.auth(s.apiDeviceFindings))
+	mux.Handle("GET /api/sites/{id}/scan", s.auth(s.apiSiteScan))
+	mux.Handle("POST /api/sites/{id}/scan", s.auth(s.siteScanSet))
 	mux.Handle("GET /api/devices/{id}/connectors", s.auth(s.apiDeviceConnectors))
 	mux.Handle("POST /api/devices/{id}/connectors", s.auth(s.connectorCreate))
 	mux.Handle("POST /api/connectors/{id}/secret", s.auth(s.connectorSecret))

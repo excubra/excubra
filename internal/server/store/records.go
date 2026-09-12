@@ -19,10 +19,11 @@ type Tenant struct {
 
 // Site is a location of a tenant; boxes and hosts belong to a site.
 type Site struct {
-	ID        string
-	TenantID  string
-	Name      string
-	CreatedAt time.Time
+	ID          string
+	TenantID    string
+	Name        string
+	CreatedAt   time.Time
+	ScanEnabled bool // the service scan runs on this site (ADR-0018)
 }
 
 // Box is an enrolled device. SiteID is empty until the console assigns it.
@@ -124,6 +125,34 @@ type Device struct {
 	LastSeen  time.Time
 	GoneAt    *time.Time
 	Ignored   bool
+}
+
+// Service is one listening service the scan found on a device (ADR-0018).
+type Service struct {
+	DeviceID  string
+	Port      int
+	Proto     string
+	Name      string
+	Product   string
+	Version   string
+	Banner    string
+	Title     string
+	TLS       json.RawMessage // wire.TLSInfo, or empty
+	FirstSeen time.Time
+	LastSeen  time.Time
+	GoneAt    *time.Time
+}
+
+// ScanRound is one round a box ran over its site.
+type ScanRound struct {
+	ID         string
+	BoxID      string
+	SiteID     string
+	StartedAt  time.Time
+	FinishedAt *time.Time
+	Hosts      int
+	Services   int
+	Errors     int
 }
 
 // Host is a monitored system, checked by its box.

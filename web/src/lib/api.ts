@@ -54,7 +54,7 @@ export interface BoxRow {
   State: BoxState; SiteName: string; TenantName: string; Assigned: boolean
 }
 export interface Tenant { ID: string; Name: string; CreatedAt: string }
-export interface Site { ID: string; TenantID: string; Name: string; CreatedAt: string }
+export interface Site { ID: string; TenantID: string; Name: string; CreatedAt: string; ScanEnabled?: boolean }
 export interface HostState { Observed: string; Reported: string; Failures: number; Successes: number; Since: string; LastBoxTime?: string }
 export interface HostRow {
   ID: string; TenantID: string; SiteID: string; BoxID: string; DeviceID: string; Name: string; Address: string; MAC: string; Vendor: string
@@ -98,7 +98,11 @@ export interface SiteData {
   Events: EventRow[] | null; Red: number; Tab: string; Chart: ChartData
   Sites: Site[] | null; TenantNames: Record<string, string>; Fingerprint: string; Netbird: { ManagementURL: string; ClaimedAt: string | null } | null; Subnets: string
 }
-export interface DeviceDetail { device: DeviceCard; tenant: Tenant; site: Site; host: HostCard | null; events: EventRow[] | null; logsNote: string }
+export interface TLSInfo { subject: string; issuer: string; not_after: string; self_signed: boolean; version: string; dns_names?: string[] }
+export interface ServiceRow { DeviceID: string; Port: number; Proto: string; Name: string; Product: string; Version: string; Banner: string; Title: string; TLSInfo: TLSInfo | null; FirstSeen: string; LastSeen: string; GoneAt: string | null; New: boolean }
+export interface ScanRound { ID: string; BoxID: string; SiteID: string; StartedAt: string; FinishedAt: string | null; Hosts: number; Services: number; Errors: number }
+export interface SiteScan { enabled: boolean; hasBox: boolean; last: ScanRound | null; rounds: ScanRound[] | null; services: number; devices: number; findings: number }
+export interface DeviceDetail { device: DeviceCard; tenant: Tenant; site: Site; host: HostCard | null; events: EventRow[] | null; services: ServiceRow[] | null; logsNote: string }
 export interface BoxesData { Unassigned: BoxRow[] | null; Assigned: BoxRow[] | null }
 export interface BoxTask { ID: string; BoxID: string; Kind: string; IssuedAt: string; IssuedBy: string; ExpiresAt: string; DoneAt: string | null; OK: boolean | null; Detail: string }
 export interface BoxNote { ID: number; BoxID: string; At: string; Text: string }

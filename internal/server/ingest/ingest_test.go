@@ -408,6 +408,103 @@ func TestAssignedBoxLifecycle(t *testing.T) {
 	}
 }
 
+// The service scan (ADR-0018): the switch reaches the box through its config, a
+// report becomes services on the device and findings from the scan rules, and a
+// later round that no longer sees a service marks it gone and resolves its finding.
+func TestScanReportBecomesServicesAndFindings(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	boxID, boxClient, _ := f.enroll(f.key.String())
+	must(t, f.eng.AssignBox(ctx, boxID, "site_a", "test"))
+	beat := func(hb wire.Heartbeat) wire.HeartbeatResponse {
+		t.Helper()
+		f.now = f.now.Add(60 * time.Second)
+		hb.SentAt, hb.Agent = f.now, wire.AgentInfo{Version: "0.3.0", OS: "linux", Arch: "amd64"}
+		status, body := f.do(boxClient, "POST", "/v1/heartbeat", hb, nil)
+		if status != 200 {
+			t.Fatalf("heartbeat: %d %s", status, body)
+		}
+		var resp wire.HeartbeatResponse
+		_ = json.Unmarshal(body, &resp)
+		return resp
+	}
+	// the device appears through discovery; the scan is off by default
+	beat(wire.Heartbeat{Discovery: wire.DiscoveryReport{Seen: []wire.Sighting{{MAC: "00:11:22:33:44:55", IP: "192.168.1.50", Vendor: "Acme", LastSeen: f.now}}}})
+	_, body := f.do(boxClient, "GET", "/v1/config", nil, nil)
+	var cfg wire.Config
+	_ = json.Unmarshal(body, &cfg)
+	if cfg.Scan.Enabled {
+		t.Fatal("scan on without anyone switching it on")
+	}
+	must(t, f.eng.SetSiteScan(ctx, "site_a", true, "test"))
+	_, body = f.do(boxClient, "GET", "/v1/config", nil, nil)
+	_ = json.Unmarshal(body, &cfg)
+	if !cfg.Scan.Enabled || cfg.Scan.MaxPPS != 20 || cfg.Scan.IntervalS != 86400 {
+		t.Fatalf("scan config: %+v", cfg.Scan)
+	}
+	devs, err := f.st.Devices(ctx, "ten_a", "site_a", time.Time{})
+	must(t, err)
+	var devID string
+	for _, d := range devs {
+		if d.IP == "192.168.1.50" {
+			devID = d.ID
+		}
+	}
+	if devID == "" {
+		t.Fatalf("device not in the inventory: %+v", devs)
+	}
+
+	// a round: telnet and an https service with an expired certificate
+	expired := &wire.TLSInfo{Subject: "CN=old.example.test", Issuer: "CN=old.example.test", NotAfter: f.now.Add(-48 * time.Hour), SelfSigned: true, Version: "1.2"}
+	beat(wire.Heartbeat{Scan: &wire.ScanReport{Round: "scan_1", StartedAt: f.now, Final: true, Scanned: 1, Hosts: []wire.ScanHost{{IP: "192.168.1.50", MAC: "00:11:22:33:44:55", Services: []wire.ScanService{
+		{Port: 23, Proto: "tcp", Name: "telnet"},
+		{Port: 443, Proto: "tcp", Name: "https", Product: "nginx", Version: "1.24.0", Title: "Kamera", TLS: expired},
+	}}}}})
+	svcs, err := f.st.ServicesForDevice(ctx, devID)
+	must(t, err)
+	if len(svcs) != 2 || svcs[0].Port != 23 || svcs[1].Port != 443 || svcs[1].Product != "nginx" || len(svcs[1].TLS) == 0 || svcs[0].GoneAt != nil {
+		t.Fatalf("services: %+v", svcs)
+	}
+	open, err := f.st.OpenFindings(ctx, "ten_a")
+	must(t, err)
+	rules := map[string]string{}
+	for _, fd := range open {
+		if fd.DeviceID == devID && fd.ConnectorID == "scan" {
+			rules[fd.Rule] = fd.Severity
+		}
+	}
+	if rules["scan.telnet"] != "high" || rules["scan.cert_expired"] != "high" || rules["scan.cert_selfsigned"] != "low" || len(rules) != 3 {
+		t.Fatalf("scan findings: %v", rules)
+	}
+	rounds, err := f.st.ScanRounds(ctx, "site_a", 5)
+	must(t, err)
+	if len(rounds) != 1 || rounds[0].FinishedAt == nil || rounds[0].Hosts != 1 || rounds[0].Services != 2 || rounds[0].BoxID != boxID {
+		t.Fatalf("rounds: %+v", rounds)
+	}
+
+	// the next round no longer sees telnet: the service is gone, its finding resolved
+	beat(wire.Heartbeat{Scan: &wire.ScanReport{Round: "scan_2", StartedAt: f.now, Final: true, Scanned: 1, Hosts: []wire.ScanHost{{IP: "192.168.1.50", MAC: "00:11:22:33:44:55", Services: []wire.ScanService{
+		{Port: 443, Proto: "tcp", Name: "https", Product: "nginx", Version: "1.24.0", Title: "Kamera", TLS: expired},
+	}}}}})
+	svcs, _ = f.st.ServicesForDevice(ctx, devID)
+	if len(svcs) != 2 || svcs[0].Port != 443 || svcs[1].Port != 23 || svcs[1].GoneAt == nil {
+		t.Fatalf("after second round: %+v", svcs)
+	}
+	open, _ = f.st.OpenFindings(ctx, "ten_a")
+	for _, fd := range open {
+		if fd.DeviceID == devID && fd.Rule == "scan.telnet" {
+			t.Fatalf("telnet finding survived: %+v", fd)
+		}
+	}
+	// switched off again: the config says so
+	must(t, f.eng.SetSiteScan(ctx, "site_a", false, "test"))
+	_, body = f.do(boxClient, "GET", "/v1/config", nil, nil)
+	_ = json.Unmarshal(body, &cfg)
+	if cfg.Scan.Enabled {
+		t.Fatal("scan still on after switching it off")
+	}
+}
+
 func TestVersionWindowAndRateLimit(t *testing.T) {
 	f := newFixture(t)
 	_, boxClient, _ := f.enroll(f.key.String())

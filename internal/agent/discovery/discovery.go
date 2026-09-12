@@ -293,6 +293,26 @@ func (t *Table) Nack() {
 	t.mu.Unlock()
 }
 
+// Address is a known device's IPv4 address with its MAC, for the service scan.
+type Address struct {
+	IP  string
+	MAC string
+}
+
+// Addresses lists every known device with an IPv4 address.
+func (t *Table) Addresses() []Address {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]Address, 0, len(t.entries))
+	for _, e := range t.entries {
+		if e.IP != "" {
+			out = append(out, Address{IP: e.IP, MAC: e.MAC})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].IP < out[j].IP })
+	return out
+}
+
 // Len returns the number of known devices.
 func (t *Table) Len() int {
 	t.mu.Lock()

@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
-import { FileText, Plug, Radar, ScrollText, ShieldAlert } from "lucide-react"
+import { FileText, Network, Plug, Radar, ScrollText, ShieldAlert } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
 import { StatCard, StatGrid } from "@/components/stat-card"
@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, post, type DeviceDetail, type EventRow } from "@/lib/api"
+import { get, post, type DeviceDetail, type EventRow, type ServiceRow } from "@/lib/api"
 import { ConnectorPanel } from "@/components/connector-panel"
 import { DeviceFindings } from "@/components/device-findings"
 import { fmtDateTime, fmtTime, pct } from "@/lib/format"
@@ -44,9 +44,18 @@ export default function DevicePage() {
     { id: "title", header: "Was", accessorFn: (r) => r.Title },
     { id: "info", header: "Details", accessorFn: (r) => r.Info, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue())}</span> },
   ]
+  const svcCols: ColumnDef<ServiceRow, unknown>[] = [
+    { id: "port", header: "Port", accessorFn: (r) => r.Port, cell: ({ row }) => <span className="font-mono text-xs">{row.original.Proto}/{row.original.Port}</span> },
+    { id: "name", header: "Dienst", accessorFn: (r) => r.Name, cell: ({ row }) => <span>{row.original.Name || "–"}{row.original.New && <Badge variant="outline" className="ml-2 border-primary/40 text-primary">neu</Badge>}{row.original.GoneAt && <Badge variant="secondary" className="ml-2">weg</Badge>}</span> },
+    { id: "product", header: "Produkt", accessorFn: (r) => `${r.Product} ${r.Version}`, cell: ({ row }) => <span>{row.original.Product ? <>{row.original.Product}{row.original.Version && <span className="font-mono text-xs text-muted-foreground"> {row.original.Version}</span>}</> : <span className="text-muted-foreground">–</span>}</span> },
+    { id: "banner", header: "Meldet sich als", accessorFn: (r) => r.Title || r.Banner, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue() || "–")}</span> },
+    { id: "tls", header: "Zertifikat", accessorFn: (r) => r.TLSInfo?.not_after ?? "", cell: ({ row }) => { const t = row.original.TLSInfo; if (!t) return <span className="text-muted-foreground">–</span>; const exp = new Date(t.not_after); const days = Math.floor((exp.getTime() - Date.now()) / 86400000); return <span className={days < 0 ? "text-destructive" : days < 14 ? "text-foreground" : "text-muted-foreground"}>TLS {t.version} · {days < 0 ? `abgelaufen seit ${-days} Tagen` : `läuft in ${days} Tagen ab`}{t.self_signed ? " · selbstsigniert" : ""}</span> } },
+    { id: "seen", header: "Gesehen", accessorFn: (r) => r.LastSeen, cell: ({ row }) => <span className="text-muted-foreground">seit {fmtDateTime(row.original.FirstSeen)}{row.original.GoneAt ? `, weg seit ${fmtDateTime(row.original.GoneAt)}` : ""}</span> },
+  ]
   if (!d) return <Skeleton className="h-64" />
   const dev = d.device
   const host = d.host
+  const openServices = (d.services ?? []).filter((s) => !s.GoneAt).length
   return (
     <>
       <PageHeader crumbs={[{ label: "Kunden", to: "/tenants" }, { label: d.tenant.Name, to: `/tenants/${d.tenant.ID}` }, { label: d.site.Name, to: `/sites/${d.site.ID}` }, { label: dev.Name }]}
@@ -67,6 +76,7 @@ export default function DevicePage() {
           <TabsTrigger value="uebersicht">Übersicht</TabsTrigger>
           <TabsTrigger value="ueberwachung">Überwachung</TabsTrigger>
           <TabsTrigger value="ereignisse">Ereignisse <Badge variant="secondary" className="ml-1">{d.events?.length ?? 0}</Badge></TabsTrigger>
+          <TabsTrigger value="dienste"><Network className="size-3.5" />Dienste <Badge variant="secondary" className="ml-1">{openServices}</Badge></TabsTrigger>
           <TabsTrigger value="logs"><ScrollText className="size-3.5" />Logs</TabsTrigger>
           <TabsTrigger value="konnektor"><Plug className="size-3.5" />Konnektor</TabsTrigger>
           <TabsTrigger value="praevention"><ShieldAlert className="size-3.5" />Prävention</TabsTrigger>
@@ -122,6 +132,11 @@ export default function DevicePage() {
           <DataTable columns={evCols} data={d.events ?? []} rowClass={(r) => r.Class === "down" ? "border-l-2 border-l-destructive" : ""} emptyTitle="Alles ruhig" emptyText="Kein Ereignis in den letzten 24 Stunden." />
         </TabsContent>
 
+        <TabsContent value="dienste" className="mt-4">
+          {(d.services ?? []).length > 0
+            ? <DataTable columns={svcCols} data={d.services ?? []} rowClass={(r) => r.GoneAt ? "opacity-60" : ""} initialSort={[{ id: "port", desc: false }]} emptyTitle="Nichts gefunden" />
+            : <Empty className="border"><EmptyHeader><EmptyMedia variant="icon"><Network /></EmptyMedia><EmptyTitle>Noch kein Scan</EmptyTitle><EmptyDescription>Der Schwachstellen-Scan wird am Standort unter Box &amp; Technik eingeschaltet. Die Box tastet die Geräte dann täglich ab: Dienste, Versionen, Zertifikate.</EmptyDescription></EmptyHeader></Empty>}
+        </TabsContent>
         <TabsContent value="logs" className="mt-4">
           <Empty className="border"><EmptyHeader><EmptyMedia variant="icon"><FileText /></EmptyMedia><EmptyTitle>Logs je Gerät kommen mit Phase 2</EmptyTitle><EmptyDescription>{d.logsNote} Geplant: Syslog der Firewall, Agent-Logs, Zeitraum und Filter, Live-Ansicht.</EmptyDescription></EmptyHeader></Empty>
         </TabsContent>

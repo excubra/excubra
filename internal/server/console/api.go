@@ -237,6 +237,7 @@ type deviceDetail struct {
 	Site     store.Site    `json:"site"`
 	Host     *hostCard     `json:"host"`
 	Events   []recentEvent `json:"events"`
+	Services []serviceView `json:"services"` // what the scan saw listening (ADR-0018)
 	LogsNote string        `json:"logsNote"`
 }
 
@@ -252,7 +253,7 @@ func (s *Server) apiDevice(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, statusFor(err))
 		return
 	}
-	out := deviceDetail{Tenant: sd.Tenant, Site: sd.Site, LogsNote: "Logs je Gerät kommen mit Phase 2 (Syslog-Empfang auf der Box, Agent-Logs). Der Platz hier ist dafür reserviert."}
+	out := deviceDetail{Tenant: sd.Tenant, Site: sd.Site, Services: s.deviceServices(ctx, dev.ID), LogsNote: "Logs je Gerät kommen mit Phase 2 (Syslog-Empfang auf der Box, Agent-Logs). Der Platz hier ist dafür reserviert."}
 	for _, c := range sd.Devices {
 		if c.ID == dev.ID {
 			out.Device = c

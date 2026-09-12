@@ -452,6 +452,9 @@ func (e *Engine) Heartbeat(ctx context.Context, box store.Box, hb wire.Heartbeat
 	if assigned {
 		e.rollups(ctx, site.TenantID, hb)
 		events = append(events, e.sightings(ctx, site, box.ID, hb.Discovery.Seen, now)...)
+		if hb.Scan != nil {
+			e.absorbScan(ctx, site, box, hb.Scan, now)
+		}
 	}
 	e.publish(ctx, events)
 
@@ -541,6 +544,10 @@ func (e *Engine) config(ctx context.Context, box store.Box) (wire.Config, error)
 	}
 	if _, ok := e.sites[box.SiteID]; ok && box.RevokedAt == nil {
 		cfg.Assigned = true
+		// the scan switch is read fresh: the CLI flips it in the store, not in this cache
+		if site, err := e.Store.Site(ctx, box.SiteID); err == nil && site.ScanEnabled {
+			cfg.Scan = wire.ScanConfig{Enabled: true, IntervalS: 24 * 3600, MaxPPS: 20}
+		}
 		hosts, err := e.Store.Hosts(ctx, "", box.ID)
 		if err != nil {
 			return wire.Config{}, err
@@ -869,4 +876,92 @@ func (e *Engine) evaluateRules(ctx context.Context, connectorID string, metrics 
 	for _, fid := range resolved { // a resolved finding takes its acknowledgement with it
 		_ = e.Store.DeleteAck(ctx, "finding", fid)
 	}
+}
+
+// ---- the service scan (ADR-0018) --------------------------------------------------------
+
+// absorbScan stores what a scan round saw on each device and lets the scan rules
+// speak: services that appeared or disappeared are logged, findings are synced per
+// device, the round is bookkept for "when did we last look".
+func (e *Engine) absorbScan(ctx context.Context, site store.Site, box store.Box, rep *wire.ScanReport, now time.Time) {
+	if rep.Round == "" || len(rep.Hosts) > wire.MaxScanHosts {
+		return
+	}
+	round, err := e.Store.ScanRound(ctx, rep.Round)
+	if err != nil {
+		round = store.ScanRound{ID: rep.Round, BoxID: box.ID, SiteID: site.ID, StartedAt: rep.StartedAt}
+	}
+	for _, h := range rep.Hosts {
+		dev, err := e.Store.DeviceByAddress(ctx, site.ID, h.MAC, h.IP)
+		if err != nil {
+			continue // the scan knows a device the inventory does not have yet; the next round will
+		}
+		svcs := make([]store.Service, 0, len(h.Services))
+		facts := make([]rules.Service, 0, len(h.Services))
+		for i, sv := range h.Services {
+			if i >= wire.MaxScanServices {
+				break
+			}
+			var tlsJSON json.RawMessage
+			var rt *rules.TLS
+			if sv.TLS != nil {
+				tlsJSON, _ = json.Marshal(sv.TLS)
+				rt = &rules.TLS{Subject: sv.TLS.Subject, Issuer: sv.TLS.Issuer, NotAfter: sv.TLS.NotAfter, SelfSigned: sv.TLS.SelfSigned, Version: sv.TLS.Version}
+			}
+			svcs = append(svcs, store.Service{DeviceID: dev.ID, Port: sv.Port, Proto: sv.Proto, Name: sv.Name, Product: sv.Product, Version: sv.Version, Banner: sv.Banner, Title: sv.Title, TLS: tlsJSON})
+			facts = append(facts, rules.Service{Port: sv.Port, Proto: sv.Proto, Name: sv.Name, Product: sv.Product, Version: sv.Version, Banner: sv.Banner, Title: sv.Title, TLS: rt})
+		}
+		added, gone, err := e.Store.UpsertServices(ctx, dev.ID, svcs, now)
+		if err != nil {
+			e.Log.Error("scan: services", "device", dev.ID, "err", err)
+			continue
+		}
+		if len(added) > 0 || len(gone) > 0 {
+			e.Log.Info("scan: services changed", "site", site.ID, "device", dev.ID, "ip", h.IP, "appeared", len(added), "gone", len(gone))
+		}
+		round.Hosts++
+		round.Services += len(svcs)
+		found := rules.EvaluateScan(rules.ScanInput{Services: facts, Now: now})
+		current := make([]store.Finding, 0, len(found))
+		for _, f := range found {
+			ev, _ := json.Marshal(f.Evidence)
+			current = append(current, store.Finding{ID: id.New("fnd"), TenantID: site.TenantID, SiteID: site.ID, DeviceID: dev.ID, ConnectorID: "scan",
+				Rule: f.Rule, Key: f.Key, Severity: f.Severity, Title: f.Title, Detail: f.Detail, Evidence: ev})
+		}
+		resolved, err := e.Store.SyncDeviceFindings(ctx, dev.ID, "scan", current, now)
+		if err != nil {
+			e.Log.Error("scan: findings", "device", dev.ID, "err", err)
+		}
+		for _, fid := range resolved {
+			_ = e.Store.DeleteAck(ctx, "finding", fid)
+		}
+	}
+	if rep.Final {
+		fin := now
+		round.FinishedAt, round.Errors = &fin, rep.Errors
+	}
+	if err := e.Store.SetScanRound(ctx, round); err != nil {
+		e.Log.Error("scan: round", "round", rep.Round, "err", err)
+	}
+}
+
+// SetSiteScan switches the service scan of a site; the box picks it up with its
+// next config pull.
+func (e *Engine) SetSiteScan(ctx context.Context, siteID string, enabled bool, actor string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	site, ok := e.sites[siteID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if err := e.Store.SetSiteScan(ctx, siteID, enabled); err != nil {
+		return err
+	}
+	site.ScanEnabled = enabled
+	e.sites[siteID] = site
+	state := "off"
+	if enabled {
+		state = "on"
+	}
+	return e.audit(ctx, actor, "site.scan", siteID, state)
 }
