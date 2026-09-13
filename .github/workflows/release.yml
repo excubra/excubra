@@ -73,4 +73,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes dist/*
+          # One HTTP 500 from the releases API used to lose the whole release and
+          # leave an empty draft that every re-run then tripped over — and with it
+          # the fix that boxes were waiting for (13.09.2026). So: retry, and when a
+          # release already exists, upload into it instead of failing on it.
+          for i in 1 2 3 4 5 6 7 8; do
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" dist/* --clobber \
+                && gh release edit "$GITHUB_REF_NAME" --draft=false \
+                && echo "published on attempt $i" && exit 0
+            else
+              gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes dist/* \
+                && echo "published on attempt $i" && exit 0
+            fi
+            echo "publish attempt $i failed; retrying in 30s"
+            sleep 30
+          done
+          echo "the releases API stayed unavailable; re-run this job once it recovers"
+          exit 1
