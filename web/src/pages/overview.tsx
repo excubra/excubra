@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { AlertTriangle, CheckCircle2, Plus } from "lucide-react"
 import { PageHeader } from "@/components/page-header"
+import { EventList } from "@/components/event-list"
 import { StatCard, StatGrid } from "@/components/stat-card"
 import { AvailabilityChart } from "@/components/availability-chart"
 import { DataTable } from "@/components/data-table"
@@ -13,7 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, type EventRow, type Overview, type SiteCard } from "@/lib/api"
+import { get, type Overview, type SiteCard } from "@/lib/api"
 import { fmtTime, n } from "@/lib/format"
 import { AttentionCard } from "@/components/attention-list"
 
@@ -36,13 +37,6 @@ export default function OverviewPage() {
     { id: "down", header: "Ausgefallen", accessorFn: (r) => r.Down, meta: { align: "right" }, cell: ({ getValue }) => <span className={Number(getValue()) > 0 ? "font-semibold text-destructive" : ""}>{String(getValue())}</span> },
     { id: "devices", header: "Geräte", accessorFn: (r) => r.Devices, meta: { align: "right" } },
     { id: "last", header: "Zuletzt", accessorFn: (r) => r.Last?.occurred_at ?? "", cell: ({ row }) => row.original.Last ? <span className="text-muted-foreground"><span className="font-mono text-xs">{fmtTime(row.original.Last.occurred_at)}</span> {row.original.Last.Title}</span> : <span className="text-muted-foreground">–</span> },
-  ]
-  const evCols: ColumnDef<EventRow, unknown>[] = [
-    { id: "t", header: "Zeit", accessorFn: (r) => r.occurred_at, cell: ({ getValue }) => <span className="font-mono text-xs">{fmtTime(String(getValue()))}</span> },
-    { id: "type", header: "Ereignis", accessorFn: (r) => r.type, cell: ({ row }) => <Badge variant="outline" className={"font-mono " + (row.original.Class === "down" ? "border-destructive/40 text-destructive" : row.original.Class === "ok" ? "border-primary/40 text-primary" : "text-muted-foreground")}>{row.original.type}</Badge> },
-    { id: "title", header: "Was", accessorFn: (r) => r.Title },
-    { id: "where", header: "Kunde · Standort", accessorFn: (r) => `${r.TenantName} ${r.SiteName}`, cell: ({ row }) => <span>{row.original.TenantName}{row.original.SiteName ? ` · ${row.original.SiteName}` : ""}</span> },
-    { id: "info", header: "Details", accessorFn: (r) => r.Info, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue())}</span> },
   ]
 
   return (
@@ -74,7 +68,7 @@ export default function OverviewPage() {
             <DataTable columns={siteCols} data={d.Cards ?? []} search={(r) => `${r.Site.Name} ${r.Tenant.Name} ${r.Box?.Name ?? ""}`} searchPlaceholder="Standort oder Kunde" onRowClick={(r) => navigate(`/sites/${r.Site.ID}`)} rowClass={(r) => r.Down ? "border-l-2 border-l-destructive" : ""} initialSort={[{ id: "down", desc: true }]} emptyTitle="Noch kein Standort" emptyText={<span>Unter <Link className="underline" to="/tenants">Kunden</Link> den ersten anlegen.</span>} footer={<Link className="underline" to="/sites">Alle Standorte</Link>} />
           </TabsContent>
           <TabsContent value="events" className="mt-3">
-            <DataTable columns={evCols} data={d.Recent ?? []} rowClass={(r) => r.Class === "down" ? "border-l-2 border-l-destructive" : ""} emptyTitle="Alles ruhig" emptyText="Keine Ereignisse in den letzten 24 Stunden." footer={<Link className="underline" to="/events">Alle Ereignisse</Link>} />
+            <EventList events={d.Recent ?? []} emptyText="Keine Ereignisse in den letzten 24 Stunden." footer={<Link className="underline" to="/events">Alle Ereignisse</Link>} />
           </TabsContent>
         </Tabs>
       )}

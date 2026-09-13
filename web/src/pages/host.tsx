@@ -1,11 +1,10 @@
 import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
+import { EventList } from "@/components/event-list"
 import { StatCard, StatGrid } from "@/components/stat-card"
-import { DataTable } from "@/components/data-table"
 import { StateBadge } from "@/components/status"
 import { Ago } from "@/components/clock"
 import { Button } from "@/components/ui/button"
@@ -18,7 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, post, type EventRow, type HostData } from "@/lib/api"
+import { get, post, type HostData } from "@/lib/api"
 import { fmtDateTime, pct } from "@/lib/format"
 
 export default function HostPage() {
@@ -32,12 +31,6 @@ export default function HostPage() {
     onSuccess: (r, v) => { toast.success(r.message); if (v.path.endsWith("/delete")) navigate(`/sites/${d?.Site.ID}?tab=ueberwachung`); else qc.invalidateQueries({ queryKey: ["host", id] }) },
     onError: (e) => toast.error(e.message),
   })
-  const evCols: ColumnDef<EventRow, unknown>[] = [
-    { id: "t", header: "Zeit", accessorFn: (r) => r.occurred_at, cell: ({ getValue }) => <span className="font-mono text-xs">{fmtDateTime(String(getValue()))}</span> },
-    { id: "type", header: "Ereignis", accessorFn: (r) => r.type, cell: ({ row }) => <Badge variant="outline" className={"font-mono " + (row.original.Class === "down" ? "border-destructive/40 text-destructive" : row.original.Class === "ok" ? "border-primary/40 text-primary" : "text-muted-foreground")}>{row.original.type}</Badge> },
-    { id: "title", header: "Was", accessorFn: (r) => r.Title },
-    { id: "info", header: "Details", accessorFn: (r) => r.Info, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue())}</span> },
-  ]
   if (!d) return <Skeleton className="h-64" />
   const v = d.View
   // The settings form owns its draft; it is re-created when the saved values change.
@@ -64,7 +57,7 @@ export default function HostPage() {
               <div className="mt-2 flex justify-between font-mono text-xs text-muted-foreground">{(d.Hours ?? []).filter((_, i) => i % 6 === 0 || i === 23).map((h) => <span key={h.Label}>{h.Label}</span>)}</div>
             </CardContent>
           </Card>
-          <DataTable columns={evCols} data={d.Events ?? []} rowClass={(r) => r.Class === "down" ? "border-l-2 border-l-destructive" : ""} emptyTitle="Keine Ereignisse" emptyText="In den letzten 24 Stunden hat sich der Zustand nicht geändert." />
+          <EventList events={d.Events ?? []} showWhere={false} emptyTitle="Keine Ereignisse" emptyText="In den letzten 24 Stunden hat sich der Zustand nicht geändert." />
         </TabsContent>
         <TabsContent value="einstellungen" className="mt-4 grid gap-4 @4xl/main:grid-cols-2">
           <HostSettings key={formKey} d={d} pending={m.isPending} onSave={(form) => m.mutate({ path: `/api/hosts/${id}`, form })} />

@@ -5,12 +5,13 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { LayoutGrid, List, Radar, Wrench, EyeOff, Eye } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
+import { EventList } from "@/components/event-list"
 import { StatCard, StatGrid } from "@/components/stat-card"
 import { AvailabilityChart } from "@/components/availability-chart"
 import { DataTable } from "@/components/data-table"
 import { StateBadge, LiveDot } from "@/components/status"
 import { Ago } from "@/components/clock"
-import { KindIcon } from "@/components/kind-icon"
+import { DeviceMark, KindIcon } from "@/components/kind-icon"
 import { DeviceCardView } from "@/components/device-card"
 import { BoxTech } from "@/components/box-tech"
 import { TaskMenu } from "@/components/task-menu"
@@ -27,7 +28,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { get, post, type DeviceCard, type EventRow, type HostCard, type SiteData } from "@/lib/api"
+import { get, post, type DeviceCard, type HostCard, type SiteData } from "@/lib/api"
 import { fmtShort, fmtTime, pct } from "@/lib/format"
 
 export default function SitePage() {
@@ -61,7 +62,7 @@ export default function SitePage() {
 
   const devCols: ColumnDef<DeviceCard, unknown>[] = [
     { id: "sel", enableSorting: false, header: ({ table }) => <Checkbox checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")} onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)} aria-label="Alle" />, cell: ({ row }) => <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)} aria-label="Auswählen" disabled={row.original.IsBox} /> },
-    { id: "kind", header: "Art", accessorFn: (r) => r.KindLabel, cell: ({ row }) => <span className="flex items-center gap-2 text-muted-foreground"><KindIcon kind={row.original.Kind} className={row.original.Monitored ? "text-primary" : ""} />{row.original.KindLabel}</span> },
+    { id: "kind", header: "Art", accessorFn: (r) => `${r.KindLabel} ${r.Vendor}`, cell: ({ row }) => <span className="flex items-center gap-2 text-muted-foreground"><DeviceMark kind={row.original.Kind} vendor={row.original.Vendor} active={row.original.Monitored} />{row.original.KindLabel}</span> },
     { id: "name", header: "Gerät", accessorFn: (r) => r.Name, cell: ({ row }) => <div><Link to={`/devices/${row.original.ID}`} className="font-medium hover:underline">{row.original.Name}</Link>{row.original.Hostname && row.original.Hostname !== row.original.Name && <div className="text-xs text-muted-foreground">{row.original.Hostname}</div>}</div> },
     { id: "ip", header: "Adresse", accessorFn: (r) => r.IP, cell: ({ row }) => <div className="font-mono text-sm">{row.original.IP || <span className="text-muted-foreground">keine IPv4</span>}<div className="text-xs text-muted-foreground">{row.original.MAC}</div></div> },
     { id: "vendor", header: "Hersteller", accessorFn: (r) => r.Vendor, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue() || "unbekannt")}</span> },
@@ -78,12 +79,6 @@ export default function SitePage() {
     { id: "check", header: "Prüfung", accessorFn: (r) => r.Checks, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue())}</span> },
     { id: "uplink", header: "Uplink", accessorFn: (r) => (r.IsUplink ? "1" : r.UplinkName), cell: ({ row }) => row.original.IsUplink ? <Badge variant="outline" className="border-primary/40 text-primary">Uplink</Badge> : row.original.UplinkName ? <span className="text-muted-foreground">hinter {row.original.UplinkName}</span> : <span className="text-muted-foreground">–</span> },
     { id: "act", header: "", enableSorting: false, cell: ({ row }) => <Button variant="ghost" size="xs" onClick={() => act.mutate({ path: `/api/hosts/${row.original.ID}/uplink` })}>{row.original.IsUplink ? "Uplink aufheben" : "Als Uplink"}</Button> },
-  ]
-  const evCols: ColumnDef<EventRow, unknown>[] = [
-    { id: "t", header: "Zeit", accessorFn: (r) => r.occurred_at, cell: ({ getValue }) => <span className="font-mono text-xs">{fmtTime(String(getValue()))}</span> },
-    { id: "type", header: "Ereignis", accessorFn: (r) => r.type, cell: ({ row }) => <Badge variant="outline" className={"font-mono " + (row.original.Class === "down" ? "border-destructive/40 text-destructive" : row.original.Class === "ok" ? "border-primary/40 text-primary" : "text-muted-foreground")}>{row.original.type}</Badge> },
-    { id: "title", header: "Was", accessorFn: (r) => r.Title },
-    { id: "info", header: "Details", accessorFn: (r) => r.Info, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue())}</span> },
   ]
 
   if (!d) return <div className="flex flex-col gap-6"><Skeleton className="h-16" /><StatGrid>{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-36" />)}</StatGrid><Skeleton className="h-96" /></div>
@@ -155,7 +150,7 @@ export default function SitePage() {
         </TabsContent>
 
         <TabsContent value="ereignisse" className="mt-4">
-          <DataTable columns={evCols} data={d.Events ?? []} search={(r) => `${r.type} ${r.Title} ${r.Info}`} rowClass={(r) => r.Class === "down" ? "border-l-2 border-l-destructive" : ""} emptyTitle="Alles ruhig" emptyText="Kein Ereignis in den letzten 24 Stunden." footer={<Link className="underline" to={`/events?site=${d.Site.ID}`}>Alle Ereignisse dieses Standorts</Link>} />
+          <EventList events={d.Events ?? []} showWhere={false} emptyText="Kein Ereignis in den letzten 24 Stunden." footer={<Link className="underline" to={`/events?site=${d.Site.ID}`}>Alle Ereignisse dieses Standorts</Link>} />
         </TabsContent>
 
         <TabsContent value="technik" className="mt-4 flex flex-col gap-6">
