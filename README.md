@@ -51,11 +51,22 @@ boxes and the server itself follow their channel, verify the signature, trial-ru
 the new binary, swap it, restart and roll back on their own if the new build does
 not confirm within five minutes. Nothing is pushed to a customer network.
 
+Boxes come first. An agent may be at most two minor versions from the server, so
+before installing, the server checks whether the new release would push any box
+outside that window. If it would, it stays where it is, asks those boxes to
+update now instead of at their daily tick, and installs once they are within
+reach — `excubra server update status` and the console name whoever is holding
+it back. Add `-anyway` for the rare box that cannot update at all. A box that has
+fallen behind is never locked out: `GET /v1/update` and `POST /v1/renew` are
+answered outside the window too, so it can always find its way forward.
+
 ```
 excubra server release sync                 # import new releases now
 excubra server release channel stable 0.2.3 # what boxes on stable should run
 excubra server box task <box_id> update     # ask one box to check now
 excubra server update now                   # let this server check now
+excubra server update now -anyway           # install even while boxes lag
+excubra server update status                # what is holding a release back
 ```
 
 ## Assistant
