@@ -166,3 +166,12 @@ A box that is gone for good must not freeze the server for ever, hence the
 not one. The direction of the asymmetry is the point: the side that can afford
 to wait is the server, because a server one release behind still serves every
 box, while a box the server refuses does nothing at all.
+
+A guard that can never be overruled is a deadlock waiting for the day a box
+cannot update at all — the server would sit on an old release, security fixes
+included, because one box keeps failing. So an operator can overrule it:
+`excubra server update now -anyway`, or "Trotzdem installieren" on the console's
+Updates page. It applies to exactly one check, never becomes a mode, and is
+written to the audit log with the boxes it stepped past. It is safe to have
+precisely because of rule 1: those boxes still reach `/v1/update` and
+`/v1/renew` and can catch up on their own.

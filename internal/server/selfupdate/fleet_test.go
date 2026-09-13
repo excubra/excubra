@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,5 +87,54 @@ func TestServerWaitsForTheBoxes(t *testing.T) {
 	}
 	if s := c.Status(ctx); len(s.HeldBack) != 0 {
 		t.Fatalf("nothing should be held back any more: %+v", s.HeldBack)
+	}
+}
+
+// The guard must not become a deadlock. A box that never manages to update would
+// otherwise hold the server on an old release for ever, so an operator can say
+// "install anyway" — once, on the record, and without taking the boxes' way back
+// (/v1/update, /v1/renew stay open outside the window).
+func TestOperatorCanInstallAnyway(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC)
+	blob := bytes.Repeat([]byte("NEW SERVER "), 200000)
+	dataDir := filepath.Join(w.dir, "data")
+	c := New(w.st, w.upd, dataDir, "linux", "amd64", true, nil)
+	c.Now = func() time.Time { return now }
+
+	must(t, w.st.PutRelease(ctx, store.Release{Version: "9.9.9", OS: "linux", Arch: "amd64", URL: w.srv.URL + "/amd", SHA256: sha256Of(blob), Signature: "good", CreatedAt: now}))
+	must(t, w.st.SetChannelVersion(ctx, "stable", "9.9.9"))
+	must(t, w.st.CreateBox(ctx, store.Box{ID: "box_stuck", Name: "Hängt", HWID: "a", AgentVersion: "9.0.0", OS: "linux", Arch: "amd64", LastSeen: now.Add(-time.Minute), EnrolledAt: now}))
+
+	if err := c.Check(ctx); err != nil {
+		t.Fatalf("held back: %v", err)
+	}
+	if s := c.Status(ctx); len(s.HeldBack) != 1 {
+		t.Fatalf("the stuck box should hold the server: %+v", s.HeldBack)
+	}
+
+	// the CLI's side: the trigger file carries the override
+	must(t, RequestNowAnyway(dataDir))
+	body, err := os.ReadFile(filepath.Join(dataDir, "update", TriggerFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), triggerAnyway) {
+		t.Fatalf("the trigger file should carry the override: %q", body)
+	}
+
+	// the server's side: one check ignores the guard, the next does not
+	c.mu.Lock()
+	c.anyway = true
+	c.mu.Unlock()
+	if err := c.Check(ctx); !errors.Is(err, update.ErrRestart) {
+		t.Fatalf("the override should install: %v", err)
+	}
+	c.mu.Lock()
+	stillSet := c.anyway
+	c.mu.Unlock()
+	if stillSet {
+		t.Fatal("the override must be one-shot, not a mode")
 	}
 }

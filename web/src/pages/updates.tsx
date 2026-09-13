@@ -90,6 +90,11 @@ export default function UpdatesPage() {
                     </li>
                   ))}
                 </ul>
+                <Button size="sm" variant="outline" className="mt-3" disabled={act.isPending}
+                  onClick={() => act.mutate({ path: "/api/updates/server", form: { anyway: "1" } })}>
+                  Trotzdem installieren
+                </Button>
+                <p className="mt-1 text-xs text-muted-foreground">Nur wenn eine Box sich dauerhaft nicht aktualisieren lässt. Sie behält den Weg zu Update und Zertifikat und kann nachziehen.</p>
               </div>
             )}
           </CardContent>

@@ -276,6 +276,18 @@ func (s *Server) updatesServer(w http.ResponseWriter, r *http.Request) {
 		s.flash(w, r, "Server prüft jetzt; auf Kanal "+st.Channel+" gibt es nichts Neueres als "+st.Running+".", "/updates")
 		return
 	}
+	// Boxes first: the server waits on its own unless an operator overrules it.
+	if len(st.HeldBack) > 0 && r.PostForm.Get("anyway") != "1" {
+		s.SelfUpdate.TriggerNow()
+		s.flash(w, r, "Server prüft jetzt, installiert "+st.Available+" aber erst, wenn die aufgeführten Boxen im Kompatibilitätsfenster sind.", "/updates")
+		return
+	}
+	if len(st.HeldBack) > 0 {
+		s.SelfUpdate.TriggerAnyway()
+		_ = s.Store.Audit(r.Context(), s.Now(), actor(r), "server.update.anyway", st.Available, "trotz zurückliegender Boxen angefordert")
+		s.flash(w, r, "Server installiert "+st.Available+", obwohl Boxen zurückliegen. Sie behalten Update- und Zertifikatsweg und können nachziehen.", "/updates")
+		return
+	}
 	s.SelfUpdate.TriggerNow()
 	_ = s.Store.Audit(r.Context(), s.Now(), actor(r), "server.update.request", st.Available, "")
 	s.flash(w, r, "Server installiert "+st.Available+" und startet neu. Die Konsole ist dafür einige Sekunden nicht erreichbar; bleibt die neue Version aus, geht sie nach fünf Minuten von selbst zurück.", "/updates")
