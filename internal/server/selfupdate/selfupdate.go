@@ -48,6 +48,10 @@ type Status struct {
 	LastCheck  time.Time `json:"lastCheck"`
 	LastError  string    `json:"lastError"`
 	RolledBack string    `json:"rolledBack"` // "0.3.0 → 0.2.1" when the last attempt was rolled back
+	// HeldBack lists the boxes that Available would push outside the
+	// compatibility window. While it is not empty the server stays where it is
+	// and asks those boxes to update first (see fleet.go).
+	HeldBack []Lagging `json:"heldBack"`
 }
 
 // Controller runs the checks for one server.
@@ -107,6 +111,7 @@ func (c *Controller) Status(ctx context.Context) Status {
 	s.Channel = c.Channel(ctx)
 	s.Target, s.Available = "", ""
 	if s.Channel == "off" {
+		s.HeldBack = nil
 		return s
 	}
 	if v, err := c.Store.ChannelVersion(ctx, s.Channel); err == nil && v != "" {
@@ -116,6 +121,9 @@ func (c *Controller) Status(ctx context.Context) Status {
 				s.Available = v
 			}
 		}
+	}
+	if s.Available == "" {
+		s.HeldBack = nil
 	}
 	return s
 }
@@ -172,6 +180,19 @@ func (c *Controller) check(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The boxes come first: installing past their window would refuse them.
+	lagging, err := c.behind(ctx, target)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.st.HeldBack = lagging
+	c.mu.Unlock()
+	if len(lagging) > 0 {
+		c.nudge(ctx, lagging)
+		c.Log.Info("self-update: waiting for boxes before installing", "to", v, "boxes", names(lagging))
+		return nil
+	}
 	c.Log.Info("self-update: newer release on channel", "channel", ch, "from", version.Version, "to", v)
 	err = c.Updater.Apply(ctx, wire.UpdateInfo{Version: rel.Version, URL: rel.URL, SHA256: rel.SHA256, Signature: rel.Signature, MinAgentVersion: rel.MinAgentVersion})
 	switch {
@@ -202,7 +223,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-			t.Reset(checkEvery + time.Duration(rand.IntN(int(checkJitter/time.Second)))*time.Second) //nolint:gosec // jitter, not security
+			t.Reset(c.nextDelay())
 		case <-c.now:
 		case <-poll.C:
 			if _, err := os.Stat(trigger); err != nil {
@@ -218,6 +239,19 @@ func (c *Controller) Run(ctx context.Context) error {
 			c.Log.Warn("self-update", "err", err)
 		}
 	}
+}
+
+// nextDelay is a day with jitter normally, and holdRetry while the server waits
+// for boxes to catch up — a release that is held back should land minutes after
+// the last box arrives, not the next morning.
+func (c *Controller) nextDelay() time.Duration {
+	c.mu.Lock()
+	held := len(c.st.HeldBack) > 0
+	c.mu.Unlock()
+	if held {
+		return holdRetry
+	}
+	return checkEvery + time.Duration(rand.IntN(int(checkJitter/time.Second)))*time.Second //nolint:gosec // jitter, not security
 }
 
 // RequestNow writes the trigger file for a running server (the CLI's side).

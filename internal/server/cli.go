@@ -788,15 +788,20 @@ func updateCmd(args []string) error {
 	case len(rest) == 1 && rest[0] == "status":
 		s := c.Status(ctx)
 		fmt.Printf("running=%s channel=%s target=%s available=%s enabled=%v\n", s.Running, s.Channel, orDash(s.Target), orDash(s.Available), s.Enabled)
+		printHeldBack(s)
 		return nil
 	case len(rest) == 1 && rest[0] == "now":
 		if err := selfupdate.RequestNow(cfg.DataDir); err != nil {
 			return err
 		}
 		s := c.Status(ctx)
-		if s.Available == "" {
+		switch {
+		case s.Available == "":
 			fmt.Printf("check requested; nothing newer than %s on channel %s right now\n", s.Running, s.Channel)
-		} else {
+		case len(s.HeldBack) > 0:
+			fmt.Printf("check requested; %s waits until the boxes below are within the compatibility window\n", s.Available)
+			printHeldBack(s)
+		default:
 			fmt.Printf("check requested; the running server will install %s within a minute and restart\n", s.Available)
 		}
 		return nil
@@ -809,6 +814,19 @@ func updateCmd(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("usage: excubra server update status | now | channel <stable|canary|off>")
+}
+
+// printHeldBack names the boxes that keep the server where it is. The server
+// waits for them on purpose: installing past their compatibility window would
+// refuse them at every request (ADR-0002).
+func printHeldBack(s selfupdate.Status) {
+	if len(s.HeldBack) == 0 {
+		return
+	}
+	fmt.Printf("held back for %d box(es); they were asked to update and the server looks again every few minutes:\n", len(s.HeldBack))
+	for _, b := range s.HeldBack {
+		fmt.Printf("  %s\t%s\tv=%s\n", b.ID, b.Name, b.Version)
+	}
 }
 
 // settingCmd: excubra server setting get <key> | set <key> <value|-> (- reads the
