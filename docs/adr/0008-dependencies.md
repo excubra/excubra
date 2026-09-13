@@ -65,12 +65,29 @@ learned falls back to the kind icon.
 
 **leaflet** (BSD-2-Clause, `web/package.json`) draws the site map. Maps are a solved
 problem with a decade of edge cases in panning, zooming and tile handling, and the
-alternative was a slippy-map implementation of our own. Its tiles come from a source the
-operator configures (`map.tiles`, OpenStreetMap by default) and are the only foreign
-thing the console loads — as images, named explicitly in the content policy. The address
-lookup that turns an address into coordinates runs on the server (`internal/server/geocode`,
-stdlib only), because the geocoder asks callers to identify themselves in the User-Agent
-and a browser cannot, and because it keeps the console's `connect-src` at `'self'`.
+alternative was a slippy-map implementation of our own.
+
+The map loads nothing from anywhere. Its background is country outlines compiled into
+the console (`web/src/components/basemap.generated.ts`, written by
+`scripts/gen-basemap.mjs` from **world-atlas**, ISC, a build-time dependency carrying
+Natural Earth data, which is public domain). So the content policy stays at
+`default-src 'self'; img-src 'self' data:` — the same line it had before the map existed.
+
+That is the whole reason the background is drawn rather than fetched. Street tiles from a
+foreign host would have to be named in that policy, and every operator's browser would
+tell that host which customer is being looked at. OpenStreetMap's own servers refuse us
+outright anyway: their tile policy requires an app to identify itself in the User-Agent,
+which a page in a browser is not allowed to set, so every tile came back 403 (13.09.2026).
+The free alternatives either want a key or serve vector tiles, and vector tiles need
+`connect-src` to that host plus `worker-src blob:` — a real exfiltration channel in
+exchange for street names nobody reads on this map.
+
+An operator who wants streets sets `map.tiles` to a server they run or license. The tiles
+are then fetched by **this server** (`internal/server/maptiles`, stdlib only), cached on
+disk, rate-limited, and served from our own origin — so the policy still names no foreign
+host, the provider never sees a customer's viewing pattern, and the request carries the
+identifying User-Agent a browser cannot send. The address lookup runs on the server for
+the same reason (`internal/server/geocode`, stdlib only).
 
 ## Consequences
 

@@ -33,7 +33,7 @@ export function DeviceCardView({ devices, onToggle, busy, onOpen }: {
               <Link to={`/devices/${r.ID}`} className="truncate text-base font-semibold hover:underline">{r.Name}</Link>
               {r.IsBox ? <Badge variant="secondary">diese Box</Badge> : r.Monitored ? <StateBadge cls={r.StateClass} /> : null}
             </div>
-            <div className="mt-1"><ConnectIP kind={r.Kind} ip={r.IP} ports={r.Ports} sub={r.MAC} className="text-sm" /></div>
+            <div className="mt-1"><ConnectIP ip={r.IP} ways={r.Ways} sub={r.MAC} className="text-sm" /></div>
           </div>
           <div className="mt-auto flex items-center justify-between gap-2 px-4 text-xs text-muted-foreground">
             <span className="truncate">{r.Vendor || "Hersteller unbekannt"}</span>

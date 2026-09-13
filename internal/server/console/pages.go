@@ -193,9 +193,10 @@ type deviceCard struct {
 	StateLabel string
 	IsBox      bool
 	Text       string // lowercase haystack for the client-side filter
-	// Ports the scan found open, so the console can offer the right way in
-	// (https, ssh, rdp …) instead of making an operator copy an address.
-	Ports []int
+	// How to reach this device, worked out from what the scan actually saw and
+	// from any connector an operator configured — so the console can offer the
+	// way in instead of making somebody copy an address (see connect.go).
+	Ways []wayIn
 }
 
 type kindCount struct {
@@ -340,18 +341,25 @@ func (s *Server) buildSite(ctx context.Context, siteID, tab, rng string) (siteDa
 	if err != nil {
 		return siteData{}, err
 	}
-	// What the scan found open, per device: the console turns it into a link.
-	ports := map[string][]int{}
+	// What the scan found open and what an operator configured, per device: the
+	// console turns it into a link.
+	svcByDevice := map[string][]store.Service{}
 	if svcs, err := s.Store.OpenServicesForSite(ctx, site.ID); err == nil {
 		for _, sv := range svcs {
-			if sv.Proto == "" || sv.Proto == "tcp" {
-				ports[sv.DeviceID] = append(ports[sv.DeviceID], sv.Port)
+			svcByDevice[sv.DeviceID] = append(svcByDevice[sv.DeviceID], sv)
+		}
+	}
+	connByDevice := map[string][]store.Connector{}
+	if conns, err := s.Store.Connectors(ctx, site.TenantID); err == nil {
+		for _, c := range conns {
+			if c.SiteID == site.ID && !c.Disabled {
+				connByDevice[c.DeviceID] = append(connByDevice[c.DeviceID], c)
 			}
 		}
 	}
 	counts := map[string]int{}
 	for _, dev := range devices {
-		c := deviceCard{Device: dev, Ports: ports[dev.ID]}
+		c := deviceCard{Device: dev}
 		c.Kind = classifyDevice(dev.Vendor, dev.Hostname, boxNames)
 		if dev.External {
 			c.Kind = "wan"
@@ -368,6 +376,9 @@ func (s *Server) buildSite(ctx context.Context, siteID, tab, rng string) (siteDa
 		}
 		if dev.Ignored {
 			d.Ignored++
+		}
+		if dev.IP != "" {
+			c.Ways = waysIn(svcByDevice[dev.ID], connByDevice[dev.ID], c.Kind)
 		}
 		c.Text = strings.ToLower(strings.Join([]string{c.Name, dev.Hostname, dev.IP, dev.MAC, dev.Vendor, c.KindLabel}, " "))
 		counts[c.Kind]++

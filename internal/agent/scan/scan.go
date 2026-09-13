@@ -35,17 +35,20 @@ const (
 
 // DefaultPorts is the built-in list: what small networks run and what an attacker
 // looks for first. Order does not matter; every port is tried on every host.
+// The odd-looking web ports (7443, 8090, 8181, 8444, 10443, 11443) are where
+// firewalls and appliances put their management interface once somebody moves it
+// off 443 — which is the moment the console stops being able to link to it.
 var DefaultPorts = []int{
 	21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 389, 443, 445, 465, 515, 548, 554, 587, 631, 636, 873, 993, 995,
 	1433, 1521, 1723, 2049, 2375, 3000, 3306, 3389, 4443, 5000, 5060, 5061, 5432, 5900, 5985, 5986, 6379,
-	8000, 8006, 8080, 8081, 8443, 8888, 9000, 9090, 9100, 9200, 9443, 10000, 27017, 62078,
+	7443, 8000, 8006, 8080, 8081, 8090, 8181, 8443, 8444, 8888, 9000, 9090, 9100, 9200, 9443, 10000, 10443, 11443, 27017, 62078,
 }
 
 // DefaultExternalPorts is what an outpost asks a customer's public address: the
 // doors an attacker tries first.
 var DefaultExternalPorts = []int{
 	21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 389, 443, 445, 465, 587, 631, 636, 873, 993, 995, 1194, 1433, 1521, 1723, 2049, 2375,
-	3306, 3389, 4443, 5000, 5060, 5061, 5432, 5900, 5985, 5986, 6379, 8000, 8006, 8080, 8081, 8443, 8888, 9000, 9090, 9100, 9200, 9443, 10000, 27017,
+	3306, 3389, 4443, 5000, 5060, 5061, 5432, 5900, 5985, 5986, 6379, 7443, 8000, 8006, 8080, 8081, 8090, 8181, 8443, 8444, 8888, 9000, 9090, 9100, 9200, 9443, 10000, 10443, 11443, 27017,
 }
 
 // Config is the effective scan configuration.
