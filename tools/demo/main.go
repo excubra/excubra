@@ -57,9 +57,15 @@ func run(dir string) error {
 	if err != nil {
 		return err
 	}
-	must(eng.CreateSite(ctx, store.Site{ID: "site_buero", TenantID: "ten_viico", Name: "Büro Ludwigshafen", CreatedAt: now.Add(-30 * 24 * time.Hour)}, "demo"))
-	must(eng.CreateSite(ctx, store.Site{ID: "site_werk", TenantID: "ten_muster", Name: "Werk Frankenthal", CreatedAt: now.Add(-20 * 24 * time.Hour)}, "demo"))
-	must(eng.CreateSite(ctx, store.Site{ID: "site_lager", TenantID: "ten_muster", Name: "Lager Worms", CreatedAt: now.Add(-10 * 24 * time.Hour)}, "demo"))
+	must(eng.CreateSite(ctx, store.Site{ID: "site_buero", TenantID: "ten_viico", Name: "Büro Ludwigshafen", CreatedAt: now.Add(-30 * 24 * time.Hour), Address: "Musterstraße 1, 67059 Ludwigshafen"}, "demo"))
+	must(eng.CreateSite(ctx, store.Site{ID: "site_werk", TenantID: "ten_muster", Name: "Werk Frankenthal", CreatedAt: now.Add(-20 * 24 * time.Hour), Address: "Beispielweg 7, 67227 Frankenthal"}, "demo"))
+	must(eng.CreateSite(ctx, store.Site{ID: "site_lager", TenantID: "ten_muster", Name: "Lager Worms", CreatedAt: now.Add(-10 * 24 * time.Hour), Address: "Beispielallee 22, 67547 Worms"}, "demo"))
+
+	// Coordinates as an operator would have looked them up once; the demo must not
+	// call a geocoder. Town centres, not real customer doorsteps.
+	must(st.SetSiteLocation(ctx, "site_buero", "Musterstraße 1, 67059 Ludwigshafen", 49.4775, 8.4450, true))
+	must(st.SetSiteLocation(ctx, "site_werk", "Beispielweg 7, 67227 Frankenthal", 49.5386, 8.3543, true))
+	must(st.SetSiteLocation(ctx, "site_lager", "Beispielallee 22, 67547 Worms", 49.6319, 8.3592, true))
 
 	boxes := []store.Box{
 		{ID: "box_buero", SiteID: "site_buero", Name: "Büro", HWID: "3f1a9c2e77b04d1a", AgentVersion: "0.1.0", OS: "linux", Arch: "amd64", CertSerial: "1a2b3c", CertNotAfter: now.Add(80 * 24 * time.Hour), Channel: "canary", DiscoveryMode: "sweep", NetbirdStatus: "connected", NetbirdIP: "100.85.12.4", DiskTotalBytes: 250e9, DiskFreeBytes: 212e9, UptimeS: 864000, LastSeen: now, EnrolledAt: now.Add(-28 * 24 * time.Hour)},

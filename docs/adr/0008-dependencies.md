@@ -49,11 +49,28 @@ Explicitly **not** used, and why:
 Test-only dependencies: none. Integration tests drive Docker through `os/exec`.
 
 Vendored into the console app (no runtime download, ADR-0013): the vendor marks in
-`web/src/components/vendor-mark.tsx` are path data from
-[simple-icons](https://github.com/simple-icons/simple-icons) (CC0-1.0), 34 brands we
-actually meet in customer networks, copied in as a generated file. The brands are
-trademarks of their owners and are used to name the device they stand for. A brand we
-do not have falls back to the kind icon; nothing is fetched at runtime.
+`web/src/components/vendor-marks.generated.ts` are path data from
+[simple-icons](https://github.com/simple-icons/simple-icons) (CC0-1.0) for the brands we
+actually meet in customer networks, written by `web/scripts/gen-vendor-marks.mjs`.
+simple-icons itself is a build-time dependency and never ships. The brands are
+trademarks of their owners and are used to name the device they stand for.
+
+simple-icons does not carry every brand — most printer makers and most German telephony
+makers are missing, Canon, Brother, Ricoh, Innovaphone and Starface among them. Those are
+**not** drawn from memory: a logo we invent is wrong in a way nobody can see, and passing
+it off as the vendor's is worse than not having it. They get a monogram instead — two
+letters from the vendor's name on a colour derived from that same name, so a vendor looks
+the same everywhere and never like another one. Only a device whose vendor we never
+learned falls back to the kind icon.
+
+**leaflet** (BSD-2-Clause, `web/package.json`) draws the site map. Maps are a solved
+problem with a decade of edge cases in panning, zooming and tile handling, and the
+alternative was a slippy-map implementation of our own. Its tiles come from a source the
+operator configures (`map.tiles`, OpenStreetMap by default) and are the only foreign
+thing the console loads — as images, named explicitly in the content policy. The address
+lookup that turns an address into coordinates runs on the server (`internal/server/geocode`,
+stdlib only), because the geocoder asks callers to identify themselves in the User-Agent
+and a browser cannot, and because it keeps the console's `connect-src` at `'self'`.
 
 ## Consequences
 

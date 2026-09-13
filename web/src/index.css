@@ -144,3 +144,26 @@
   --sidebar-primary-foreground: oklch(0.17 0.06 150);
 }
 html { color-scheme: dark; }
+
+/* The map (Leaflet). The console is dark, the tiles of every public map are not:
+   inverting and rotating the hue turns a daylight street map into something that
+   sits in the page instead of glaring out of it. Everything Leaflet draws on top
+   — markers, controls, attribution — keeps the console's own colours. */
+.ex0-map { background: var(--muted); }
+.ex0-map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.92) saturate(0.7); }
+.ex0-map .leaflet-control-attribution {
+  background: color-mix(in oklab, var(--background) 80%, transparent);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  }
+.ex0-map .leaflet-control-attribution a { color: var(--muted-foreground); }
+.ex0-map .leaflet-bar a {
+  background: var(--background);
+  color: var(--foreground);
+  border-color: var(--border);
+  }
+.ex0-map .leaflet-bar a:hover { background: var(--muted); }
+.ex0-map .leaflet-marker-icon { cursor: pointer; }
+
+/* A light console (someone switched the theme) wants the tiles as they are. */
+html[data-theme="light"] .ex0-map .leaflet-tile-pane, .light .ex0-map .leaflet-tile-pane { filter: none; }

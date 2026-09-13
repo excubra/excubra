@@ -43,7 +43,10 @@ export async function post<T = { ok: boolean; message: string }>(path: string, f
 
 // ---- types mirrored from the Go side (field names as Go marshals them) ----
 
-export interface Me { user: string; csrf: string; version: string; now: string; secure: boolean; Nav: { Tenants: number; Sites: number; Boxes: number; Unassigned: number; Attention: number; Findings: number } }
+export interface MapConfig { tiles: string; attribution: string }
+export interface Me { user: string; csrf: string; version: string; now: string; secure: boolean; map?: MapConfig; Nav: { Tenants: number; Sites: number; Boxes: number; Unassigned: number; Attention: number; Findings: number } }
+/** One candidate the geocoder returned for an address. */
+export interface Place { label: string; lat: number; lon: number }
 
 export interface BoxState { ID: string; Status: string; LastHeartbeat: string; SilentSince: string; AgentVersion: string }
 export interface BoxRow {
@@ -54,7 +57,12 @@ export interface BoxRow {
   State: BoxState; SiteName: string; TenantName: string; Assigned: boolean
 }
 export interface Tenant { ID: string; Name: string; CreatedAt: string; AIScope?: string }
-export interface Site { ID: string; TenantID: string; Name: string; CreatedAt: string; ScanEnabled?: boolean; CanaryEnabled?: boolean; DNSEnabled?: boolean; DNSBlock?: boolean; DNSUpstreams?: string[] | null }
+export interface Site {
+  ID: string; TenantID: string; Name: string; CreatedAt: string
+  ScanEnabled?: boolean; CanaryEnabled?: boolean; DNSEnabled?: boolean; DNSBlock?: boolean; DNSUpstreams?: string[] | null
+  // Where the site is. Lat/Lon mean nothing unless Located is true.
+  Address?: string; Lat?: number; Lon?: number; Located?: boolean
+}
 export interface HostState { Observed: string; Reported: string; Failures: number; Successes: number; Since: string; LastBoxTime?: string }
 export interface HostRow {
   ID: string; TenantID: string; SiteID: string; BoxID: string; DeviceID: string; Name: string; Address: string; MAC: string; Vendor: string
@@ -90,7 +98,11 @@ export interface TenantDetail { tenant: Tenant; sites: SiteCard[] | null; events
 export interface DeviceCard {
   ID: string; TenantID: string; SiteID: string; MAC: string; IP: string; Vendor: string; Hostname: string; FirstSeen: string; LastSeen: string; GoneAt: string | null; Ignored: boolean
   Kind: string; KindLabel: string; Name: string; Monitored: boolean; HostID: string; IsUplink: boolean; StateClass: string; StateLabel: string; IsBox: boolean; Text: string
+  /** Ports the scan found open, so the console can offer the right way in. */
+  Ports?: number[] | null
 }
+/** What the "beobachten, was sich lohnt" rule would do at a site. */
+export interface WatchSuggestion { count: number; names: string[] | null; skipped: Record<string, number>; hasBox: boolean }
 export interface KindCount { Key: string; Label: string; N: number }
 export interface SiteData {
   Site: Site; Tenant: Tenant; Boxes: BoxRow[] | null; Box: BoxRow | null; Online: boolean

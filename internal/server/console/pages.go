@@ -193,6 +193,9 @@ type deviceCard struct {
 	StateLabel string
 	IsBox      bool
 	Text       string // lowercase haystack for the client-side filter
+	// Ports the scan found open, so the console can offer the right way in
+	// (https, ssh, rdp …) instead of making an operator copy an address.
+	Ports []int
 }
 
 type kindCount struct {
@@ -337,9 +340,18 @@ func (s *Server) buildSite(ctx context.Context, siteID, tab, rng string) (siteDa
 	if err != nil {
 		return siteData{}, err
 	}
+	// What the scan found open, per device: the console turns it into a link.
+	ports := map[string][]int{}
+	if svcs, err := s.Store.OpenServicesForSite(ctx, site.ID); err == nil {
+		for _, sv := range svcs {
+			if sv.Proto == "" || sv.Proto == "tcp" {
+				ports[sv.DeviceID] = append(ports[sv.DeviceID], sv.Port)
+			}
+		}
+	}
 	counts := map[string]int{}
 	for _, dev := range devices {
-		c := deviceCard{Device: dev}
+		c := deviceCard{Device: dev, Ports: ports[dev.ID]}
 		c.Kind = classifyDevice(dev.Vendor, dev.Hostname, boxNames)
 		if dev.External {
 			c.Kind = "wan"

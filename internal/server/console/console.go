@@ -62,6 +62,10 @@ type Server struct {
 	flashMu sync.Mutex
 	flashes map[string]string       // session hash → message
 	pending map[string]pendingLogin // login cookie hash → passed step one
+
+	mapMu    sync.Mutex // the tile settings, held briefly: every response's CSP needs them
+	mapCfg   mapConfig
+	mapUntil time.Time
 }
 
 // New wires the console. ingestHost/ingestPort go into enrollment keys.
@@ -232,6 +236,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/sites/{id}/canary", s.auth(s.siteCanarySet))
 	mux.Handle("GET /api/sites/{id}/dns", s.auth(s.apiSiteDNS))
 	mux.Handle("POST /api/sites/{id}/dns", s.auth(s.siteDNSSet))
+	mux.Handle("POST /api/sites/{id}/geocode", s.auth(s.siteGeocode))
+	mux.Handle("POST /api/sites/{id}/location", s.auth(s.siteLocationSet))
+	mux.Handle("GET /api/sites/{id}/watch/suggestion", s.auth(s.apiSiteWatchSuggestion))
+	mux.Handle("POST /api/sites/{id}/watch/suggested", s.auth(s.siteWatchSuggested))
 	mux.Handle("GET /api/settings/dns", s.auth(s.apiDNSSettings))
 	mux.Handle("POST /api/settings/dns", s.auth(s.dnsSettingsSave))
 	mux.Handle("GET /api/devices/{id}/connectors", s.auth(s.apiDeviceConnectors))
@@ -282,7 +290,15 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) headers(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		csp := "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+		// Map tiles are the one foreign thing the console loads, and only as
+		// images: the tile host is named here and nowhere else, so it can serve
+		// pictures and nothing more. Everything else, the geocoder included,
+		// still goes through this server.
+		img := "img-src 'self' data:"
+		if o := tileOrigin(s.mapConfig(r).Tiles); o != "" {
+			img += " " + o
+		}
+		csp := "default-src 'self'; " + img + "; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
 		if strings.HasPrefix(r.URL.Path, "/login") || strings.HasPrefix(r.URL.Path, "/static") {
 			csp = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
 		}

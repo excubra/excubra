@@ -40,17 +40,18 @@ type apiErr struct {
 // ---- me ------------------------------------------------------------------------------------
 
 type meData struct {
-	User    string `json:"user"`
-	CSRF    string `json:"csrf"`
-	Version string `json:"version"`
-	Now     string `json:"now"`
-	Secure  bool   `json:"secure"`
+	User    string    `json:"user"`
+	CSRF    string    `json:"csrf"`
+	Version string    `json:"version"`
+	Now     string    `json:"now"`
+	Secure  bool      `json:"secure"`
+	Map     mapConfig `json:"map"` // where map tiles come from, so the map page needs no extra fetch
 	Nav     navCounts
 }
 
 func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	d := meData{CSRF: sess.CSRF, Version: version.Version, Now: s.Now().In(s.Loc).Format(time.RFC3339), Secure: s.Secure, Nav: s.navCounts(r.Context())}
+	d := meData{CSRF: sess.CSRF, Version: version.Version, Now: s.Now().In(s.Loc).Format(time.RFC3339), Secure: s.Secure, Map: s.mapConfig(r), Nav: s.navCounts(r.Context())}
 	if u := userFrom(r); u != nil {
 		d.User = u.Name
 	}
