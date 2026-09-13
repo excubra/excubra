@@ -1,0 +1,12 @@
+[Unit]
+Description=EX0: renew the console's certificate (DNS-01, no inbound connection)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/excubra/console-cert.sh %i
+# The DNS token and the key never leave this host.
+PrivateTmp=yes
+ProtectSystem=full
+NoNewPrivileges=yes

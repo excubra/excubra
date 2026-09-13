@@ -1,0 +1,10 @@
+[Unit]
+Description=EX0: look at the console certificate daily; lego renews only when due
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

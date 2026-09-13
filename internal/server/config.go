@@ -19,7 +19,9 @@ type Config struct {
 	IngestPublicHost string // host[:port] boxes connect to; goes into enrollment keys and the ingest certificate
 	OverlayListen    string // ip:port, never a wildcard
 	OverlayAllowAny  bool   // development only
-	OverlayTLS       string // off | internal
+	OverlayTLS       string // off | internal | files
+	OverlayCert      string // certificate path when OverlayTLS is files
+	OverlayKey       string // key path when OverlayTLS is files
 	ConsoleURL       string // base URL for webhook links; derived from OverlayListen when empty
 	UpdateBaseURL    string
 	ReleaseCatalog   string // GitHub-style releases URL the server imports release metadata from; "off" disables
@@ -73,6 +75,8 @@ func LoadConfig(envFile string, getenv func(string) string) (Config, error) {
 		OverlayListen:    get("EXCUBRA_OVERLAY_LISTEN", ""),
 		OverlayAllowAny:  get("EXCUBRA_OVERLAY_ALLOW_ANY", "") == "1",
 		OverlayTLS:       get("EXCUBRA_OVERLAY_TLS", "off"),
+		OverlayCert:      get("EXCUBRA_OVERLAY_CERT", ""),
+		OverlayKey:       get("EXCUBRA_OVERLAY_KEY", ""),
 		ConsoleURL:       get("EXCUBRA_CONSOLE_URL", ""),
 		UpdateBaseURL:    get("EXCUBRA_UPDATE_BASE_URL", "https://github.com/excubra/excubra/releases/download"),
 		ReleaseCatalog:   get("EXCUBRA_RELEASE_CATALOG", "https://api.github.com/repos/excubra/excubra/releases"),
@@ -146,8 +150,14 @@ func (c Config) Validate() error {
 	}
 	switch c.OverlayTLS {
 	case "off", "internal":
+	case "files":
+		// A certificate from a public CA, renewed on the host and read from disk,
+		// so an operator reaches the console without installing our CA first.
+		if c.OverlayCert == "" || c.OverlayKey == "" {
+			errs = append(errs, errors.New("EXCUBRA_OVERLAY_TLS=files needs EXCUBRA_OVERLAY_CERT and EXCUBRA_OVERLAY_KEY"))
+		}
 	default:
-		errs = append(errs, fmt.Errorf("EXCUBRA_OVERLAY_TLS %q must be off or internal", c.OverlayTLS))
+		errs = append(errs, fmt.Errorf("EXCUBRA_OVERLAY_TLS %q must be off, internal or files", c.OverlayTLS))
 	}
 	switch c.LogLevel {
 	case "debug", "info", "warn", "error":
@@ -180,7 +190,7 @@ func (c Config) ConsoleBaseURL() string {
 		return strings.TrimRight(c.ConsoleURL, "/")
 	}
 	scheme := "http"
-	if c.OverlayTLS == "internal" {
+	if c.OverlayTLS != "off" {
 		scheme = "https"
 	}
 	return scheme + "://" + c.OverlayListen

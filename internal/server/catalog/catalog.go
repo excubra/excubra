@@ -56,6 +56,10 @@ type Client struct {
 	Store *store.Store
 	Log   *slog.Logger
 	Now   func() time.Time
+	// OnAdded is called when a sync imported versions that were not stored
+	// before. A channel set to follow the newest release should not wait for the
+	// next daily check to notice one arrived.
+	OnAdded func(added []string)
 
 	mu sync.Mutex
 	st Status
@@ -92,6 +96,9 @@ func (c *Client) Run(ctx context.Context, every time.Duration) {
 			c.Log.Warn("release catalog", "url", c.URL, "err", err)
 		} else if len(added) > 0 {
 			c.Log.Info("release catalog", "added", added)
+			if c.OnAdded != nil {
+				c.OnAdded(added)
+			}
 		}
 		t.Reset(every)
 	}

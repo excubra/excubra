@@ -13,6 +13,7 @@ import (
 	"github.com/excubra/excubra/internal/id"
 	"github.com/excubra/excubra/internal/secretbox"
 	"github.com/excubra/excubra/internal/server/state"
+	"github.com/excubra/excubra/internal/version"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -1147,14 +1148,74 @@ func (s *Store) Releases(ctx context.Context) ([]Release, error) {
 	return out, wrap("releases", rows.Err())
 }
 
-// SetChannelVersion points a channel (stable/canary) at a version; "" clears it.
+// ChannelAuto is the channel value that means "the newest release the catalog
+// knows", instead of a version somebody typed. It is what makes a release roll
+// out without anyone pointing at it — the point of the update machinery, and the
+// thing that was missing while every release waited for a human.
+const ChannelAuto = "auto"
+
+// SetChannelVersion points a channel (stable/canary) at a version, or at
+// ChannelAuto; "" clears it.
 func (s *Store) SetChannelVersion(ctx context.Context, channel, version string) error {
 	return s.SetSetting(ctx, "channel."+channel, version)
 }
 
-// ChannelVersion returns the version a channel points at ("" if none).
-func (s *Store) ChannelVersion(ctx context.Context, channel string) (string, error) {
+// ChannelSetting returns what the channel is set to literally, which may be
+// ChannelAuto. The console shows this; everything that installs uses
+// ChannelVersion.
+func (s *Store) ChannelSetting(ctx context.Context, channel string) (string, error) {
 	return s.Setting(ctx, "channel."+channel)
+}
+
+// ChannelVersion returns the version a channel points at ("" if none). On
+// ChannelAuto it resolves to the newest stored release.
+func (s *Store) ChannelVersion(ctx context.Context, channel string) (string, error) {
+	v, err := s.Setting(ctx, "channel."+channel)
+	if err != nil || v != ChannelAuto {
+		return v, err
+	}
+	return s.NewestRelease(ctx)
+}
+
+// NewestRelease is the highest version among the stored releases. Highest, not
+// most recently imported: a hotfix for an older line must not pull the fleet
+// backwards. Pre-releases are skipped — a channel that follows on its own must
+// not pick up a release candidate.
+func (s *Store) NewestRelease(ctx context.Context) (string, error) {
+	rows, err := s.main.QueryContext(ctx, `SELECT DISTINCT version FROM releases`)
+	if err != nil {
+		return "", wrap("newest release", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var best version.Semver
+	var bestStr string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return "", wrap("newest release", err)
+		}
+		if strings.ContainsAny(v, "-+") { // 1.2.3-rc1 is not what a channel follows
+			continue
+		}
+		sv, err := version.Parse(v)
+		if err != nil {
+			continue
+		}
+		if bestStr == "" || newerSemver(sv, best) {
+			best, bestStr = sv, v
+		}
+	}
+	return bestStr, wrap("newest release", rows.Err())
+}
+
+func newerSemver(a, b version.Semver) bool {
+	if a.Major != b.Major {
+		return a.Major > b.Major
+	}
+	if a.Minor != b.Minor {
+		return a.Minor > b.Minor
+	}
+	return a.Patch > b.Patch
 }
 
 // Setting returns a setting value ("" if unset); a sealed one is opened.

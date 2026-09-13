@@ -138,7 +138,14 @@ export interface UpdateRow extends BoxRow { Target: string; Behind: boolean; Las
 export interface CatalogStatus { url: string; lastCheck: string; lastError: string; lastAdded: string[] }
 export interface LaggingBox { id: string; name: string; version: string }
 export interface ServerUpdateStatus { enabled: boolean; running: string; arch: string; channel: string; target: string; available: string; lastCheck: string; lastError: string; rolledBack: string; heldBack: LaggingBox[] | null }
-export interface UpdatesData { Boxes: UpdateRow[] | null; Releases: Release[] | null; Channels: Record<string, string>; Versions: string[] | null; Behind: number; Current: number; NoTarget: number; Catalog: CatalogStatus | null; Server: ServerUpdateStatus | null }
+export interface UpdatesData {
+  Boxes: UpdateRow[] | null; Releases: Release[] | null
+  /** channel → the version it resolves to right now. */
+  Channels: Record<string, string>
+  /** channel → follows the newest release instead of a fixed version. */
+  Auto?: Record<string, boolean>
+  Versions: string[] | null; Behind: number; Current: number; NoTarget: number; Catalog: CatalogStatus | null; Server: ServerUpdateStatus | null
+}
 export interface HostData {
   View: HostRow; Row: HostRow; Box: BoxRow; Site: Site; Tenant: Tenant; Siblings: HostRow[] | null
   Windows: MaintenanceWindow[] | null; Form: { ICMP: boolean; TCPPort: number; HTTPURL: string }; Rounds: number; Failed: number; Availability: number
