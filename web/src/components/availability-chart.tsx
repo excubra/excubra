@@ -31,14 +31,16 @@ export function AvailabilityChart({ chart, range, onRange, title = "Erreichbarke
           <div className="flex h-[250px] items-center justify-center text-sm text-muted-foreground">Noch keine Prüfungen in diesem Zeitraum. Sobald Geräte beobachtet werden, füllt sich die Kurve.</div>
         ) : (
           <ChartContainer config={config} className="aspect-auto h-[250px] w-full">
-            <AreaChart data={data} margin={{ left: 8, right: 8 }}>
+            <AreaChart data={data} margin={{ top: 10, left: 8, right: 8 }}>
               <defs>
                 <linearGradient id="fillOk" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--color-ok)" stopOpacity={0.8} /><stop offset="95%" stopColor="var(--color-ok)" stopOpacity={0.1} /></linearGradient>
                 <linearGradient id="fillFailed" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--color-failed)" stopOpacity={0.8} /><stop offset="95%" stopColor="var(--color-failed)" stopOpacity={0.1} /></linearGradient>
               </defs>
               <CartesianGrid vertical={false} strokeDasharray="3 3" />
               <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={32} />
-              <YAxis hide />
+              {/* Without headroom the busiest hour sits exactly on the top edge and its
+                  stroke is cut off; twelve percent keeps the curve inside the plot. */}
+              <YAxis hide domain={[0, (max: number) => Math.max(1, Math.ceil(max * 1.12))]} />
               <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="dot" />} />
               <Area dataKey="failed" type="natural" fill="url(#fillFailed)" stroke="var(--color-failed)" stackId="a" />
               <Area dataKey="ok" type="natural" fill="url(#fillOk)" stroke="var(--color-ok)" stackId="a" />
