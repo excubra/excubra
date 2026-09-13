@@ -113,7 +113,7 @@ func (s *Server) box(next http.HandlerFunc) http.Handler {
 			writeErr(w, http.StatusTooManyRequests, wire.ErrRateLimited, "slow down")
 			return
 		}
-		if v := r.Header.Get(wire.HeaderAgentVersion); v != "" {
+		if v := r.Header.Get(wire.HeaderAgentVersion); v != "" && !alwaysOpen(r.URL.Path) {
 			av, err := version.Parse(v)
 			if err != nil {
 				writeErr(w, http.StatusBadRequest, wire.ErrBadRequest, "bad agent version header")
@@ -131,6 +131,17 @@ func (s *Server) box(next http.HandlerFunc) http.Handler {
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), boxKey, b)))
 	})
+}
+
+// alwaysOpen names the endpoints an agent outside the compatibility window may
+// still use. Without them a box that fell too far behind could never catch up:
+// it would be refused, ask for update metadata, be refused again, and stay silent
+// for good — which is exactly what happened to the pilot box on 13.09.2026.
+// Update metadata says where the signed binary is (the agent verifies the
+// signature itself), and renew only extends the certificate of a box we already
+// know: neither depends on the protocol version.
+func alwaysOpen(path string) bool {
+	return path == "/v1/update" || path == "/v1/renew"
 }
 
 // enroll turns a one-time key and a CSR into a box identity (ADR-0010).

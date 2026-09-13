@@ -945,6 +945,21 @@ func TestVersionWindowAndRateLimit(t *testing.T) {
 	if status, _ := f.do(boxClient, "GET", "/v1/config", nil, map[string]string{wire.HeaderAgentVersion: "not-a-version"}); status != 400 {
 		t.Fatalf("bad version header: %d", status)
 	}
+	// An agent that fell out of the window must still reach the way back: update
+	// metadata and certificate renewal. Otherwise it is refused, asks how to update,
+	// is refused again, and stays silent for good (13.09.2026, the pilot box).
+	old := map[string]string{wire.HeaderAgentVersion: "9.9.9"} // far outside the window
+	if status, body := f.do(boxClient, "GET", "/v1/update?os=linux&arch=amd64", nil, old); status != 200 && status != 204 {
+		t.Fatalf("update metadata must stay reachable for an old agent: %d %s", status, body)
+	}
+	key, _ := pki.GenerateKey()
+	csr, _ := pki.CSRPEM(key, "hw-test")
+	if status, body := f.do(boxClient, "POST", "/v1/renew", wire.RenewRequest{CSR: string(csr)}, old); status != 200 {
+		t.Fatalf("renew must stay reachable for an old agent: %d %s", status, body)
+	}
+	if status, _ := f.do(boxClient, "POST", "/v1/heartbeat", wire.Heartbeat{SentAt: f.now}, old); status != 426 {
+		t.Fatalf("everything else stays closed: %d", status)
+	}
 	limited := false
 	for i := 0; i < 40; i++ {
 		if status, _ := f.do(boxClient, "GET", "/v1/config", nil, nil); status == 429 {
