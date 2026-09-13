@@ -5,6 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { Plus } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
+import { PinButton } from "@/components/pin-button"
 import { EventList } from "@/components/event-list"
 import { DataTable } from "@/components/data-table"
 import { StateBadge } from "@/components/status"
@@ -15,13 +16,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, post, type SiteCard, type TenantDetail } from "@/lib/api"
+import { get, post, type Me, type SiteCard, type TenantDetail } from "@/lib/api"
 import { fmtTime } from "@/lib/format"
 
 export default function TenantPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const me = useQuery({ queryKey: ["me"], queryFn: () => get<Me>("/api/me") })
   const q = useQuery({ queryKey: ["tenant", id], queryFn: () => get<TenantDetail>(`/api/tenants/${id}`) })
   const [open, setOpen] = useState(false)
   const [slug, setSlug] = useState("")
@@ -50,7 +52,8 @@ export default function TenantPage() {
   return (
     <>
       <PageHeader crumbs={[{ label: "Kunden", to: "/tenants" }, { label: d.tenant.Name }]} title={d.tenant.Name} sub={<span className="font-mono">{d.tenant.ID}</span>}
-        actions={
+        actions={<>
+          <PinButton kind="tenant" id={d.tenant.ID} me={me.data} />
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild><Button size="sm"><Plus />Standort anlegen</Button></DialogTrigger>
             <DialogContent>
@@ -62,7 +65,7 @@ export default function TenantPage() {
               <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Abbrechen</Button><Button onClick={() => create.mutate()} disabled={!slug || !name || create.isPending}>Anlegen</Button></DialogFooter>
             </DialogContent>
           </Dialog>
-        } />
+        </>} />
       <section className="flex flex-wrap items-center gap-3 rounded-md border bg-card px-4 py-3 text-sm">
         <span className="font-medium">KI-Auswertung</span>
         <span className="text-muted-foreground">Was das Modell von diesem Kunden sehen darf. Aus: nichts verlässt den Server. Facts: Inventar, Dienste, Findings, Ereignisse, Konnektor-Facts, keine Zugangsdaten, keine Logs. Voraussetzung: Auftragsverarbeitung mit dem Anbieter und Zustimmung des Kunden.</span>

@@ -46,12 +46,15 @@ type meData struct {
 	Now     string    `json:"now"`
 	Secure  bool      `json:"secure"`
 	Map     mapConfig `json:"map"` // where map tiles come from, so the map page needs no extra fetch
-	Nav     navCounts
+	// What this operator pinned, for the top of the sidebar. Travels with /api/me
+	// because the sidebar is on every page.
+	Pins []store.Pin `json:"pins"`
+	Nav  navCounts
 }
 
 func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	d := meData{CSRF: sess.CSRF, Version: version.Version, Now: s.Now().In(s.Loc).Format(time.RFC3339), Secure: s.Secure, Map: s.mapConfig(r), Nav: s.navCounts(r.Context())}
+	d := meData{CSRF: sess.CSRF, Version: version.Version, Now: s.Now().In(s.Loc).Format(time.RFC3339), Secure: s.Secure, Map: s.mapConfig(r), Pins: s.pinsFor(r), Nav: s.navCounts(r.Context())}
 	if u := userFrom(r); u != nil {
 		d.User = u.Name
 	}

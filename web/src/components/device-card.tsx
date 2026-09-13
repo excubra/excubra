@@ -15,7 +15,7 @@ import type { DeviceCard } from "@/lib/api"
 export function DeviceCardView({ devices, onToggle, busy, onOpen }: {
   devices: DeviceCard[]; onToggle: (d: DeviceCard, on: boolean) => void; busy: boolean; onOpen?: (d: DeviceCard) => void
 }) {
-  if (!devices.length) return <div className="rounded-md border p-10 text-center text-sm text-muted-foreground">Kein Gerät passt zum Filter.</div>
+  if (!devices.length) return <div className="rounded-xl border p-10 text-center text-sm text-muted-foreground">Kein Gerät passt zum Filter.</div>
   return (
     <div className="grid grid-cols-1 gap-3 @xl/main:grid-cols-2 @4xl/main:grid-cols-3 @6xl/main:grid-cols-4 @[100rem]/main:grid-cols-5 @[120rem]/main:grid-cols-6">
       {devices.map((r) => (
