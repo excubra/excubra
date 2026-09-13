@@ -132,3 +132,37 @@ showed exactly that. The box package now carries a small root helper:
   installation predates the helper, the installer one-liner without a key
   (`ex0-box.sh --version …`) that brings the installation up to date once;
   from then on, rights ride along with updates.
+
+## Amendment 2026-09-13: the server does not outrun its boxes
+
+Boxes update themselves, but they look once a day. A server that follows the
+same channel installs within minutes of a release. Between two of a box's
+checks, the server can therefore walk several minor versions forward — and the
+moment it stands more than the compatibility window ahead (ADR-0002), it
+refuses every box it was built to serve.
+
+That is not hypothetical. On 13.09.2026 the server went from 0.7.4 to 0.10.0 in
+one morning while both boxes were still on 0.7.4 from the night before. They
+were refused at 08:22 UTC and stayed silent for roughly two hours. Nothing was
+broken on the boxes; they were simply never given the offer, and the refusal
+then blocked the very endpoint that would have delivered it.
+
+Two rules follow, and they are deliberately belt and braces:
+
+1. **The way back is always open** (ADR-0002): `GET /v1/update` and
+   `POST /v1/renew` ignore the window, so a box that has fallen behind can
+   always learn what to install and keep its certificate valid meanwhile.
+2. **The server waits for the fleet.** Before installing a release, the server
+   lists the boxes that release would push outside the window — enrolled, not
+   revoked, heard from within the last 14 days. If there are any, it does not
+   install. It issues each of them an `update` task so they fetch metadata at
+   their next heartbeat instead of at their daily tick, looks again every five
+   minutes, and installs once they are within reach. The CLI
+   (`excubra server update status`) and the console's Updates page name the
+   boxes that are holding it back.
+
+A box that is gone for good must not freeze the server for ever, hence the
+14-day cutoff; a box switched off over a long weekend must, hence 14 days and
+not one. The direction of the asymmetry is the point: the side that can afford
+to wait is the server, because a server one release behind still serves every
+box, while a box the server refuses does nothing at all.

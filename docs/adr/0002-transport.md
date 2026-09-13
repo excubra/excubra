@@ -51,9 +51,17 @@ HTTP status. Codes are part of the protocol and never renamed.
 
 **Version negotiation.** The agent sends `X-Excubra-Agent-Version: <semver>`. The server
 accepts an agent whose MAJOR equals its own and whose MINOR is within two of its own,
-in either direction. Otherwise it answers `426 Upgrade Required` with the update metadata;
-the agent updates before doing anything else. Additive JSON changes never bump `/v1`;
-breaking changes get `/v2` beside `/v1` for the length of the compatibility window.
+in either direction. Otherwise it answers `426 Upgrade Required`; the agent updates
+before doing anything else. Additive JSON changes never bump `/v1`; breaking changes get
+`/v2` beside `/v1` for the length of the compatibility window.
+
+**The way back stays open.** `GET /v1/update` and `POST /v1/renew` are answered
+regardless of the window. An agent that is refused everywhere cannot be told to update
+either: it asks for metadata, is refused, and stays silent for good. That is not a
+theoretical risk — it took both pilot boxes off the air on 13.09.2026, and it is the one
+failure mode a compatibility window must never produce. A refused agent therefore keeps
+exactly two doors: the one that tells it what to install, and the one that keeps its
+certificate valid while it gets there.
 
 **Rate limits.** Per client certificate: token bucket, 10 requests/min sustained, burst 30.
 Per source IP on `/v1/enroll`: 5/min. Exceeding returns `429` with `Retry-After`.

@@ -74,7 +74,24 @@ export default function UpdatesPage() {
               <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="stable">stable</SelectItem><SelectItem value="canary">canary</SelectItem><SelectItem value="off">nicht automatisch</SelectItem></SelectContent>
             </Select>
-            <Button size="sm" onClick={() => act.mutate({ path: "/api/updates/server" })} disabled={act.isPending || !d.Server.enabled || d.Server.channel === "off"} variant={d.Server.available ? "default" : "outline"}><Download />{d.Server.available ? `Jetzt auf ${d.Server.available} aktualisieren` : "Jetzt prüfen"}</Button>
+            <Button size="sm" onClick={() => act.mutate({ path: "/api/updates/server" })} disabled={act.isPending || !d.Server.enabled || d.Server.channel === "off" || (d.Server.heldBack ?? []).length > 0} variant={d.Server.available ? "default" : "outline"}><Download />{d.Server.available ? `Jetzt auf ${d.Server.available} aktualisieren` : "Jetzt prüfen"}</Button>
+            {(d.Server.heldBack ?? []).length > 0 && (
+              <div className="w-full rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
+                <p className="font-medium">Der Server wartet auf {(d.Server.heldBack ?? []).length} Box{(d.Server.heldBack ?? []).length === 1 ? "" : "en"}, bevor er {d.Server.available} installiert.</p>
+                <p className="mt-1 text-muted-foreground">
+                  Eine Box darf höchstens zwei Minor-Versionen vom Server entfernt sein. Würde der Server jetzt springen, würde er diese Boxen ab sofort abweisen.
+                  Sie wurden aufgefordert, sofort zu aktualisieren; der Server sieht alle paar Minuten nach und installiert von selbst, sobald sie nachgezogen sind.
+                </p>
+                <ul className="mt-2 flex flex-col gap-1">
+                  {(d.Server.heldBack ?? []).map((b) => (
+                    <li key={b.id} className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{b.name}</span>
+                      <Badge variant="outline" className="font-mono">{b.version}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
