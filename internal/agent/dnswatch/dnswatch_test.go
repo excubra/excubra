@@ -90,6 +90,14 @@ func newUpstream(t *testing.T) *upstream {
 	return u
 }
 
+// count is how many queries the fake upstream answered. Read it through here:
+// the serving goroutines increment it, so a bare field read is a data race.
+func (u *upstream) count() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.seen
+}
+
 func (u *upstream) reply(msg []byte) []byte {
 	u.mu.Lock()
 	u.seen++
@@ -109,19 +117,56 @@ func (u *upstream) reply(msg []byte) []byte {
 	return out
 }
 
+// collected is what the watch emitted. The serving goroutines write it while the
+// test body reads it, so both sides go through the lock — handing the test a bare
+// slice looked fine and was a data race that only -race saw.
+type collected struct {
+	mu    sync.Mutex
+	sigs  []wire.Signal
+	notes []string
+}
+
+func (c *collected) addSignals(s []wire.Signal) {
+	c.mu.Lock()
+	c.sigs = append(c.sigs, s...)
+	c.mu.Unlock()
+}
+
+func (c *collected) addNote(s string) {
+	c.mu.Lock()
+	c.notes = append(c.notes, s)
+	c.mu.Unlock()
+}
+
+func (c *collected) signals() []wire.Signal {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]wire.Signal(nil), c.sigs...)
+}
+
+func (c *collected) noted() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.notes...)
+}
+
+func (c *collected) reset() {
+	c.mu.Lock()
+	c.sigs, c.notes = nil, nil
+	c.mu.Unlock()
+}
+
 // sensor starts a Watch on the IPv4 loopback with the given upstreams and returns
-// its UDP and TCP addresses plus the signals it emits.
-func sensor(t *testing.T, cfg Config) (*Watch, string, string, *[]wire.Signal, *[]string) {
+// its UDP and TCP addresses plus what it emits.
+func sensor(t *testing.T, cfg Config) (*Watch, string, string, *collected) {
 	t.Helper()
 	now := time.Date(2026, 9, 12, 14, 0, 0, 0, time.UTC)
 	w := New(slog.Default(), t.TempDir())
 	w.Now = func() time.Time { return now }
 	w.LAN = func() string { return "127.0.0.1" }
-	var sigs []wire.Signal
-	var notes []string
-	var mu sync.Mutex
-	w.Signals = func(s []wire.Signal) { mu.Lock(); sigs = append(sigs, s...); mu.Unlock() }
-	w.Note = func(s string) { mu.Lock(); notes = append(notes, s); mu.Unlock() }
+	got := &collected{}
+	w.Signals = got.addSignals
+	w.Note = got.addNote
 	var udpAddr, tcpAddr string
 	w.ListenPacket = func(ctx context.Context, network, _ string) (net.PacketConn, error) {
 		pc, err := (&net.ListenConfig{}).ListenPacket(ctx, network, "127.0.0.1:0")
@@ -145,7 +190,7 @@ func sensor(t *testing.T, cfg Config) (*Watch, string, string, *[]wire.Signal, *
 		t.Fatalf("sensor not listening: %s", w.Drain().Error)
 	}
 	t.Cleanup(w.close)
-	return w, udpAddr, tcpAddr, &sigs, &notes
+	return w, udpAddr, tcpAddr, got
 }
 
 func ask(t *testing.T, addr, name string, qtype uint16) []byte {
@@ -169,7 +214,7 @@ func ask(t *testing.T, addr, name string, qtype uint16) []byte {
 
 func TestForwardsBlocksAndReports(t *testing.T) {
 	up := newUpstream(t)
-	w, udp, tcp, sigs, _ := sensor(t, Config{Enabled: true, Block: true, Upstreams: []string{up.addr}})
+	w, udp, tcp, got := sensor(t, Config{Enabled: true, Block: true, Upstreams: []string{up.addr}})
 	w.mu.Lock()
 	w.list, w.listVer = parseList([]byte("# malware\nevil.test\n0.0.0.0 bad.example\n")), "v1"
 	w.mu.Unlock()
@@ -183,7 +228,7 @@ func TestForwardsBlocksAndReports(t *testing.T) {
 	if r := ask(t, udp, "www.evil.test", 1); rcode(r) != rcodeNX || r[2]&0x80 == 0 {
 		t.Fatalf("listed name not blocked: %x", r)
 	}
-	if got := *sigs; len(got) != 1 || got[0].Kind != wire.SignalDNSBlock || got[0].IP != "127.0.0.1" || got[0].Detail != "evil.test|www.evil.test|blocked" {
+	if got := got.signals(); len(got) != 1 || got[0].Kind != wire.SignalDNSBlock || got[0].IP != "127.0.0.1" || got[0].Detail != "evil.test|www.evil.test|blocked" {
 		t.Fatalf("block signal: %+v", got)
 	}
 	// over TCP too
@@ -216,15 +261,15 @@ func TestForwardsBlocksAndReports(t *testing.T) {
 
 	// reporting only: the listed name is forwarded, the signal still comes
 	w.Apply(Config{Enabled: true, Block: false, Upstreams: []string{up.addr}})
-	*sigs = nil
+	got.reset()
 	if r := ask(t, udp, "evil.test", 1); rcode(r) != 0 {
 		t.Fatalf("report mode blocked: %x", r)
 	}
-	if got := *sigs; len(got) != 1 || got[0].Detail != "evil.test|evil.test|reported" {
+	if got := got.signals(); len(got) != 1 || got[0].Detail != "evil.test|evil.test|reported" {
 		t.Fatalf("report signal: %+v", got)
 	}
-	if up.seen != 4 {
-		t.Fatalf("upstream saw %d queries, want 4", up.seen)
+	if n := up.count(); n != 4 {
+		t.Fatalf("upstream saw %d queries, want 4", n)
 	}
 }
 
@@ -232,7 +277,7 @@ func TestForwardsBlocksAndReports(t *testing.T) {
 // never an open resolver, whatever the firewall lets through.
 func TestOutsideSourcesAreNotServed(t *testing.T) {
 	up := newUpstream(t)
-	w, _, _, sigs, _ := sensor(t, Config{Enabled: true, Upstreams: []string{up.addr}})
+	w, _, _, got := sensor(t, Config{Enabled: true, Upstreams: []string{up.addr}})
 	if resp := w.handle(context.Background(), query(1, "example.test", 1), "203.0.113.9", "udp"); resp != nil {
 		t.Fatalf("answered an outside source: %x", resp)
 	}
@@ -243,11 +288,11 @@ func TestOutsideSourcesAreNotServed(t *testing.T) {
 		t.Fatal("did not answer a mapped private source")
 	}
 	rep := w.Drain()
-	if rep.Refused != 1 || rep.Queries != 2 || up.seen != 2 {
-		t.Fatalf("report: %+v upstream=%d", rep, up.seen)
+	if n := up.count(); rep.Refused != 1 || rep.Queries != 2 || n != 2 {
+		t.Fatalf("report: %+v upstream=%d", rep, n)
 	}
-	if len(*sigs) != 0 {
-		t.Fatalf("signals: %+v", *sigs)
+	if s := got.signals(); len(s) != 0 {
+		t.Fatalf("signals: %+v", s)
 	}
 	for src, want := range map[string]bool{"127.0.0.1": true, "169.254.10.4": true, "100.64.0.9": false, "8.8.8.8": false, "fd00::1": true, "2001:db8::1": false, "": false} {
 		if got := servedAddress(src); got != want {
@@ -259,7 +304,7 @@ func TestOutsideSourcesAreNotServed(t *testing.T) {
 func TestFailoverAndLoopGuard(t *testing.T) {
 	up := newUpstream(t)
 	dead := "[::1]:1"
-	w, udp, _, _, notes := sensor(t, Config{Enabled: true, Upstreams: []string{dead, up.addr}})
+	w, udp, _, got := sensor(t, Config{Enabled: true, Upstreams: []string{dead, up.addr}})
 	if r := ask(t, udp, "ok.test", 1); rcode(r) != 0 {
 		t.Fatalf("failover: %x", r)
 	}
@@ -283,14 +328,14 @@ func TestFailoverAndLoopGuard(t *testing.T) {
 			t.Fatalf("loop not refused: %x", r)
 		}
 	}
-	if len(*notes) != 1 || !strings.Contains((*notes)[0], "Schleife") {
-		t.Fatalf("notes: %v", *notes)
+	if n := got.noted(); len(n) != 1 || !strings.Contains(n[0], "Schleife") {
+		t.Fatalf("notes: %v", n)
 	}
 }
 
 func TestRandomNamesAndTunnels(t *testing.T) {
 	up := newUpstream(t)
-	w, udp, _, sigs, _ := sensor(t, Config{Enabled: true, Upstreams: []string{up.addr}})
+	w, udp, _, got := sensor(t, Config{Enabled: true, Upstreams: []string{up.addr}})
 	// real names that do not exist are not a DGA
 	for _, n := range []string{"printer.nx", "intranet.nx", "fileserver01.nx"} {
 		ask(t, udp, n, 1)
@@ -302,7 +347,7 @@ func TestRandomNamesAndTunnels(t *testing.T) {
 		ask(t, udp, rot[:10]+strconv.Itoa(i)+".nx", 1)
 	}
 	var dga []wire.Signal
-	for _, s := range *sigs {
+	for _, s := range got.signals() {
 		if s.Kind == wire.SignalDNSDGA {
 			dga = append(dga, s)
 		}
@@ -311,12 +356,12 @@ func TestRandomNamesAndTunnels(t *testing.T) {
 		t.Fatalf("dga signals: %+v", dga)
 	}
 	// a tunnel: long labels to one domain
-	*sigs = nil
+	got.reset()
 	for i := 0; i < 31; i++ {
 		ask(t, udp, strings.Repeat("a", 30)+strconv.Itoa(i)+"."+strings.Repeat("b", 25)+".tunnel.test", 1)
 	}
 	var tun []wire.Signal
-	for _, s := range *sigs {
+	for _, s := range got.signals() {
 		if s.Kind == wire.SignalDNSTunnel {
 			tun = append(tun, s)
 		}
@@ -325,11 +370,11 @@ func TestRandomNamesAndTunnels(t *testing.T) {
 		t.Fatalf("tunnel signals: %+v", tun)
 	}
 	// TXT queries count as well, short names do not
-	*sigs = nil
+	got.reset()
 	for i := 0; i < 30; i++ {
 		ask(t, udp, "c"+strconv.Itoa(i)+".txt.test", qtypeTXT)
 	}
-	if got := *sigs; len(got) != 1 || got[0].Kind != wire.SignalDNSTunnel || got[0].Detail != "txt.test" {
+	if got := got.signals(); len(got) != 1 || got[0].Kind != wire.SignalDNSTunnel || got[0].Detail != "txt.test" {
 		t.Fatalf("txt tunnel: %+v", got)
 	}
 	_ = w
