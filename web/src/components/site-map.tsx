@@ -158,5 +158,5 @@ export function SiteMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, selected, key])
 
-  return <div ref={host} className={cn("ex0-map w-full rounded-md border", className)} style={{ minHeight: 320 }} />
+  return <div ref={host} className={cn("ex0-map w-full rounded-xl border", className)} style={{ minHeight: 320 }} />
 }

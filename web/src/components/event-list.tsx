@@ -50,7 +50,7 @@ export function EventList({ events, showWhere = true, emptyTitle = "Alles ruhig"
   let lastDay = ""
   return (
     <div className="flex flex-col gap-2">
-      <ul className="divide-y rounded-md border">
+      <ul className="divide-y rounded-xl border">
         {events.map((e) => {
           const k = eventKinds[e.type] ?? fallback
           const day = dayLabel(e.occurred_at)

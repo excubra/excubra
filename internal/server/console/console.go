@@ -241,6 +241,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/sites/{id}/geocode", s.auth(s.siteGeocode))
 	mux.Handle("POST /api/sites/{id}/location", s.auth(s.siteLocationSet))
 	mux.Handle("GET /api/map/tiles/{z}/{x}/{y}", s.auth(s.mapTile))
+	mux.Handle("POST /api/pins", s.auth(s.pinToggle))
 	mux.Handle("GET /api/sites/{id}/watch/suggestion", s.auth(s.apiSiteWatchSuggestion))
 	mux.Handle("POST /api/sites/{id}/watch/suggested", s.auth(s.siteWatchSuggested))
 	mux.Handle("GET /api/settings/dns", s.auth(s.apiDNSSettings))

@@ -8,7 +8,7 @@ export function Group({ title, meta, tone, open, onToggle, children }: {
   title: ReactNode; meta?: ReactNode; tone?: "bad" | "plain"; open: boolean; onToggle: () => void; children: ReactNode
 }) {
   return (
-    <section className={cn("overflow-hidden rounded-md border", tone === "bad" && "border-destructive/40")}>
+    <section className={cn("overflow-hidden rounded-xl border", tone === "bad" && "border-destructive/40")}>
       <button type="button" onClick={onToggle} aria-expanded={open}
         className="flex w-full items-center gap-2 bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/70">
         <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />

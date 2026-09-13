@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
@@ -14,9 +14,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, type Overview, type SiteCard } from "@/lib/api"
+import { get, type Me, type Overview, type SiteCard } from "@/lib/api"
 import { fmtTime, n } from "@/lib/format"
 import { AttentionCard } from "@/components/attention-list"
+import { SiteMap, type MapPoint } from "@/components/site-map"
+import { Card } from "@/components/ui/card"
+
+// The same four states the badges use, so a marker and a badge never disagree.
+const mapTone = (c: SiteCard): MapPoint["tone"] => (!c.HasBox ? "none" : !c.Online ? "silent" : c.Down > 0 ? "bad" : "ok")
 
 export default function OverviewPage() {
   const [range, setRange] = useState("24h")
@@ -27,6 +32,13 @@ export default function OverviewPage() {
   const attention = d?.attention ?? []
   const open = attention.filter((a) => !a.ack)
   const refresh = () => { qc.invalidateQueries({ queryKey: ["overview"] }); qc.invalidateQueries({ queryKey: ["me"] }) }
+  const me = useQuery({ queryKey: ["me"], queryFn: () => get<Me>("/api/me") })
+  const [picked, setPicked] = useState<string>()
+  const cards = useMemo(() => d?.Cards ?? [], [d])
+  const points: MapPoint[] = useMemo(() => cards
+    .filter((c) => c.Site.Located && typeof c.Site.Lat === "number" && typeof c.Site.Lon === "number")
+    .map((c) => ({ id: c.Site.ID, name: c.Site.Name, tenant: c.Tenant.Name, lat: c.Site.Lat as number, lon: c.Site.Lon as number, tone: mapTone(c) })), [cards])
+  const chosen = picked ? cards.find((c) => c.Site.ID === picked) : undefined
 
   const siteCols: ColumnDef<SiteCard, unknown>[] = [
     { id: "site", header: "Standort", accessorFn: (r) => r.Site.Name, cell: ({ row }) => <div><div className="font-medium">{row.original.Site.Name}</div><div className="text-xs text-muted-foreground">{row.original.Tenant.Name}</div></div> },
@@ -55,6 +67,36 @@ export default function OverviewPage() {
       )}
 
       {d && <AttentionCard items={attention} onChanged={refresh} />}
+
+      {/* Where the fleet is, next to what it is doing. Only when somebody has
+          entered an address; an empty map is a hole in the page, not a feature. */}
+      {points.length > 0 && (
+        <Card className="gap-0 py-0">
+          <div className="relative">
+            <SiteMap
+              points={points}
+              tiles={me.data?.map?.tiles}
+              attribution={me.data?.map?.attribution}
+              selected={picked}
+              onSelect={setPicked}
+              className="h-72 rounded-xl border-0"
+            />
+            {chosen && (
+              <div className="pointer-events-none absolute inset-x-3 bottom-8 flex sm:inset-x-auto sm:left-3 sm:max-w-xs">
+                <button type="button" onClick={() => navigate(`/sites/${chosen.Site.ID}`)}
+                  className="pointer-events-auto w-full rounded-lg border bg-background/95 p-3 text-left shadow-lg backdrop-blur transition-colors hover:bg-muted/60">
+                  <span className="block truncate font-medium">{chosen.Site.Name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{chosen.Tenant.Name}</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {chosen.Down ? <span className="text-destructive">{chosen.Down} ausgefallen</span> : !chosen.Online ? <span className="text-destructive">Box schweigt</span> : "ruhig"}
+                    {" · "}{chosen.Monitored} beobachtet
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       {d ? <AvailabilityChart chart={d.Chart} range={range} onRange={setRange} /> : <Skeleton className="h-[340px]" />}
 

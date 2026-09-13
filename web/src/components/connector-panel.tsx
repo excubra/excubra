@@ -137,7 +137,7 @@ function Complex({ value }: { value: unknown }) {
     if (typeof value[0] === "object" && value[0] !== null) {
       const cols = Array.from(new Set(value.flatMap((r) => Object.keys(r as object)))).filter((c) => !c.startsWith("_")).slice(0, 8)
       return (
-        <div className="overflow-x-auto rounded-md border">
+        <div className="overflow-x-auto rounded-xl border">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-left text-xs text-muted-foreground"><tr>{cols.map((c) => <th key={c} className="px-2 py-1.5 font-medium">{label(c)}</th>)}</tr></thead>
             <tbody>{value.map((r, i) => <tr key={i} className="border-t">{cols.map((c) => <td key={c} className="px-2 py-1.5 font-mono text-xs"><Cell v={(r as Record<string, unknown>)[c]} k={c} /></td>)}</tr>)}</tbody>

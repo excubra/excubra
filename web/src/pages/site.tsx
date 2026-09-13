@@ -32,6 +32,7 @@ import { SiteLocationCard } from "@/components/site-location-card"
 import { ConnectIP } from "@/components/connect"
 import { PingCell } from "@/components/ping-bar"
 import { SuggestWatchButton } from "@/components/suggest-watch"
+import { PinButton } from "@/components/pin-button"
 import { get, post, type DeviceCard, type HostCard, type Me, type SiteData } from "@/lib/api"
 import { fmtShort, fmtTime, pct } from "@/lib/format"
 
@@ -94,7 +95,7 @@ export default function SitePage() {
       <PageHeader crumbs={[{ label: "Kunden", to: "/tenants" }, { label: d.Tenant.Name, to: `/tenants/${d.Tenant.ID}` }, { label: d.Site.Name }]}
         title={<>{d.Site.Name}{d.Box ? <span className="flex items-center gap-2 text-sm font-medium"><LiveDot ok={online} />{online ? "online" : "Box schweigt"}</span> : <Badge variant="secondary">keine Box</Badge>}</>}
         sub={<span className="font-mono">{d.Site.ID}</span>}
-        actions={<>{d.Box && <TaskMenu path={`/api/sites/${id}/tasks`} onDone={refresh} />}<Button asChild variant="outline" size="sm"><Link to={`/maintenance?site=${d.Site.ID}`}><Wrench />Wartung planen</Link></Button></>} />
+        actions={<><PinButton kind="site" id={d.Site.ID} me={me.data} />{d.Box && <TaskMenu path={`/api/sites/${id}/tasks`} onDone={refresh} />}<Button asChild variant="outline" size="sm"><Link to={`/maintenance?site=${d.Site.ID}`}><Wrench />Wartung planen</Link></Button></>} />
 
       <StatGrid>
         <StatCard label="Box" value={d.Box ? (online ? "online" : "schweigt") : "keine"} tone={d.Box ? (online ? "ok" : "bad") : undefined} badge={d.Box ? <Badge variant="outline" className="font-mono">{d.Box.Name || d.Box.ID}</Badge> : undefined}

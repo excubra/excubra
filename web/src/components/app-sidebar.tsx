@@ -32,6 +32,37 @@ const system: Item[] = [
   { to: "/settings", label: "Einstellungen", icon: Settings2 },
 ]
 
+// What this operator pinned, above everything else. With fifty customers the
+// groups below stop being a shortcut; the three somebody works with today belong
+// at the top, and which three that is changes by the day and by the person.
+function Pinned({ me, onGo }: { me: Me; onGo: () => void }) {
+  const { pathname } = useLocation()
+  const pins = me.pins ?? []
+  if (pins.length === 0) return null
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>Angeheftet</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {pins.map((p) => {
+            const to = p.kind === "site" ? `/sites/${p.id}` : `/tenants/${p.id}`
+            return (
+              <SidebarMenuItem key={`${p.kind}:${p.id}`}>
+                <SidebarMenuButton asChild isActive={pathname === to} tooltip={p.sub ? `${p.name} · ${p.sub}` : p.name}>
+                  <Link to={to} onClick={onGo}>
+                    {p.kind === "site" ? <MapPin /> : <Building2 />}
+                    <span className="truncate">{p.name}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          })}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}
+
 function isActive(path: string, to: string) {
   if (to === "/") return path === "/"
   // a device or a host is reached through its site, so they light up "Standorte"
@@ -89,6 +120,7 @@ export function AppSidebar({ me, onSearch }: { me: Me; onSearch: () => void }) {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
+        <Pinned me={me} onGo={onGo} />
         <Nav items={operate} label="Betrieb" me={me} onGo={onGo} />
         <Nav items={fleet} label="Flotte" me={me} onGo={onGo} />
         <Nav items={system} label="System" me={me} onGo={onGo} className="mt-auto" />
