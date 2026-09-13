@@ -51,14 +51,14 @@ export function Mark({ className = "size-6", title }: { className?: string; titl
   )
 }
 
-/** Mark plus wordmark, for the sidebar header and the login page. */
-export function Logo({ className = "" }: { className?: string }) {
+/** The wordmark: E, X, and the faceted zero — one word, not a badge with a name
+ *  next to it. In an icon-collapsed sidebar the letters step back and the zero
+ *  stands alone as the app icon. */
+export function Wordmark({ className = "" }: { className?: string }) {
   return (
-    <span className={"inline-flex items-center gap-2 " + className}>
-      <Mark className="size-7 shrink-0" title="EX0" />
-      <span className="text-lg font-semibold leading-none tracking-tight">
-        EX<span className="text-primary">0</span>
-      </span>
+    <span className={"flex items-center text-[20px] font-bold leading-none tracking-tight " + className}>
+      <span className="group-data-[collapsible=icon]:hidden">EX</span>
+      <Mark className="ml-[0.06em] size-[1.15em] shrink-0" title="EX0" />
     </span>
   )
 }

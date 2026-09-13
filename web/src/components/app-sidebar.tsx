@@ -5,7 +5,7 @@ import {
   SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar,
 } from "@/components/ui/sidebar"
 import { Kbd } from "@/components/ui/kbd"
-import { Mark } from "@/components/logo"
+import { Wordmark } from "@/components/logo"
 import { post, type Me } from "@/lib/api"
 
 type Item = { to: string; label: string; icon: typeof Box; count?: (m: Me) => number; bad?: boolean | ((m: Me) => boolean) }
@@ -76,8 +76,8 @@ export function AppSidebar({ me, onSearch }: { me: Me; onSearch: () => void }) {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link to="/" onClick={onGo}>
-                <Mark className="size-7 shrink-0" title="EX0" />
-                <div className="grid flex-1 text-left text-sm leading-tight"><span className="truncate font-semibold">EX0 Konsole</span><span className="truncate text-xs text-muted-foreground">VIICO GmbH</span></div>
+                <Wordmark />
+                <div className="grid flex-1 text-left text-xs leading-tight text-muted-foreground"><span className="truncate">Konsole</span><span className="truncate">VIICO GmbH</span></div>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

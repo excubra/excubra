@@ -57,8 +57,7 @@ type Server struct {
 	Blocklist  *blocklist.Service     // the DNS sensors' list, nil when off
 	AI         *ai.Service            // assessments (ADR-0019), nil in tests
 
-	pages    map[string]*template.Template
-	partials *template.Template
+	pages map[string]*template.Template
 
 	flashMu sync.Mutex
 	flashes map[string]string       // session hash → message
@@ -160,20 +159,15 @@ func (s *Server) funcs() template.FuncMap {
 }
 
 func (s *Server) parseTemplates() error {
-	names := []string{"login", "status", "host", "boxes", "box", "tenants", "site", "events", "users", "maintenance", "webhooks", "keys", "tokens", "audit", "error"}
+	names := []string{"login", "error"}
 	s.pages = map[string]*template.Template{}
 	for _, n := range names {
-		t, err := template.New("layout.html").Funcs(s.funcs()).ParseFS(templatesFS, "templates/layout.html", "templates/_status_table.html", "templates/"+n+".html")
+		t, err := template.New("layout.html").Funcs(s.funcs()).ParseFS(templatesFS, "templates/layout.html", "templates/"+n+".html")
 		if err != nil {
 			return fmt.Errorf("console: template %s: %w", n, err)
 		}
 		s.pages[n] = t
 	}
-	p, err := template.New("partials").Funcs(s.funcs()).ParseFS(templatesFS, "templates/_status_table.html")
-	if err != nil {
-		return fmt.Errorf("console: partials: %w", err)
-	}
-	s.partials = p
 	return nil
 }
 
@@ -189,8 +183,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ca.crt", s.caCert)
 	mux.Handle("POST /logout", s.auth(s.logout))
 
-	mux.Handle("GET /{$}", s.auth(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/app/", http.StatusFound) }))
-	mux.Handle("GET /app/{path...}", s.auth(s.spa)) // also matches /app/ itself
 	mux.Handle("GET /api/me", s.auth(s.apiMe))
 	mux.Handle("GET /api/overview", s.auth(s.apiOverview))
 	mux.Handle("GET /api/search", s.auth(s.apiSearch))
@@ -277,49 +269,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/users", s.auth(s.apiUsers))
 	mux.Handle("GET /api/audit", s.auth(s.apiAudit))
 	mux.Handle("POST /api/logout", s.auth(s.logout))
-	mux.Handle("GET /status", s.auth(s.statusPage))
-	mux.Handle("GET /status/table", s.auth(s.statusTable))
-	mux.Handle("GET /hosts/{id}", s.auth(s.hostPage))
-	mux.Handle("POST /hosts/{id}", s.auth(s.hostUpdate))
-	mux.Handle("POST /hosts/{id}/delete", s.auth(s.hostDelete))
-	mux.Handle("POST /hosts/{id}/maintenance", s.auth(s.hostMaintenance))
-	mux.Handle("GET /boxes", s.auth(s.boxesPage))
-	mux.Handle("GET /boxes/{id}", s.auth(s.boxPage))
-	mux.Handle("POST /boxes/{id}/assign", s.auth(s.boxAssign))
-	mux.Handle("POST /boxes/{id}/settings", s.auth(s.boxSettings))
-	mux.Handle("POST /boxes/{id}/netbird", s.auth(s.boxNetbird))
-	mux.Handle("POST /boxes/{id}/revoke", s.auth(s.boxRevoke))
-	mux.Handle("POST /boxes/{id}/delete", s.auth(s.boxDelete))
-	mux.Handle("GET /tenants", s.auth(s.tenantsPage))
-	mux.Handle("POST /tenants", s.auth(s.tenantCreate))
-	mux.Handle("POST /tenants/{id}/sites", s.auth(s.siteCreate))
-	mux.Handle("GET /sites/{id}", s.auth(s.sitePage))
-	mux.Handle("GET /sites/{id}/inventory", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/sites/"+r.PathValue("id")+"?tab=netz", http.StatusFound)
+	// Everything that is not an endpoint above is the app: it routes client-side.
+	// A link from before the merge (/app/…) still lands in the right place.
+	mux.Handle("GET /app/{path...}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/"+r.PathValue("path"), http.StatusMovedPermanently)
 	}))
-	mux.Handle("GET /events", s.auth(s.eventsPage))
-	mux.Handle("GET /users", s.auth(s.usersPage))
-	mux.Handle("POST /devices/{id}/watch", s.auth(s.deviceWatch))
-	mux.Handle("POST /hosts/{id}/unwatch", s.auth(s.hostUnwatch))
-	mux.Handle("POST /hosts/{id}/uplink", s.auth(s.hostUplink))
-	mux.Handle("GET /devices/{id}", s.auth(s.deviceRedirect))
-	mux.Handle("POST /devices/{id}/monitor", s.auth(s.deviceMonitor))
-	mux.Handle("POST /devices/{id}/ignore", s.auth(s.deviceIgnore))
-	mux.Handle("GET /maintenance", s.auth(s.maintenancePage))
-	mux.Handle("POST /maintenance", s.auth(s.maintenanceCreate))
-	mux.Handle("POST /maintenance/{id}/end", s.auth(s.maintenanceEnd))
-	mux.Handle("GET /webhooks", s.auth(s.webhooksPage))
-	mux.Handle("POST /webhooks", s.auth(s.webhookCreate))
-	mux.Handle("POST /webhooks/{id}", s.auth(s.webhookUpdate))
-	mux.Handle("POST /webhooks/{id}/delete", s.auth(s.webhookDelete))
-	mux.Handle("POST /webhooks/{id}/test", s.auth(s.webhookTest))
-	mux.Handle("GET /keys", s.auth(s.keysPage))
-	mux.Handle("POST /keys", s.auth(s.keysCreate))
-	mux.Handle("POST /keys/{id}/revoke", s.auth(s.keyRevoke))
-	mux.Handle("GET /tokens", s.auth(s.tokensPage))
-	mux.Handle("POST /tokens", s.auth(s.tokenCreate))
-	mux.Handle("POST /tokens/{id}/revoke", s.auth(s.tokenRevoke))
-	mux.Handle("GET /audit", s.auth(s.auditPage))
+	mux.Handle("GET /", s.auth(s.spa))
 	return s.headers(mux)
 }
 
@@ -327,9 +282,9 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) headers(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		csp := "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
-		if strings.HasPrefix(r.URL.Path, "/app") {
-			csp = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+		csp := "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+		if strings.HasPrefix(r.URL.Path, "/login") || strings.HasPrefix(r.URL.Path, "/static") {
+			csp = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
 		}
 		h.Set("Content-Security-Policy", csp)
 		h.Set("X-Content-Type-Options", "nosniff")
@@ -380,17 +335,6 @@ func (s *Server) renderOpts(w http.ResponseWriter, r *http.Request, name, title 
 	if err := t.ExecuteTemplate(&buf, "layout.html", p); err != nil {
 		s.Log.Error("console: render", "page", name, "err", err)
 		http.Error(w, "Seite konnte nicht gerendert werden — Details im Server-Log.", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = buf.WriteTo(w)
-}
-
-func (s *Server) renderPartial(w http.ResponseWriter, name string, data any) {
-	var buf bytes.Buffer
-	if err := s.partials.ExecuteTemplate(&buf, name, data); err != nil {
-		s.Log.Error("console: render partial", "name", name, "err", err)
-		http.Error(w, "Fehler", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -502,7 +446,7 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "console app not built", http.StatusNotFound)
 		return
 	}
-	p := strings.TrimPrefix(r.URL.Path, "/app/")
+	p := strings.TrimPrefix(r.URL.Path, "/")
 	if p != "" && p != "index.html" && fs.ValidPath(p) {
 		if f, err := sub.Open(p); err == nil {
 			_ = f.Close()

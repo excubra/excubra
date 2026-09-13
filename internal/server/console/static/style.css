@@ -56,7 +56,10 @@ pre { font: 13px/1.55 var(--mono); background: var(--bg); border: 1px solid var(
 body.app { display: grid; grid-template-columns: 256px 1fr; background: var(--sidebar); }
 .side { display: flex; flex-direction: column; gap: 4px; padding: 8px; overflow-y: auto; height: 100vh; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius); margin-bottom: 4px; }
-.brand .mark { width: 32px; height: 32px; flex: none; }
+.brand .mark { width: 1.15em; height: 1.15em; flex: none; margin-left: .04em; }
+.login-card .brand b { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.login-card .brand { display: flex; align-items: center; gap: 0; }
+.login-card .brand span { margin-left: 10px; font-size: 13px; color: var(--muted); }
 .brand .txt { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .brand .txt b { font-weight: 600; font-size: 14px; }
 .brand .txt span { font-size: 12px; color: var(--fg-2); }

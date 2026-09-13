@@ -39,7 +39,7 @@ make web          # only the console: web/ → internal/server/console/webdist
 ```
 
 `go build ./cmd/excubra` on its own still works without Node; the binary then serves a
-placeholder page under `/app/` instead of the console (ADR-0013).
+placeholder page instead of the console (ADR-0013).
 
 ## Updates
 

@@ -54,8 +54,8 @@ func TestAPIRequiresSession(t *testing.T) {
 		t.Fatalf("expected a JSON error, got %s", body)
 	}
 	// The app shell itself is behind the session too.
-	if status, _ := f.get("/app/"); status != http.StatusSeeOther && status != http.StatusFound {
-		t.Fatalf("unauthenticated /app/: %d", status)
+	if status, _ := f.get("/"); status != http.StatusSeeOther && status != http.StatusFound {
+		t.Fatalf("unauthenticated console: %d", status)
 	}
 }
 
@@ -147,7 +147,7 @@ func TestAPICreateTenantAndList(t *testing.T) {
 func TestAppShell(t *testing.T) {
 	f := newFixture(t)
 	f.login(t)
-	for _, p := range []string{"/app/", "/app/tenants", "/app/sites/site_x"} {
+	for _, p := range []string{"/", "/tenants", "/sites/site_x"} {
 		resp, err := f.client.Get(f.srv.URL + p)
 		if err != nil {
 			t.Fatal(err)
@@ -174,8 +174,8 @@ func TestAppShell(t *testing.T) {
 			t.Errorf("%s: shell must not be cached, got %q", p, resp.Header.Get("Cache-Control"))
 		}
 	}
-	// Nothing outside webdist is reachable through the app path.
-	if status, _ := f.get("/app/../ca.crt"); status == 200 {
-		t.Fatal("path traversal out of /app/ must not serve files")
+	// A link from before the merge still lands in the app.
+	if status, _ := f.get("/app/tenants"); status != http.StatusMovedPermanently {
+		t.Fatalf("old /app/ link: %d", status)
 	}
 }

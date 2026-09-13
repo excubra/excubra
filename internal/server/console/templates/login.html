@@ -1,7 +1,7 @@
 {{define "content"}}
 {{with .Data}}
 <section class="login-card">
-  <div class="brand"><img class="mark" src="/static/mark.svg" alt="" width="32" height="32"><b>EX<i>0</i></b><span>Konsole</span></div>
+  <div class="brand"><b>EX</b><img class="mark" src="/static/mark.svg" alt="0" width="26" height="26"><span>Konsole</span></div>
   <div class="steps" aria-hidden="true"><span class="{{if eq .Step "credentials"}}on{{else}}done{{end}}"></span><span class="{{if eq .Step "code"}}on{{end}}"></span></div>
   {{if eq .Step "credentials"}}
   <h1>Anmelden</h1>
