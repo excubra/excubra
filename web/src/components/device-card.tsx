@@ -1,5 +1,6 @@
 import { Link } from "react-router"
 import { ConnectIP } from "@/components/connect"
+import { PingCell } from "@/components/ping-bar"
 import { Card } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
@@ -35,6 +36,7 @@ export function DeviceCardView({ devices, onToggle, busy, onOpen }: {
             </div>
             <div className="mt-1"><ConnectIP ip={r.IP} ways={r.Ways} sub={r.MAC} className="text-sm" /></div>
           </div>
+          {r.Monitored && <div className="px-4"><PingCell ping={r.Ping} /></div>}
           <div className="mt-auto flex items-center justify-between gap-2 px-4 text-xs text-muted-foreground">
             <span className="truncate">{r.Vendor || "Hersteller unbekannt"}</span>
             <span className={cn("shrink-0", r.GoneAt && "text-destructive")}>{r.GoneAt ? <>weg seit <Ago t={r.GoneAt} /></> : `seit ${fmtShort(r.FirstSeen)}`}</span>
