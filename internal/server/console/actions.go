@@ -104,8 +104,11 @@ type updateRow struct {
 type updatesData struct {
 	Boxes    []updateRow
 	Releases []store.Release
-	Channels map[string]string // channel → version
-	Versions []string          // distinct release versions, newest first
+	Channels map[string]string // channel → the version it resolves to
+	// Auto lists the channels that follow the newest release instead of a version
+	// somebody typed; the page says so rather than showing a number that moves.
+	Auto     map[string]bool
+	Versions []string // distinct release versions, newest first
 	Behind   int
 	Current  int
 	NoTarget int
@@ -114,13 +117,17 @@ type updatesData struct {
 }
 
 func (s *Server) buildUpdates(ctx context.Context) (updatesData, error) {
-	d := updatesData{Channels: map[string]string{}}
+	d := updatesData{Channels: map[string]string{}, Auto: map[string]bool{}}
 	for _, ch := range []string{wire.ChannelStable, wire.ChannelCanary} {
+		set, err := s.Store.ChannelSetting(ctx, ch)
+		if err != nil {
+			return d, err
+		}
 		v, err := s.Store.ChannelVersion(ctx, ch)
 		if err != nil {
 			return d, err
 		}
-		d.Channels[ch] = v
+		d.Channels[ch], d.Auto[ch] = v, set == store.ChannelAuto
 	}
 	rels, err := s.Store.Releases(ctx)
 	if err != nil {
@@ -210,6 +217,19 @@ func (s *Server) updatesChannel(w http.ResponseWriter, r *http.Request) {
 	ch, v := r.PostForm.Get("channel"), strings.TrimPrefix(strings.TrimSpace(r.PostForm.Get("version")), "v")
 	if ch != wire.ChannelStable && ch != wire.ChannelCanary {
 		s.flashErr(w, r, "Kanal muss stable oder canary sein.", "/updates")
+		return
+	}
+	if v == store.ChannelAuto {
+		if err := s.Store.SetChannelVersion(ctx, ch, v); err != nil {
+			s.fail(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		_ = s.Store.Audit(ctx, s.Now(), actor(r), "release.channel", ch, v)
+		now, _ := s.Store.NewestRelease(ctx)
+		if now == "" {
+			now = "noch keines"
+		}
+		s.flash(w, r, "Kanal "+ch+" folgt ab jetzt dem neuesten Release, aktuell "+now+". Neue Releases werden ohne weiteres Zutun übernommen.", "/updates")
 		return
 	}
 	if v != "" {

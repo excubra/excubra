@@ -510,3 +510,50 @@ func TestSecretSettingsAreSealed(t *testing.T) {
 		t.Fatal("sealed value read without a key")
 	}
 }
+
+// A channel set to "auto" follows the newest release, so a published release
+// rolls out without anybody pointing at it — which was the plan all along and
+// the step that kept needing a human.
+func TestChannelAutoFollowsTheNewestRelease(t *testing.T) {
+	st := open(t)
+	rel := func(v string) Release {
+		return Release{Version: v, OS: "linux", Arch: "amd64", URL: "https://example.test/" + v, SHA256: "x", Signature: "y", CreatedAt: time.Now()}
+	}
+	must(t, st.SetChannelVersion(ctx, "stable", ChannelAuto))
+
+	// nothing stored yet: nothing to follow, and that is not an error
+	if v, err := st.ChannelVersion(ctx, "stable"); err != nil || v != "" {
+		t.Fatalf("empty catalog: %q %v", v, err)
+	}
+
+	must(t, st.PutRelease(ctx, rel("0.9.0")))
+	must(t, st.PutRelease(ctx, rel("0.11.2")))
+	must(t, st.PutRelease(ctx, rel("0.10.7")))
+	must(t, st.PutRelease(ctx, rel("0.12.0-rc1"))) // a candidate is not what a channel follows
+	if v, err := st.ChannelVersion(ctx, "stable"); err != nil || v != "0.11.2" {
+		t.Fatalf("auto should resolve to the highest release, got %q %v", v, err)
+	}
+
+	// highest, not most recently imported: a hotfix for an old line must not pull
+	// the fleet backwards
+	must(t, st.PutRelease(ctx, rel("0.9.1")))
+	if v, _ := st.ChannelVersion(ctx, "stable"); v != "0.11.2" {
+		t.Fatalf("a late hotfix for an old line moved the channel to %q", v)
+	}
+	must(t, st.PutRelease(ctx, rel("0.12.0")))
+	if v, _ := st.ChannelVersion(ctx, "stable"); v != "0.12.0" {
+		t.Fatalf("a new release should be picked up, got %q", v)
+	}
+
+	// the literal setting stays readable, so the console can say "auto" instead of
+	// a number that moves under the operator
+	if set, _ := st.ChannelSetting(ctx, "stable"); set != ChannelAuto {
+		t.Fatalf("channel setting: %q", set)
+	}
+
+	// a pinned channel is untouched by any of this
+	must(t, st.SetChannelVersion(ctx, "canary", "0.9.0"))
+	if v, _ := st.ChannelVersion(ctx, "canary"); v != "0.9.0" {
+		t.Fatalf("a pinned channel should stay pinned, got %q", v)
+	}
+}

@@ -69,7 +69,10 @@ func TestTileFetchesOnceAndIdentifiesItself(t *testing.T) {
 	defer srv.Close()
 
 	s := New(t.TempDir())
-	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	// The cache ages files by their modification time, which the operating system
+	// writes from the real clock. A fixed date here would make this test pass in
+	// the morning and fail in the afternoon, so the fake clock starts from now.
+	now := time.Now()
 	s.Now = func() time.Time { return now }
 	set := Settings{Template: srv.URL + "/{z}/{x}/{y}.png"}
 	ctx := context.Background()
@@ -110,7 +113,8 @@ func TestTileFetchesOnceAndIdentifiesItself(t *testing.T) {
 	}
 
 	// old tiles are swept up
-	s.Now = func() time.Time { return now.Add(CacheFor + time.Hour) }
+	later := now.Add(CacheFor + time.Hour)
+	s.Now = func() time.Time { return later }
 	n, err := s.Prune()
 	if err != nil || n == 0 {
 		t.Fatalf("prune: %d %v", n, err)
@@ -120,7 +124,7 @@ func TestTileFetchesOnceAndIdentifiesItself(t *testing.T) {
 // However fast an operator drags the map, the provider sees a trickle.
 func TestRateLimit(t *testing.T) {
 	s := New(t.TempDir())
-	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	now := time.Now()
 	s.Now = func() time.Time { return now }
 	ctx := context.Background()
 	for i := 0; i < Burst; i++ {

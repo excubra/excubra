@@ -103,7 +103,7 @@ export default function UpdatesPage() {
       {d && (
         <div className="grid gap-4 @4xl/main:grid-cols-2">
           {(["stable", "canary"] as const).map((ch) => (
-            <ChannelCard key={ch} channel={ch} current={d.Channels[ch] ?? ""} versions={d.Versions ?? []} boxes={(d.Boxes ?? []).filter((b) => (b.Channel || "stable") === ch).length} pending={act.isPending}
+            <ChannelCard key={ch} channel={ch} current={d.Channels[ch] ?? ""} auto={!!d.Auto?.[ch]} versions={d.Versions ?? []} boxes={(d.Boxes ?? []).filter((b) => (b.Channel || "stable") === ch).length} pending={act.isPending}
               onSet={(v) => act.mutate({ path: "/api/updates/channel", form: { channel: ch, version: v } })}
               onRollout={() => act.mutate({ path: "/api/updates/rollout", form: { channel: ch } })} />
           ))}
@@ -139,20 +139,29 @@ function ChannelSelect({ value, onChange }: { value: string; onChange: (c: strin
   )
 }
 
-function ChannelCard({ channel, current, versions, boxes, pending, onSet, onRollout }: { channel: string; current: string; versions: string[]; boxes: number; pending: boolean; onSet: (v: string) => void; onRollout: () => void }) {
-  const [v, setV] = useState(current || NONE)
+const AUTO = "auto"
+
+function ChannelCard({ channel, current, auto, versions, boxes, pending, onSet, onRollout }: { channel: string; current: string; auto: boolean; versions: string[]; boxes: number; pending: boolean; onSet: (v: string) => void; onRollout: () => void }) {
+  const [v, setV] = useState(auto ? AUTO : current || NONE)
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">Kanal <span className="font-mono">{channel}</span><Badge variant="secondary">{boxes} Box{boxes === 1 ? "" : "en"}</Badge></CardTitle>
-        <CardDescription>{channel === "canary" ? "Erst VIICO, dann fünf Kundenboxen, dann der Rest: was hier steht, bekommt die Vorhut." : "Alle Boxen ohne besondere Einstellung."}{current ? ` Zeigt auf ${current}.` : " Zeigt auf keine Version."}</CardDescription>
+        <CardDescription>
+          {channel === "canary" ? "Erst VIICO, dann fünf Kundenboxen, dann der Rest: was hier steht, bekommt die Vorhut." : "Alle Boxen ohne besondere Einstellung."}
+          {auto ? ` Folgt dem neuesten Release, aktuell ${current || "noch keines"}.` : current ? ` Zeigt auf ${current}.` : " Zeigt auf keine Version."}
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap items-center gap-2">
         <Select value={v} onValueChange={setV}>
           <SelectTrigger className="w-56"><SelectValue placeholder="Version" /></SelectTrigger>
-          <SelectContent><SelectItem value={NONE}>— keine Version —</SelectItem>{versions.map((x) => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+          <SelectContent>
+            <SelectItem value={AUTO}>neuestes Release, automatisch</SelectItem>
+            <SelectItem value={NONE}>— keine Version —</SelectItem>
+            {versions.map((x) => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+          </SelectContent>
         </Select>
-        <Button size="sm" onClick={() => onSet(v === NONE ? "" : v)} disabled={pending || v === (current || NONE)}>Kanal setzen</Button>
+        <Button size="sm" onClick={() => onSet(v === NONE ? "" : v)} disabled={pending || v === (auto ? AUTO : current || NONE)}>Kanal setzen</Button>
         <Button size="sm" variant="outline" onClick={onRollout} disabled={pending || !current || boxes === 0}><Download />Alle {boxes} Boxen jetzt holen lassen</Button>
       </CardContent>
     </Card>

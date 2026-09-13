@@ -62,12 +62,37 @@ answered outside the window too, so it can always find its way forward.
 
 ```
 excubra server release sync                 # import new releases now
-excubra server release channel stable 0.2.3 # what boxes on stable should run
+excubra server release channel stable auto  # follow the newest release, no hand
+excubra server release channel stable 0.2.3 # or pin one version
 excubra server box task <box_id> update     # ask one box to check now
 excubra server update now                   # let this server check now
 excubra server update now -anyway           # install even while boxes lag
 excubra server update status                # what is holding a release back
 ```
+
+A channel set to `auto` follows the newest release the catalog knows, so a
+published release rolls out without anyone pointing at it: the catalog imports it
+within the hour, the server checks straight away, the fleet guard holds until the
+boxes are within the window, and the boxes follow the same channel. Pinning a
+version stays possible and is what a canary channel is for.
+
+## The console's certificate
+
+The console lives on the overlay and is not reachable from the internet, so it
+cannot answer an HTTP challenge — and an operator should not have to install our
+CA to avoid a browser warning. `deploy/console-cert.sh` proves the name over DNS
+instead (Let's Encrypt DNS-01, a TXT record, no inbound connection), writes the
+pair beside the server, and a daily timer renews it. Point the server at it:
+
+```
+EXCUBRA_OVERLAY_TLS=files
+EXCUBRA_OVERLAY_CERT=/etc/excubra/console.crt
+EXCUBRA_OVERLAY_KEY=/etc/excubra/console.key
+```
+
+The pair is re-read when it changes, so a renewal costs no restart. The ingest is
+untouched: boxes pin our own CA there (ADR-0002), which is stronger for a channel
+we control on both ends.
 
 ## Assistant
 

@@ -27,6 +27,7 @@ import (
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/blocklist"
 	"github.com/excubra/excubra/internal/server/catalog"
+	"github.com/excubra/excubra/internal/server/certfile"
 	"github.com/excubra/excubra/internal/server/console"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/feed"
@@ -177,7 +178,7 @@ func run(envFile string) error {
 	if err != nil {
 		return err
 	}
-	con.Secure = cfg.OverlayTLS == "internal"
+	con.Secure = cfg.OverlayTLS != "off"
 	overlayMux := http.NewServeMux()
 	overlayMux.Handle("/v1/", api.New(eng, st, log).Handler())
 	overlayMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -194,6 +195,17 @@ func run(envFile string) error {
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    64 << 10,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+	}
+	if cfg.OverlayTLS == "files" {
+		// A certificate a public CA issued, renewed on the host (see
+		// deploy/console-cert.sh). The pair is re-read when it changes, so a
+		// renewal needs no restart.
+		pair, err := certfile.Load(cfg.OverlayCert, cfg.OverlayKey, log)
+		if err != nil {
+			return fmt.Errorf("overlay certificate: %w", err)
+		}
+		log.Info("overlay certificate from files", "cert", cfg.OverlayCert, "not_after", pair.NotAfter().Format(time.RFC3339))
+		overlaySrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: pair.GetCertificate}
 	}
 	if cfg.OverlayTLS == "internal" {
 		host, _, _ := net.SplitHostPort(cfg.OverlayListen)
@@ -288,6 +300,9 @@ func run(envFile string) error {
 	if cfg.ReleaseCatalog != "" && cfg.ReleaseCatalog != "off" {
 		// release metadata from the project's published releases, hourly (ADR-0006)
 		cat := catalog.New(cfg.ReleaseCatalog, st, log)
+		// A channel that follows the newest release should act when one arrives,
+		// not at the next daily check.
+		cat.OnAdded = func([]string) { su.TriggerNow() }
 		con.Catalog = cat
 		go cat.Run(ctx, time.Hour)
 	}

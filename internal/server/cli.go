@@ -605,7 +605,10 @@ func pruneCmd(args []string) error {
 //	excubra server release list
 //	excubra server release add --version 0.2.0 --os linux --arch amd64 --url https://… --sha256 … --sig … [--min-agent 0.1.0]
 //	excubra server release import --version 0.2.0 --dir dist/ --base-url https://github.com/excubra/excubra/releases/download/v0.2.0 [--min-agent 0.1.0]
-//	excubra server release channel <stable|canary> <version|->
+//	excubra server release channel <stable|canary> <version|auto|->
+//
+// "auto" makes the channel follow the newest stored release, so a published
+// release rolls out without anyone pointing at it.
 //
 // import reads SHA256SUMS and excubra_linux_<arch>.sig from a release directory, which
 // is exactly what the release workflow produces. The server never stores a binary.
@@ -722,6 +725,15 @@ func releaseCmd(args []string) error {
 		if want == "-" {
 			want = ""
 		}
+		if want == store.ChannelAuto {
+			if err := st.SetChannelVersion(ctx, ch, want); err != nil {
+				return err
+			}
+			_ = st.Audit(ctx, time.Now(), "cli", "release.channel", ch, want)
+			now, _ := st.NewestRelease(ctx)
+			fmt.Printf("channel %s → auto; it follows the newest release, right now %s\n", ch, orDash(now))
+			return nil
+		}
 		if want != "" {
 			rels, err := st.Releases(ctx)
 			if err != nil {
@@ -744,7 +756,7 @@ func releaseCmd(args []string) error {
 		fmt.Printf("channel %s → %s\n", ch, orDash(want))
 		return nil
 	}
-	return fmt.Errorf("usage: excubra server release list | sync | add … | import … | channel <stable|canary> <version|->")
+	return fmt.Errorf("usage: excubra server release list | sync | add … | import … | channel <stable|canary> <version|auto|->")
 }
 
 func orDash(s string) string {
