@@ -769,10 +769,11 @@ func selftestCmd(args []string) error {
 	return nil
 }
 
-// updateCmd: excubra server update now | status
+// updateCmd: excubra server update now [-anyway] | status | channel <name>
 func updateCmd(args []string) error {
 	fs := flag.NewFlagSet("excubra server update", flag.ContinueOnError)
 	envFile := fs.String("env-file", "", "server env file")
+	anyway := fs.Bool("anyway", false, "install even while boxes are outside the compatibility window")
 	rest, flags := cliArgs(args)
 	if err := fs.Parse(flags); err != nil {
 		return err
@@ -791,16 +792,24 @@ func updateCmd(args []string) error {
 		printHeldBack(s)
 		return nil
 	case len(rest) == 1 && rest[0] == "now":
-		if err := selfupdate.RequestNow(cfg.DataDir); err != nil {
+		req := selfupdate.RequestNow
+		if *anyway {
+			req = selfupdate.RequestNowAnyway
+		}
+		if err := req(cfg.DataDir); err != nil {
 			return err
 		}
 		s := c.Status(ctx)
 		switch {
 		case s.Available == "":
 			fmt.Printf("check requested; nothing newer than %s on channel %s right now\n", s.Running, s.Channel)
+		case len(s.HeldBack) > 0 && *anyway:
+			fmt.Printf("check requested; %s will be installed although %d box(es) are outside the window — they keep /v1/update and /v1/renew and can still catch up:\n", s.Available, len(s.HeldBack))
+			printHeldBack(s)
 		case len(s.HeldBack) > 0:
 			fmt.Printf("check requested; %s waits until the boxes below are within the compatibility window\n", s.Available)
 			printHeldBack(s)
+			fmt.Println("add -anyway to install regardless")
 		default:
 			fmt.Printf("check requested; the running server will install %s within a minute and restart\n", s.Available)
 		}
@@ -813,7 +822,7 @@ func updateCmd(args []string) error {
 		fmt.Printf("server follows channel %s\n", rest[1])
 		return nil
 	}
-	return fmt.Errorf("usage: excubra server update status | now | channel <stable|canary|off>")
+	return fmt.Errorf("usage: excubra server update status | now [-anyway] | channel <stable|canary|off>")
 }
 
 // printHeldBack names the boxes that keep the server where it is. The server

@@ -13,6 +13,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,9 @@ const SettingChannel = "server.channel"
 // TriggerFile under <datadir>/update asks the running server to check now; the CLI
 // writes it, the server removes it.
 const TriggerFile = "now"
+
+// triggerAnyway in that file means: install even while boxes are behind.
+const triggerAnyway = "anyway"
 
 // Timings.
 const (
@@ -68,6 +72,10 @@ type Controller struct {
 	now chan struct{}
 	mu  sync.Mutex
 	st  Status
+	// anyway skips the fleet guard for exactly one check, after an operator asked
+	// for it. Deliberate, audited and one-shot: a guard that can never be overruled
+	// is a deadlock waiting for the day a box cannot update at all.
+	anyway bool
 }
 
 // New returns a controller; Run starts the checks.
@@ -126,6 +134,15 @@ func (c *Controller) Status(ctx context.Context) Status {
 		s.HeldBack = nil
 	}
 	return s
+}
+
+// TriggerAnyway asks for a check that installs even while boxes are behind.
+// One check only — the next one guards the fleet again.
+func (c *Controller) TriggerAnyway() {
+	c.mu.Lock()
+	c.anyway = true
+	c.mu.Unlock()
+	c.TriggerNow()
 }
 
 // TriggerNow asks for a check at the next opportunity.
@@ -187,8 +204,18 @@ func (c *Controller) check(ctx context.Context) error {
 	}
 	c.mu.Lock()
 	c.st.HeldBack = lagging
+	override := c.anyway
+	c.anyway = false
 	c.mu.Unlock()
-	if len(lagging) > 0 {
+	switch {
+	case len(lagging) == 0:
+	case override:
+		c.Log.Warn("self-update: installing although boxes are behind, as an operator asked", "to", v, "boxes", names(lagging))
+		_ = c.Store.Audit(ctx, c.Now(), "operator", "server.update.anyway", v, "installed past the window of: "+strings.Join(names(lagging), ", "))
+		c.mu.Lock()
+		c.st.HeldBack = nil
+		c.mu.Unlock()
+	default:
 		c.nudge(ctx, lagging)
 		c.Log.Info("self-update: waiting for boxes before installing", "to", v, "boxes", names(lagging))
 		return nil
@@ -226,10 +253,17 @@ func (c *Controller) Run(ctx context.Context) error {
 			t.Reset(c.nextDelay())
 		case <-c.now:
 		case <-poll.C:
-			if _, err := os.Stat(trigger); err != nil {
+			body, err := os.ReadFile(trigger) //nolint:gosec // a flag file the CLI wrote next to our own data
+			if err != nil {
 				continue
 			}
 			_ = os.Remove(trigger)
+			if strings.Contains(string(body), triggerAnyway) {
+				c.mu.Lock()
+				c.anyway = true
+				c.mu.Unlock()
+				c.Log.Warn("self-update: an operator asked to install even if boxes are behind")
+			}
 			c.Log.Info("self-update: check requested through the trigger file")
 		}
 		if err := c.Check(ctx); err != nil {
@@ -255,12 +289,25 @@ func (c *Controller) nextDelay() time.Duration {
 }
 
 // RequestNow writes the trigger file for a running server (the CLI's side).
-func RequestNow(dataDir string) error {
+func RequestNow(dataDir string) error { return request(dataDir, "") }
+
+// RequestNowAnyway asks for a check that installs even while boxes are behind.
+// It is the operator's answer to the one case the fleet guard cannot solve by
+// itself: a box that keeps failing to update would otherwise hold the server on
+// an old release for ever. The boxes keep their way back either way, because
+// /v1/update and /v1/renew are answered outside the window (ADR-0002).
+func RequestNowAnyway(dataDir string) error { return request(dataDir, triggerAnyway) }
+
+func request(dataDir, extra string) error {
 	dir := filepath.Join(dataDir, "update")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, TriggerFile), []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644) //nolint:gosec // a flag file, no secret
+	body := time.Now().UTC().Format(time.RFC3339)
+	if extra != "" {
+		body += " " + extra
+	}
+	return os.WriteFile(filepath.Join(dir, TriggerFile), []byte(body+"\n"), 0o644) //nolint:gosec // a flag file, no secret
 }
 
 func newer(a, b version.Semver) bool {
