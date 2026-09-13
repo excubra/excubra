@@ -48,6 +48,13 @@ Explicitly **not** used, and why:
 
 Test-only dependencies: none. Integration tests drive Docker through `os/exec`.
 
+Vendored into the console app (no runtime download, ADR-0013): the vendor marks in
+`web/src/components/vendor-mark.tsx` are path data from
+[simple-icons](https://github.com/simple-icons/simple-icons) (CC0-1.0), 34 brands we
+actually meet in customer networks, copied in as a generated file. The brands are
+trademarks of their owners and are used to name the device they stand for. A brand we
+do not have falls back to the kind icon; nothing is fetched at runtime.
+
 ## Consequences
 
 - `go.sum` stays short enough to read in a review.

@@ -4,10 +4,11 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { FileText, Network, Plug, Radar, ScrollText, ShieldAlert } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
+import { EventList } from "@/components/event-list"
 import { StatCard, StatGrid } from "@/components/stat-card"
 import { DataTable } from "@/components/data-table"
 import { StateBadge } from "@/components/status"
-import { KindIcon } from "@/components/kind-icon"
+import { DeviceMark } from "@/components/kind-icon"
 import { Ago } from "@/components/clock"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -16,7 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, post, type DeviceDetail, type EventRow, type ServiceRow } from "@/lib/api"
+import { get, post, type DeviceDetail, type ServiceRow } from "@/lib/api"
 import { ConnectorPanel } from "@/components/connector-panel"
 import { DeviceFindings } from "@/components/device-findings"
 import { fmtDateTime, fmtTime, pct } from "@/lib/format"
@@ -38,12 +39,6 @@ export default function DevicePage() {
     onError: (e) => toast.error(e.message),
   })
   const d = q.data
-  const evCols: ColumnDef<EventRow, unknown>[] = [
-    { id: "t", header: "Zeit", accessorFn: (r) => r.occurred_at, cell: ({ getValue }) => <span className="font-mono text-xs">{fmtDateTime(String(getValue()))}</span> },
-    { id: "type", header: "Ereignis", accessorFn: (r) => r.type, cell: ({ row }) => <Badge variant="outline" className={"font-mono " + (row.original.Class === "down" ? "border-destructive/40 text-destructive" : row.original.Class === "ok" ? "border-primary/40 text-primary" : "text-muted-foreground")}>{row.original.type}</Badge> },
-    { id: "title", header: "Was", accessorFn: (r) => r.Title },
-    { id: "info", header: "Details", accessorFn: (r) => r.Info, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue())}</span> },
-  ]
   const svcCols: ColumnDef<ServiceRow, unknown>[] = [
     { id: "port", header: "Port", accessorFn: (r) => r.Port, cell: ({ row }) => <span className="font-mono text-xs">{row.original.Proto}/{row.original.Port}</span> },
     { id: "name", header: "Dienst", accessorFn: (r) => r.Name, cell: ({ row }) => <span>{row.original.Name || "–"}{row.original.New && <Badge variant="outline" className="ml-2 border-primary/40 text-primary">neu</Badge>}{row.original.GoneAt && <Badge variant="secondary" className="ml-2">weg</Badge>}</span> },
@@ -59,7 +54,7 @@ export default function DevicePage() {
   return (
     <>
       <PageHeader crumbs={[{ label: "Kunden", to: "/tenants" }, { label: d.tenant.Name, to: `/tenants/${d.tenant.ID}` }, { label: d.site.Name, to: `/sites/${d.site.ID}` }, { label: dev.Name }]}
-        title={<><KindIcon kind={dev.Kind} className={"size-6 " + (dev.Monitored ? "text-primary" : "text-muted-foreground")} />{dev.Name}{dev.Monitored && <StateBadge cls={dev.StateClass} label={dev.StateLabel} />}{dev.IsUplink && <Badge variant="outline" className="border-primary/40 text-primary">Uplink</Badge>}{dev.IsBox && <Badge variant="secondary">diese Box</Badge>}</>}
+        title={<><DeviceMark kind={dev.Kind} vendor={dev.Vendor} className={"size-6 " + (dev.Monitored ? "text-primary" : "text-muted-foreground")} />{dev.Name}{dev.Monitored && <StateBadge cls={dev.StateClass} label={dev.StateLabel} />}{dev.IsUplink && <Badge variant="outline" className="border-primary/40 text-primary">Uplink</Badge>}{dev.IsBox && <Badge variant="secondary">diese Box</Badge>}</>}
         sub={<span>{dev.KindLabel} · <span className="font-mono">{dev.IP || "keine IPv4"}</span> · {dev.Vendor || "Hersteller unbekannt"}</span>}
         actions={!dev.IsBox && <label className="flex items-center gap-2 text-sm"><span className="text-muted-foreground">Beobachten</span><Switch checked={dev.Monitored} disabled={!dev.IP || act.isPending} onCheckedChange={(on) => act.mutate({ path: on ? `/api/devices/${dev.ID}/watch` : `/api/hosts/${dev.HostID}/unwatch` })} /></label>} />
 
@@ -129,7 +124,7 @@ export default function DevicePage() {
         </TabsContent>
 
         <TabsContent value="ereignisse" className="mt-4">
-          <DataTable columns={evCols} data={d.events ?? []} rowClass={(r) => r.Class === "down" ? "border-l-2 border-l-destructive" : ""} emptyTitle="Alles ruhig" emptyText="Kein Ereignis in den letzten 24 Stunden." />
+          <EventList events={d.events ?? []} showWhere={false} emptyTitle="Alles ruhig" emptyText="Kein Ereignis in den letzten 24 Stunden." />
         </TabsContent>
 
         <TabsContent value="dienste" className="mt-4">

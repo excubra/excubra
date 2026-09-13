@@ -5,6 +5,10 @@ TypeScript, Tailwind v4, shadcn/ui (radix-nova preset), TanStack Query and Table
 Recharts, cmdk, react-router. Why this stack and what it must never do:
 [ADR-0013](../docs/adr/0013-console-spa.md).
 
+Device inventories show the vendor's own mark where we know the brand
+(`src/components/vendor-mark.tsx`, path data from simple-icons, CC0) and the kind icon
+otherwise — see [ADR-0008](../docs/adr/0008-dependencies.md).
+
 ## Build
 
 ```

@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { StateBadge } from "@/components/status"
-import { KindIcon } from "@/components/kind-icon"
+import { DeviceMark } from "@/components/kind-icon"
 import { Ago } from "@/components/clock"
 import { fmtShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -17,7 +17,7 @@ export function DeviceCardView({ devices, onToggle, busy }: { devices: DeviceCar
       {devices.map((r) => (
         <Card key={r.ID} className={cn("gap-2 py-4", r.Ignored && "opacity-50", r.Monitored && r.StateClass === "down" && "border-destructive/50")}>
           <div className="flex items-start justify-between gap-2 px-4">
-            <span className="flex items-center gap-2 text-xs text-muted-foreground"><KindIcon kind={r.Kind} className={r.Monitored ? "text-primary" : ""} />{r.KindLabel}{r.IsUplink && " · Uplink"}</span>
+            <span className="flex items-center gap-2 text-xs text-muted-foreground"><DeviceMark kind={r.Kind} vendor={r.Vendor} active={r.Monitored} />{r.KindLabel}{r.IsUplink && " · Uplink"}</span>
             {!r.IsBox && <Switch checked={r.Monitored} disabled={!r.IP || busy} onCheckedChange={(on) => onToggle(r, on)} aria-label={`${r.Name} beobachten`} />}
           </div>
           <div className="px-4">

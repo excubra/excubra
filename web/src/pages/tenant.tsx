@@ -5,6 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { Plus } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
+import { EventList } from "@/components/event-list"
 import { DataTable } from "@/components/data-table"
 import { StateBadge } from "@/components/status"
 import { Ago } from "@/components/clock"
@@ -14,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, post, type EventRow, type SiteCard, type TenantDetail } from "@/lib/api"
+import { get, post, type SiteCard, type TenantDetail } from "@/lib/api"
 import { fmtTime } from "@/lib/format"
 
 export default function TenantPage() {
@@ -44,13 +45,6 @@ export default function TenantPage() {
     { id: "down", header: "Ausgefallen", accessorFn: (r) => r.Down, meta: { align: "right" }, cell: ({ getValue }) => <span className={Number(getValue()) > 0 ? "text-destructive font-semibold" : ""}>{String(getValue())}</span> },
     { id: "devices", header: "Geräte", accessorFn: (r) => r.Devices, meta: { align: "right" } },
     { id: "last", header: "Zuletzt", accessorFn: (r) => r.Last?.occurred_at ?? "", cell: ({ row }) => row.original.Last ? <span className="text-muted-foreground"><span className="font-mono text-xs">{fmtTime(row.original.Last.occurred_at)}</span> {row.original.Last.Title}</span> : "–" },
-  ]
-  const evCols: ColumnDef<EventRow, unknown>[] = [
-    { id: "t", header: "Zeit", accessorFn: (r) => r.occurred_at, cell: ({ getValue }) => <span className="font-mono text-xs">{fmtTime(String(getValue()))}</span> },
-    { id: "type", header: "Ereignis", accessorFn: (r) => r.type, cell: ({ row }) => <Badge variant="outline" className={"font-mono " + (row.original.Class === "down" ? "border-destructive/40 text-destructive" : row.original.Class === "ok" ? "border-primary/40 text-primary" : "text-muted-foreground")}>{row.original.type}</Badge> },
-    { id: "title", header: "Was", accessorFn: (r) => r.Title },
-    { id: "site", header: "Standort", accessorFn: (r) => r.SiteName },
-    { id: "info", header: "Details", accessorFn: (r) => r.Info, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue())}</span> },
   ]
   if (!d) return <Skeleton className="h-64" />
   return (
@@ -83,7 +77,7 @@ export default function TenantPage() {
       </section>
       <section className="flex flex-col gap-3">
         <h2 className="text-base font-semibold">Ereignisse der letzten 24 Stunden</h2>
-        <DataTable columns={evCols} data={d.events ?? []} rowClass={(r) => r.Class === "down" ? "border-l-2 border-l-destructive" : ""} emptyTitle="Alles ruhig" footer={<Link className="underline" to={`/events?tenant=${d.tenant.ID}`}>Alle Ereignisse dieses Kunden</Link>} />
+        <EventList events={d.events ?? []} emptyText="In den letzten 24 Stunden hat sich bei diesem Kunden nichts geändert." footer={<Link className="underline" to={`/events?tenant=${d.tenant.ID}`}>Alle Ereignisse dieses Kunden</Link>} />
       </section>
     </>
   )
