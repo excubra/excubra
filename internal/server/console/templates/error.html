@@ -1,5 +1,10 @@
 {{define "content"}}
 {{with .Data}}
-<div class="card" style="max-width:520px;margin:40px auto"><div class="empty"><svg class="i"><use href="/static/icons.svg#inbox"/></svg><b>{{.Status}}</b><span>{{.Message}}</span><a class="btn ghost small" href="/status">Zurück zum Status</a></div></div>
+<section class="login-card">
+  <div class="brand"><b>EX</b><img class="mark" src="/static/mark.svg" alt="0" width="26" height="26"><span>Konsole</span></div>
+  <h1>{{.Status}}</h1>
+  <p class="sub">{{.Message}}</p>
+  <a class="btn" href="/">Zurück zur Konsole</a>
+</section>
 {{end}}
 {{end}}

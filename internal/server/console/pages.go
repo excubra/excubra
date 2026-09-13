@@ -543,78 +543,7 @@ func backTo(r *http.Request, def string) string {
 
 // ---- events page ----------------------------------------------------------------------
 
-type eventsData struct {
-	Events  []recentEvent
-	Range   string // 24h | 7d
-	Tenants []store.Tenant
-	Tenant  string
-	Red     int
-}
-
-func (s *Server) eventsPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	d := eventsData{Range: r.URL.Query().Get("range"), Tenant: r.URL.Query().Get("tenant")}
-	if d.Range != "7d" {
-		d.Range = "24h"
-	}
-	tm, sm, err := s.lookups(ctx)
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	for _, t := range tm {
-		d.Tenants = append(d.Tenants, t)
-	}
-	sort.Slice(d.Tenants, func(i, j int) bool { return d.Tenants[i].Name < d.Tenants[j].Name })
-	now := s.Now()
-	since := now.Add(-24 * time.Hour)
-	if d.Range == "7d" {
-		since = now.Add(-7 * 24 * time.Hour)
-	}
-	for _, t := range d.Tenants {
-		if d.Tenant != "" && t.ID != d.Tenant {
-			continue
-		}
-		evs, err := s.Store.Events(ctx, t.ID, since, now.Add(time.Minute), "", 500)
-		if err != nil {
-			s.fail(w, r, err, http.StatusInternalServerError)
-			return
-		}
-		for _, ev := range evs {
-			re := recentEvent{Event: ev, TenantName: t.Name, Class: eventClass(ev), Title: eventTitle(ev), Info: eventInfo(ev)}
-			if site, ok := sm[ev.SiteID]; ok {
-				re.SiteName = site.Name
-			}
-			if re.Class == "down" {
-				d.Red++
-			}
-			d.Events = append(d.Events, re)
-		}
-	}
-	sort.Slice(d.Events, func(i, j int) bool { return d.Events[i].OccurredAt.After(d.Events[j].OccurredAt) })
-	s.render(w, r, "events", "Ereignisse", d)
-}
-
 // ---- users page ---------------------------------------------------------------------------
-
-type userRow struct {
-	store.User
-	Locked bool
-}
-
-func (s *Server) usersPage(w http.ResponseWriter, r *http.Request) {
-	users, err := s.Store.Users(r.Context())
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	now := s.Now()
-	rows := make([]userRow, 0, len(users))
-	for _, u := range users {
-		rows = append(rows, userRow{User: u, Locked: u.LockedUntil != nil && u.LockedUntil.After(now)})
-	}
-	s.render(w, r, "users", "Benutzer", rows)
-}
 
 // ---- status (Übersicht) cards ---------------------------------------------------------
 
@@ -708,14 +637,4 @@ func (s *Server) siteCards(ctx context.Context, d *statusData) error {
 		}
 	}
 	return nil
-}
-
-func (s *Server) sitePage(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	d, err := s.buildSite(r.Context(), r.PathValue("id"), q.Get("tab"), q.Get("range"))
-	if err != nil {
-		s.fail(w, r, err, statusFor(err))
-		return
-	}
-	s.renderOpts(w, r, "site", d.Site.Name, d, pageOpts{Search: true, Crumbs: []crumb{{"Kunden", "/tenants"}, {d.Tenant.Name, "/tenants"}, {d.Site.Name, ""}}})
 }

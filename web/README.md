@@ -1,6 +1,6 @@
 # EX0 console (single-page app)
 
-The operator console served under `/app/` by the overlay listener. React 19,
+The operator console, served at the root by the overlay listener. React 19,
 TypeScript, Tailwind v4, shadcn/ui (radix-nova preset), TanStack Query and Table,
 Recharts, cmdk, react-router. Why this stack and what it must never do:
 [ADR-0013](../docs/adr/0013-console-spa.md).

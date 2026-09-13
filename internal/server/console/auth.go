@@ -301,7 +301,7 @@ func (s *Server) loginCodeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.Store.Audit(ctx, now, "console:"+u.Name, "login", u.ID, clientIP(r))
 	s.setCookie(w, raw, int(sessionAbsolute/time.Second))
-	http.Redirect(w, r, "/status", http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // noteFailure counts a failed password or code and locks after lockAfter of them.

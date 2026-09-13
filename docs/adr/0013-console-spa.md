@@ -88,3 +88,22 @@ JavaScript we did not write.
   login pages stay.
 - Phase 2 (logs per device, rules, AI triage) gets its screens in the app; the API
   grows per feature, never a generic query endpoint.
+
+## Amendment 2026-09-13: one console, at the root
+
+The consequence above ("the old pages are removed once nothing links to them")
+is now done: the app is served at `/` and the server-rendered console is gone —
+fourteen templates, the vendored htmx, the old `app.js`, the icon sprite and
+every page handler and its duplicate POST route, about 1700 lines. What stays
+server-rendered is the login flow, the error page, `/ca.crt` and the assets
+those need under `/static/` (they keep the strict CSP; the app's own policy
+allows inline styles for the component library). `GET /app/…` answers 301 to
+the same path at the root, so an old bookmark or a webhook link still lands in
+the right place, and the links in webhook payloads (`/hosts/<id>`,
+`/sites/<id>`) now open the app instead of a template.
+
+Two things the merge brought to light: creating an API token or a webhook
+target still rendered the deleted template, so the app never got its JSON and
+the secret never appeared — both now answer `{ok, message, token|secret}`. And
+the router's basename was pinned to `/app`, which the move made obvious
+because nothing rendered at all.

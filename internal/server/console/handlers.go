@@ -12,7 +12,6 @@ import (
 
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/id"
-	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/state"
@@ -417,24 +416,6 @@ func eventTitle(ev event.Event) string {
 	return string(ev.Type)
 }
 
-func (s *Server) statusPage(w http.ResponseWriter, r *http.Request) {
-	d, err := s.buildStatus(r.Context(), r.URL.Query().Get("range"))
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	s.render(w, r, "status", "Status", d)
-}
-
-func (s *Server) statusTable(w http.ResponseWriter, r *http.Request) {
-	d, err := s.buildStatus(r.Context(), r.URL.Query().Get("range"))
-	if err != nil {
-		http.Error(w, "Fehler", http.StatusInternalServerError)
-		return
-	}
-	s.renderPartial(w, "status_table", d)
-}
-
 // ---- hosts --------------------------------------------------------------------------
 
 type checkForm struct {
@@ -573,7 +554,7 @@ func (s *Server) hostUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hostDelete(w http.ResponseWriter, r *http.Request) {
-	back := "/status"
+	back := "/"
 	if v, err := s.Engine.HostView(r.Context(), r.PathValue("id")); err == nil && v.SiteID != "" {
 		back = "/sites/" + v.SiteID + "?tab=ueberwachung"
 	}
@@ -794,61 +775,6 @@ func (s *Server) boxDelete(w http.ResponseWriter, r *http.Request) {
 
 // ---- tenants and sites -------------------------------------------------------------------
 
-type siteRow struct {
-	store.Site
-	Boxes int
-	Hosts int
-}
-
-type tenantRow struct {
-	store.Tenant
-	Sites []siteRow
-}
-
-func (s *Server) tenantsPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	tenants, err := s.Store.Tenants(ctx)
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	sites, err := s.Store.Sites(ctx, "")
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	boxes, err := s.Store.Boxes(ctx, "")
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	hosts, err := s.Store.Hosts(ctx, "", "")
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	nb, nh := map[string]int{}, map[string]int{}
-	for _, b := range boxes {
-		if b.RevokedAt == nil {
-			nb[b.SiteID]++
-		}
-	}
-	for _, h := range hosts {
-		nh[h.SiteID]++
-	}
-	var rows []tenantRow
-	for _, t := range tenants {
-		tr := tenantRow{Tenant: t}
-		for _, st := range sites {
-			if st.TenantID == t.ID {
-				tr.Sites = append(tr.Sites, siteRow{Site: st, Boxes: nb[st.ID], Hosts: nh[st.ID]})
-			}
-		}
-		rows = append(rows, tr)
-	}
-	s.render(w, r, "tenants", "Mandanten & Standorte", rows)
-}
-
 func (s *Server) tenantCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tid, err := id.FromSlug("ten", r.PostForm.Get("slug"))
@@ -894,15 +820,6 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
-}
-
-func (s *Server) deviceRedirect(w http.ResponseWriter, r *http.Request) {
-	dev, err := s.Store.Device(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, r, err, http.StatusNotFound)
-		return
-	}
-	http.Redirect(w, r, "/sites/"+dev.SiteID+"?tab=netz", http.StatusFound)
 }
 
 func (s *Server) deviceMonitor(w http.ResponseWriter, r *http.Request) {
@@ -1098,15 +1015,6 @@ func (s *Server) webhooksData(ctx context.Context) (webhooksData, error) {
 	return d, nil
 }
 
-func (s *Server) webhooksPage(w http.ResponseWriter, r *http.Request) {
-	d, err := s.webhooksData(r.Context())
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	s.render(w, r, "webhooks", "Webhook-Ziele", d)
-}
-
 func validTargetForm(r *http.Request) (string, string, string, error) {
 	name := strings.TrimSpace(r.PostForm.Get("name"))
 	u := strings.TrimSpace(r.PostForm.Get("url"))
@@ -1133,13 +1041,7 @@ func (s *Server) webhookCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.Audit(ctx, s.Now(), actor(r), "webhook.create", t.ID, name+" "+u)
-	d, err := s.webhooksData(ctx)
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	d.NewSecret, d.NewTarget = t.Secret, &t
-	s.render(w, r, "webhooks", "Webhook-Ziele", d)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Ziel angelegt. Das Secret wird nur einmal angezeigt.", "secret": t.Secret, "name": name})
 }
 
 func (s *Server) webhookUpdate(w http.ResponseWriter, r *http.Request) {
@@ -1169,13 +1071,7 @@ func (s *Server) webhookUpdate(w http.ResponseWriter, r *http.Request) {
 		s.flash(w, r, "Ziel gespeichert.", "/webhooks")
 		return
 	}
-	d, err := s.webhooksData(ctx)
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	d.NewSecret, d.NewTarget = rotated, &t
-	s.render(w, r, "webhooks", "Webhook-Ziele", d)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Ziel gespeichert, Secret erneuert. Es wird nur einmal angezeigt.", "secret": rotated, "name": t.Name})
 }
 
 func (s *Server) webhookDelete(w http.ResponseWriter, r *http.Request) {
@@ -1214,56 +1110,6 @@ func (s *Server) webhookTest(w http.ResponseWriter, r *http.Request) {
 
 // ---- enrollment keys and API tokens ---------------------------------------------------------------
 
-type keysData struct {
-	Keys   []store.EnrollmentKey
-	New    []string
-	Ingest string
-}
-
-func (s *Server) keysPage(w http.ResponseWriter, r *http.Request) {
-	keys, err := s.Store.EnrollmentKeys(r.Context())
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	s.render(w, r, "keys", "Enrollment-Keys", keysData{Keys: keys, Ingest: fmt.Sprintf("%s:%d", s.Ingest, s.IngestPt)})
-}
-
-func (s *Server) keysCreate(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	count, _ := strconv.Atoi(r.PostForm.Get("count"))
-	days, _ := strconv.Atoi(r.PostForm.Get("days"))
-	if count < 1 || count > 100 {
-		count = 1
-	}
-	if days < 1 || days > 365 {
-		days = 30
-	}
-	note := strings.TrimSpace(r.PostForm.Get("note"))
-	now := s.Now()
-	var created []string
-	for i := 0; i < count; i++ {
-		k, err := pki.NewEnrollmentKey(s.Ingest, s.IngestPt, s.CA.Fingerprint())
-		if err != nil {
-			s.fail(w, r, err, http.StatusInternalServerError)
-			return
-		}
-		rec := store.EnrollmentKey{ID: id.New("key"), SecretHash: k.SecretHash(), Note: note, CreatedAt: now, ExpiresAt: now.Add(time.Duration(days) * 24 * time.Hour)}
-		if err := s.Store.CreateEnrollmentKey(ctx, rec); err != nil {
-			s.fail(w, r, err, http.StatusInternalServerError)
-			return
-		}
-		_ = s.Store.Audit(ctx, now, actor(r), "key.new", rec.ID, note)
-		created = append(created, rec.ID+"  "+k.String())
-	}
-	keys, err := s.Store.EnrollmentKeys(ctx)
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	s.render(w, r, "keys", "Enrollment-Keys", keysData{Keys: keys, New: created, Ingest: fmt.Sprintf("%s:%d", s.Ingest, s.IngestPt)})
-}
-
 func (s *Server) keyRevoke(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if err := s.Store.RevokeEnrollmentKey(ctx, r.PathValue("id"), s.Now()); err != nil {
@@ -1279,15 +1125,6 @@ type tokensData struct {
 	Tenants  []store.Tenant
 	NewToken string
 	NewName  string
-}
-
-func (s *Server) tokensPage(w http.ResponseWriter, r *http.Request) {
-	d, err := s.tokensData(r.Context())
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	s.render(w, r, "tokens", "API-Tokens", d)
 }
 
 func (s *Server) tokensData(ctx context.Context) (tokensData, error) {
@@ -1318,13 +1155,7 @@ func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.Audit(ctx, s.Now(), actor(r), "token.new", t.ID, name+" "+strings.Join(tenants, ","))
-	d, err := s.tokensData(ctx)
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	d.NewToken, d.NewName = raw, name
-	s.render(w, r, "tokens", "API-Tokens", d)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Token angelegt. Er wird nur einmal angezeigt.", "token": raw, "name": name})
 }
 
 func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request) {
@@ -1338,58 +1169,3 @@ func (s *Server) tokenRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- audit ------------------------------------------------------------------------------------------
-
-type auditData struct {
-	Entries []store.AuditEntry
-	Next    int64
-}
-
-func (s *Server) auditPage(w http.ResponseWriter, r *http.Request) {
-	before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
-	entries, err := s.Store.AuditEntries(r.Context(), 100, before)
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	d := auditData{Entries: entries}
-	if len(entries) == 100 {
-		d.Next = entries[len(entries)-1].ID
-	}
-	s.render(w, r, "audit", "Audit-Log", d)
-}
-
-func (s *Server) boxesPage(w http.ResponseWriter, r *http.Request) {
-	d, err := s.buildBoxes(r.Context())
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	s.render(w, r, "boxes", "Boxen", d)
-}
-
-func (s *Server) boxPage(w http.ResponseWriter, r *http.Request) {
-	d, err := s.buildBox(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, r, err, statusFor(err))
-		return
-	}
-	s.render(w, r, "box", firstNonEmpty(d.Row.Name, d.Row.ID), d)
-}
-
-func (s *Server) hostPage(w http.ResponseWriter, r *http.Request) {
-	d, err := s.buildHost(r.Context(), r.PathValue("id"), r.URL.Query().Get("tab"))
-	if err != nil {
-		s.fail(w, r, err, statusFor(err))
-		return
-	}
-	s.render(w, r, "host", d.View.Name, d)
-}
-
-func (s *Server) maintenancePage(w http.ResponseWriter, r *http.Request) {
-	d, err := s.buildMaintenance(r.Context())
-	if err != nil {
-		s.fail(w, r, err, http.StatusInternalServerError)
-		return
-	}
-	s.render(w, r, "maintenance", "Wartung", d)
-}
