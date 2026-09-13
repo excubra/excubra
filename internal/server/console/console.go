@@ -21,6 +21,7 @@ import (
 	"github.com/excubra/excubra/internal/server/blocklist"
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/core"
+	"github.com/excubra/excubra/internal/server/maptiles"
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
@@ -53,6 +54,7 @@ type Server struct {
 	Catalog    *catalog.Client        // release catalog, nil when disabled (ADR-0006)
 	SelfUpdate *selfupdate.Controller // this server's own updates, nil in tests
 	Remote     *remote.Service        // remote access through the box, nil in tests
+	Tiles      *maptiles.Service      // the map background, proxied and cached; nil when off
 	Vuln       *vuln.Service          // CVE matching, nil when off
 	Blocklist  *blocklist.Service     // the DNS sensors' list, nil when off
 	AI         *ai.Service            // assessments (ADR-0019), nil in tests
@@ -63,8 +65,8 @@ type Server struct {
 	flashes map[string]string       // session hash → message
 	pending map[string]pendingLogin // login cookie hash → passed step one
 
-	mapMu    sync.Mutex // the tile settings, held briefly: every response's CSP needs them
-	mapCfg   mapConfig
+	mapMu    sync.Mutex // the tile settings, held briefly: /api/me carries them
+	mapSet   maptiles.Settings
 	mapUntil time.Time
 }
 
@@ -238,6 +240,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/sites/{id}/dns", s.auth(s.siteDNSSet))
 	mux.Handle("POST /api/sites/{id}/geocode", s.auth(s.siteGeocode))
 	mux.Handle("POST /api/sites/{id}/location", s.auth(s.siteLocationSet))
+	mux.Handle("GET /api/map/tiles/{z}/{x}/{y}", s.auth(s.mapTile))
 	mux.Handle("GET /api/sites/{id}/watch/suggestion", s.auth(s.apiSiteWatchSuggestion))
 	mux.Handle("POST /api/sites/{id}/watch/suggested", s.auth(s.siteWatchSuggested))
 	mux.Handle("GET /api/settings/dns", s.auth(s.apiDNSSettings))
@@ -290,15 +293,11 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) headers(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		// Map tiles are the one foreign thing the console loads, and only as
-		// images: the tile host is named here and nowhere else, so it can serve
-		// pictures and nothing more. Everything else, the geocoder included,
-		// still goes through this server.
-		img := "img-src 'self' data:"
-		if o := tileOrigin(s.mapConfig(r).Tiles); o != "" {
-			img += " " + o
-		}
-		csp := "default-src 'self'; " + img + "; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+		// Nothing foreign is ever named here. The map draws its outlines from the
+		// binary, and a tile background an operator configures is fetched by this
+		// server and served from this origin (internal/server/maptiles) — so the
+		// policy does not widen when the map is switched on.
+		csp := "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
 		if strings.HasPrefix(r.URL.Path, "/login") || strings.HasPrefix(r.URL.Path, "/static") {
 			csp = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
 		}

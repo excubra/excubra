@@ -22,6 +22,7 @@ import (
 	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/catalog"
+	"github.com/excubra/excubra/internal/server/maptiles"
 	"github.com/excubra/excubra/internal/server/mcp"
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
@@ -576,7 +577,7 @@ func pruneCmd(args []string) error {
 	if *keep < 1 {
 		return fmt.Errorf("--keep must be at least 1 day")
 	}
-	st, _, err := cliStore(*envFile)
+	st, cfg, err := cliStore(*envFile)
 	if err != nil {
 		return err
 	}
@@ -589,6 +590,13 @@ func pruneCmd(args []string) error {
 		fmt.Println("removed", p)
 	}
 	fmt.Printf("%d day file(s) removed\n", len(removed))
+	// The map's tile cache ages out on the same run: a cache nobody empties is a
+	// disk that fills up.
+	if n, err := maptiles.New(filepath.Join(cfg.DataDir, "tiles")).Prune(); err != nil {
+		fmt.Fprintf(os.Stderr, "map tile cache: %v\n", err)
+	} else if n > 0 {
+		fmt.Printf("%d cached map tile(s) removed\n", n)
+	}
 	return nil
 }
 

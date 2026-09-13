@@ -110,8 +110,8 @@ export default function SitesPage() {
             <div className="relative">
               <SiteMap
                 points={points}
-                tiles={me.data?.map?.tiles ?? ""}
-                attribution={me.data?.map?.attribution ?? ""}
+                tiles={me.data?.map?.tiles}
+                attribution={me.data?.map?.attribution}
                 selected={picked}
                 onSelect={setPicked}
                 className="h-[min(70vh,680px)]"

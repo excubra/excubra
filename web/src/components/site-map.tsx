@@ -1,14 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
+import { countries } from "@/components/basemap.generated"
 import { cn } from "@/lib/utils"
 
 // A map of the sites. It exists because a list answers "which sites are there"
 // and fifty rows answer nothing at all; a map answers "where is it burning".
 //
-// Two deliberate choices. Markers are div icons built from the theme's own
-// colours, not Leaflet's default pin, so no image files ship and the map speaks
-// the same colour vocabulary as every badge in the console — the marker's markup
+// The background is drawn, not fetched. Country outlines are compiled into the
+// console (Natural Earth, public domain), so by default the map asks nobody for
+// anything and the content policy stays at `img-src 'self'`. Street tiles would
+// mean naming a foreign host in that policy and telling it which customer is
+// being looked at, and OpenStreetMap's own servers refuse us anyway: their policy
+// requires an app to identify itself in the User-Agent, which a page in a browser
+// is not allowed to set. An operator who wants streets sets map.tiles, and the
+// tiles then come through this server — still same-origin, still no foreign host
+// in the policy.
+//
+// Two more deliberate choices. Markers are elements built from the theme's own
+// colours, not Leaflet's default pin, so no image files ship — a marker's markup
 // is a fixed template of numbers and CSS variables, never a site's name. And
 // clicking a marker opens no popup: it hands the site back to React, which draws
 // the card, so customer names reach the page as text nodes like everywhere else.
@@ -31,6 +41,14 @@ const toneVar: Record<MapPoint["tone"], string> = {
   none: "var(--muted-foreground)",
 }
 
+// Without tiles there is nothing under the outlines to zoom into, so the map
+// stops where the drawing stops: a country shape is readable at zoom 7 and is a
+// faint line at 9. With tiles it goes to street level.
+const maxZoomOutlines = 7
+const fitZoomOutlines = 6
+const maxZoomTiles = 19
+const fitZoomTiles = 16
+
 function pin(p: MapPoint, selected: boolean) {
   const colour = toneVar[p.tone]
   const size = selected ? 26 : 20
@@ -49,8 +67,9 @@ export function SiteMap({
   points, tiles, attribution, selected, onSelect, className,
 }: {
   points: MapPoint[]
-  tiles: string
-  attribution: string
+  /** A tile background is configured; it is served by this server at /api/map/tiles. */
+  tiles?: boolean
+  attribution?: string
   selected?: string
   onSelect?: (id: string) => void
   className?: string
@@ -63,25 +82,46 @@ export function SiteMap({
   // create once
   useEffect(() => {
     if (!host.current || map.current) return
+    const drawn = markers.current // the same Map for this effect's whole life
     // No wheel zoom: the map fills most of the page, and a map that swallows the
     // scroll wheel traps everything below it. Zoom with the buttons, a double
     // click, or two fingers.
     const m = L.map(host.current, { attributionControl: true, zoomControl: true, worldCopyJump: true, scrollWheelZoom: false })
     m.setView([51.2, 10.4], 5) // a sensible first frame before the points arrive
     map.current = m
-    const drawn = markers.current // the same Map for this effect's whole life
     setReady(true)
-    return () => { m.remove(); map.current = null; drawn.clear() }
+    return () => { m.remove(); map.current = null; drawn.clear(); setReady(false) }
   }, [])
 
-  // the tile layer, replaced when the operator changes the source
+  // the drawn base: coastlines and borders, from the binary
   useEffect(() => {
     const m = map.current
     if (!m || !ready) return
-    if (!tiles) return
-    const layer = L.tileLayer(tiles, { attribution, maxZoom: 19, className: "ex0-tiles" }).addTo(m)
-    return () => { layer.remove() }
+    const layer = L.geoJSON(countries, {
+      // The colours live in the stylesheet, not here: Leaflet writes style values
+      // into SVG presentation attributes, and a CSS variable does not resolve
+      // there. A class does, and it follows the theme.
+      style: { className: "ex0-land", weight: 1, interactive: false },
+    }).addTo(m)
+    m.attributionControl.addAttribution("Umrisse: Natural Earth")
+    return () => { layer.remove(); m.attributionControl.removeAttribution("Umrisse: Natural Earth") }
+  }, [ready])
+
+  // the optional tile background, fetched by our own server
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !tiles) return
+    const layer = L.tileLayer("/api/map/tiles/{z}/{x}/{y}", {
+      attribution, maxZoom: maxZoomTiles, className: "ex0-tiles", crossOrigin: false,
+    }).addTo(m)
+    m.setMaxZoom(maxZoomTiles)
+    return () => { layer.remove(); m.setMaxZoom(maxZoomOutlines) }
   }, [ready, tiles, attribution])
+
+  useEffect(() => {
+    const m = map.current
+    if (m && ready && !tiles) m.setMaxZoom(maxZoomOutlines)
+  }, [ready, tiles])
 
   const key = useMemo(() => points.map((p) => `${p.id}:${p.lat}:${p.lon}:${p.tone}`).join("|"), [points])
 
@@ -99,11 +139,12 @@ export function SiteMap({
     }
     if (points.length > 0) {
       const b = L.latLngBounds(points.map((p) => [p.lat, p.lon] as [number, number]))
-      m.fitBounds(b, { padding: [40, 40], maxZoom: points.length === 1 ? 14 : 16 })
+      const fit = tiles ? fitZoomTiles : fitZoomOutlines
+      m.fitBounds(b, { padding: [40, 40], maxZoom: points.length === 1 ? Math.min(fit, tiles ? 14 : fitZoomOutlines) : fit })
     }
     // `key` stands in for the contents of `points`; selection is handled below
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, key])
+  }, [ready, key, tiles])
 
   // only the selected marker changes, so redraw two icons instead of all of them
   useEffect(() => {

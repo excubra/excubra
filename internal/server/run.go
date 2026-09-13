@@ -31,6 +31,7 @@ import (
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/feed"
 	"github.com/excubra/excubra/internal/server/ingest"
+	"github.com/excubra/excubra/internal/server/maptiles"
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
@@ -274,6 +275,9 @@ func run(envFile string) error {
 		go vs.Run(ctx, 5*time.Minute)
 	}
 	con.Blocklist = bl
+	// The map's optional street background. Nothing is fetched unless an operator
+	// set map.tiles; the browser only ever asks this server (internal/server/maptiles).
+	con.Tiles = maptiles.New(filepath.Join(cfg.DataDir, "tiles"))
 	// a restarted server takes a first look at what it already knows, so the feeds
 	// learn what to fetch without waiting for the next scan round
 	go func() {

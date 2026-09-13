@@ -43,7 +43,9 @@ export async function post<T = { ok: boolean; message: string }>(path: string, f
 
 // ---- types mirrored from the Go side (field names as Go marshals them) ----
 
-export interface MapConfig { tiles: string; attribution: string }
+/** Whether a tile background is configured, and what the map must credit. Tiles
+ *  are served by this server at /api/map/tiles, never fetched from a foreign host. */
+export interface MapConfig { tiles: boolean; attribution: string }
 export interface Me { user: string; csrf: string; version: string; now: string; secure: boolean; map?: MapConfig; Nav: { Tenants: number; Sites: number; Boxes: number; Unassigned: number; Attention: number; Findings: number } }
 /** One candidate the geocoder returned for an address. */
 export interface Place { label: string; lat: number; lon: number }
@@ -98,9 +100,11 @@ export interface TenantDetail { tenant: Tenant; sites: SiteCard[] | null; events
 export interface DeviceCard {
   ID: string; TenantID: string; SiteID: string; MAC: string; IP: string; Vendor: string; Hostname: string; FirstSeen: string; LastSeen: string; GoneAt: string | null; Ignored: boolean
   Kind: string; KindLabel: string; Name: string; Monitored: boolean; HostID: string; IsUplink: boolean; StateClass: string; StateLabel: string; IsBox: boolean; Text: string
-  /** Ports the scan found open, so the console can offer the right way in. */
-  Ports?: number[] | null
+  /** How to reach this device, worked out by the server from the scan and the connectors. */
+  Ways?: WayIn[] | null
 }
+/** One protocol the operator's own client can open. */
+export interface WayIn { kind: string; port: number; note: string }
 /** What the "beobachten, was sich lohnt" rule would do at a site. */
 export interface WatchSuggestion { count: number; names: string[] | null; skipped: Record<string, number>; hasBox: boolean }
 export interface KindCount { Key: string; Label: string; N: number }

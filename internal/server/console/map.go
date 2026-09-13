@@ -3,79 +3,93 @@ package console
 import (
 	"errors"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/excubra/excubra/internal/server/geocode"
+	"github.com/excubra/excubra/internal/server/maptiles"
 )
 
 // The map: a site carries an address an operator typed and the coordinates that
 // were looked up for it once. Fifty sites in a list answer "which ones exist";
 // the same fifty on a map answer "where is it burning", which is the question an
 // operator actually has.
-
-// Map settings. The tile source is a setting so an operator can point at their
-// own tile server — theirs, ours, or none at all — instead of being wired to one
-// provider. The default is the OpenStreetMap project's own.
-const (
-	settingTiles       = "map.tiles"
-	settingAttribution = "map.attribution"
-
-	defaultTiles       = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-	defaultAttribution = "© OpenStreetMap"
-)
+//
+// The background is drawn from country outlines compiled into the console, so by
+// default the map talks to nobody and the content policy stays at `img-src
+// 'self'`. An operator who wants streets sets map.tiles; the tiles then come
+// through this server (internal/server/maptiles), never straight from the
+// browser, so the policy still names no foreign host and the tile provider never
+// learns which customer is being looked at.
 
 // mapConfig is what the console needs to draw a map.
 type mapConfig struct {
-	Tiles       string `json:"tiles"`       // Leaflet URL template
+	Tiles       bool   `json:"tiles"`       // a background is configured and proxied at /api/map/tiles
 	Attribution string `json:"attribution"` // what the map must say about where it came from
-}
-
-// mapConfig reads the tile settings, falling back to OpenStreetMap. Every
-// response carries a content policy derived from it, so the answer is held for a
-// few seconds rather than read from the database on every request; a changed
-// setting takes effect on the next reload either way.
-func (s *Server) mapConfig(r *http.Request) mapConfig {
-	s.mapMu.Lock()
-	defer s.mapMu.Unlock()
-	if s.Now().Before(s.mapUntil) {
-		return s.mapCfg
-	}
-	c := mapConfig{Tiles: defaultTiles, Attribution: defaultAttribution}
-	if v, err := s.Store.Setting(r.Context(), settingTiles); err == nil && v != "" {
-		c.Tiles = v
-	}
-	if v, err := s.Store.Setting(r.Context(), settingAttribution); err == nil && v != "" {
-		c.Attribution = v
-	}
-	if c.Tiles == "off" {
-		c.Tiles = ""
-	}
-	s.mapCfg, s.mapUntil = c, s.Now().Add(mapCacheFor)
-	return c
 }
 
 // mapCacheFor is how long the tile settings are held before they are read again.
 const mapCacheFor = 10 * time.Second
 
-// tileOrigin is the scheme and host of the tile template, for the content policy.
-// A template with no usable origin contributes nothing, which is the safe answer.
-func tileOrigin(tiles string) string {
-	if tiles == "" {
-		return ""
+// mapSettings reads the tile settings, briefly cached: the map's status travels
+// with every /api/me and the value changes about once a year.
+func (s *Server) mapSettings(r *http.Request) maptiles.Settings {
+	s.mapMu.Lock()
+	defer s.mapMu.Unlock()
+	if s.Now().Before(s.mapUntil) {
+		return s.mapSet
 	}
-	// {z}/{x}/{y} are not legal URL characters everywhere, but they never appear
-	// in the origin, so parsing the part before the first brace is enough.
-	if i := strings.IndexByte(tiles, '{'); i >= 0 {
-		tiles = tiles[:i]
+	var set maptiles.Settings
+	if v, err := s.Store.Setting(r.Context(), maptiles.SettingTiles); err == nil {
+		set.Template = v
 	}
-	u, err := url.Parse(tiles)
-	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
-		return ""
+	if v, err := s.Store.Setting(r.Context(), maptiles.SettingAttribution); err == nil {
+		set.Attribution = v
 	}
-	return u.Scheme + "://" + u.Host
+	if set.Attribution == "" && set.Enabled() {
+		set.Attribution = "Kartenhintergrund vom eingestellten Kachel-Server"
+	}
+	s.mapSet, s.mapUntil = set, s.Now().Add(mapCacheFor)
+	return set
+}
+
+func (s *Server) mapConfig(r *http.Request) mapConfig {
+	set := s.mapSettings(r)
+	return mapConfig{Tiles: set.Enabled(), Attribution: set.Attribution}
+}
+
+// mapTile serves one tile of the configured background. The browser only ever
+// asks this server; see internal/server/maptiles for why.
+func (s *Server) mapTile(w http.ResponseWriter, r *http.Request) {
+	if s.Tiles == nil {
+		http.NotFound(w, r)
+		return
+	}
+	z, err1 := strconv.Atoi(r.PathValue("z"))
+	x, err2 := strconv.Atoi(r.PathValue("x"))
+	y, err3 := strconv.Atoi(strings.TrimSuffix(r.PathValue("y"), ".png"))
+	if err1 != nil || err2 != nil || err3 != nil || !maptiles.Valid(z, x, y) {
+		http.NotFound(w, r)
+		return
+	}
+	body, ct, err := s.Tiles.Tile(r.Context(), s.mapSettings(r), z, x, y)
+	if errors.Is(err, maptiles.ErrDisabled) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.Log.Warn("map tile", "z", z, "x", x, "y", y, "err", err)
+		http.Error(w, "tile unavailable", http.StatusBadGateway)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", ct)
+	// The console sets Cache-Control: no-store for everything; a tile is a
+	// picture of a coastline and may sit in the browser for a day.
+	h.Set("Cache-Control", "private, max-age=86400")
+	h.Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(body)
 }
 
 // siteGeocode asks the geocoder what an address might mean and returns the

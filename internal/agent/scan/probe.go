@@ -24,13 +24,14 @@ var portNames = map[int]string{
 	636: "ldaps", 873: "rsync", 993: "imaps", 995: "pop3s", 1433: "mssql", 1521: "oracle", 1723: "pptp", 2049: "nfs", 2375: "docker",
 	3000: "http", 3306: "mysql", 3389: "rdp", 4443: "https", 5000: "http", 5060: "sip", 5061: "sips", 5432: "postgres", 5900: "vnc",
 	5985: "winrm", 5986: "winrm-https", 6379: "redis", 8000: "http", 8006: "https", 8080: "http", 8081: "http", 8443: "https", 8888: "http",
+	7443: "https", 8090: "http", 8181: "http", 8444: "https", 10443: "https", 11443: "https",
 	9000: "http", 9090: "http", 9100: "jetdirect", 9200: "elasticsearch", 9443: "https", 10000: "https", 27017: "mongodb", 62078: "iphone-sync",
 }
 
 var (
-	tlsPorts    = map[int]bool{443: true, 465: true, 636: true, 993: true, 995: true, 4443: true, 5061: true, 5986: true, 8006: true, 8443: true, 9443: true, 10000: true}
-	httpPorts   = map[int]bool{80: true, 3000: true, 5000: true, 8000: true, 8080: true, 8081: true, 8888: true, 9000: true, 9090: true, 5985: true, 9200: true}
-	httpsPorts  = map[int]bool{443: true, 4443: true, 5986: true, 8006: true, 8443: true, 9443: true, 10000: true}
+	tlsPorts    = map[int]bool{443: true, 465: true, 636: true, 993: true, 995: true, 4443: true, 5061: true, 5986: true, 7443: true, 8006: true, 8443: true, 8444: true, 9443: true, 10000: true, 10443: true, 11443: true}
+	httpPorts   = map[int]bool{80: true, 3000: true, 5000: true, 8000: true, 8080: true, 8081: true, 8090: true, 8181: true, 8888: true, 9000: true, 9090: true, 5985: true, 9200: true}
+	httpsPorts  = map[int]bool{443: true, 4443: true, 5986: true, 7443: true, 8006: true, 8443: true, 8444: true, 9443: true, 10000: true, 10443: true, 11443: true}
 	bannerPorts = map[int]bool{21: true, 22: true, 23: true, 25: true, 110: true, 143: true, 587: true, 5900: true}
 )
 

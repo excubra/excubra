@@ -41,8 +41,9 @@ export default function DevicePage() {
   })
   const d = q.data
   const deviceIP = d?.device.IP ?? ""
+  const deviceWays = d?.device.Ways ?? []
   const svcCols: ColumnDef<ServiceRow, unknown>[] = [
-    { id: "port", header: "Port", accessorFn: (r) => r.Port, cell: ({ row }) => <ServicePort proto={row.original.Proto} port={row.original.Port} ip={deviceIP} gone={!!row.original.GoneAt} /> },
+    { id: "port", header: "Port", accessorFn: (r) => r.Port, cell: ({ row }) => <ServicePort proto={row.original.Proto} port={row.original.Port} ip={deviceIP} ways={deviceWays} gone={!!row.original.GoneAt} /> },
     { id: "name", header: "Dienst", accessorFn: (r) => r.Name, cell: ({ row }) => <span>{row.original.Name || "–"}{row.original.New && <Badge variant="outline" className="ml-2 border-primary/40 text-primary">neu</Badge>}{row.original.GoneAt && <Badge variant="secondary" className="ml-2">weg</Badge>}</span> },
     { id: "product", header: "Produkt", accessorFn: (r) => `${r.Product} ${r.Version}`, cell: ({ row }) => <span>{row.original.Product ? <>{row.original.Product}{row.original.Version && <span className="font-mono text-xs text-muted-foreground"> {row.original.Version}</span>}</> : <span className="text-muted-foreground">–</span>}</span> },
     { id: "banner", header: "Meldet sich als", accessorFn: (r) => r.Title || r.Banner, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue() || "–")}</span> },
@@ -53,14 +54,14 @@ export default function DevicePage() {
   const dev = d.device
   const host = d.host
   const openServices = (d.services ?? []).filter((s) => !s.GoneAt).length
-  // The open TCP ports drive the "connect" links: what the scan actually found
-  // beats a guess from the kind of device.
-  const ports = (d.services ?? []).filter((s) => !s.GoneAt && (s.Proto === "" || s.Proto === "tcp")).map((s) => s.Port)
+  // The ways in come with the device, worked out on the server from the scan and
+  // the connectors — not from a table of port numbers in the browser.
+  const ways = d.device.Ways ?? []
   return (
     <>
       <PageHeader crumbs={[{ label: "Kunden", to: "/tenants" }, { label: d.tenant.Name, to: `/tenants/${d.tenant.ID}` }, { label: d.site.Name, to: `/sites/${d.site.ID}` }, { label: dev.Name }]}
         title={<><DeviceMark kind={dev.Kind} vendor={dev.Vendor} className={"size-6 " + (dev.Monitored ? "text-primary" : "text-muted-foreground")} />{dev.Name}{dev.Monitored && <StateBadge cls={dev.StateClass} label={dev.StateLabel} />}{dev.IsUplink && <Badge variant="outline" className="border-primary/40 text-primary">Uplink</Badge>}{dev.IsBox && <Badge variant="secondary">diese Box</Badge>}</>}
-        sub={<span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">{dev.KindLabel} · <ConnectIP kind={dev.Kind} ip={dev.IP} ports={ports} /> · {dev.Vendor || "Hersteller unbekannt"}</span>}
+        sub={<span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">{dev.KindLabel} · <ConnectIP ip={dev.IP} ways={ways} /> · {dev.Vendor || "Hersteller unbekannt"}</span>}
         actions={!dev.IsBox && <label className="flex items-center gap-2 text-sm"><span className="text-muted-foreground">Beobachten</span><Switch checked={dev.Monitored} disabled={!dev.IP || act.isPending} onCheckedChange={(on) => act.mutate({ path: on ? `/api/devices/${dev.ID}/watch` : `/api/hosts/${dev.HostID}/unwatch` })} /></label>} />
 
       <StatGrid>

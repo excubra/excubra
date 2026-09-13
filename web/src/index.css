@@ -149,7 +149,21 @@ html { color-scheme: dark; }
    inverting and rotating the hue turns a daylight street map into something that
    sits in the page instead of glaring out of it. Everything Leaflet draws on top
    — markers, controls, attribution — keeps the console's own colours. */
-.ex0-map { background: var(--muted); }
+/* Leaflet paints its own light grey behind the map and its rule has the same
+   weight as ours, so the selector names both classes to win on specificity —
+   otherwise the sea comes out lighter than the land. */
+.leaflet-container.ex0-map { background: var(--background); }
+/* The drawn base: land a shade above the page's ground, borders a shade above
+   that — enough to read a coastline without competing with the markers. */
+.ex0-map .ex0-land {
+  fill: var(--muted);
+  fill-opacity: 0.7;
+  stroke: var(--muted-foreground);
+  stroke-opacity: 0.45;
+  }
+/* A street background, when an operator configured one, comes from a daylight
+   map; inverting it lets it sit in a dark console instead of glaring out of it.
+   The drawn outlines already use the console's own colours and are left alone. */
 .ex0-map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.92) saturate(0.7); }
 .ex0-map .leaflet-control-attribution {
   background: color-mix(in oklab, var(--background) 80%, transparent);

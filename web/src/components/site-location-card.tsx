@@ -100,11 +100,14 @@ export function SiteLocationCard({ site, map, onChanged }: { site: Site; map?: M
           </div>
         </div>
 
-        {coords && (
+        {/* A preview only helps when there is something under the pin. With the
+            drawn outlines alone, a single point on a country shape says nothing,
+            so the coordinates above are the whole answer. */}
+        {coords && map?.tiles && (
           <SiteMap
             points={[{ id: site.ID, name: site.Name, tenant: "", lat: Number(lat), lon: Number(lon), tone: "ok" }]}
-            tiles={map?.tiles ?? ""}
-            attribution={map?.attribution ?? ""}
+            tiles={map?.tiles}
+            attribution={map?.attribution}
             className="h-56"
           />
         )}
