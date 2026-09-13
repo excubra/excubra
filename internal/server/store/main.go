@@ -64,27 +64,39 @@ func (s *Store) RenameTenant(ctx context.Context, tenantID, name string) error {
 
 // ---- sites -----------------------------------------------------------------------
 
+const siteCols = `id, tenant_id, name, created_at, scan_enabled, canary_enabled, dns_enabled, dns_block, dns_upstreams, address, lat, lon`
+
+func scanSite(sc interface{ Scan(...any) error }) (Site, error) {
+	var st Site
+	var created, ups string
+	var scan, canary, dnsOn, dnsBlock int
+	var lat, lon sql.NullFloat64
+	if err := sc.Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan, &canary, &dnsOn, &dnsBlock, &ups, &st.Address, &lat, &lon); err != nil {
+		return Site{}, err
+	}
+	st.CreatedAt, st.ScanEnabled, st.CanaryEnabled, st.DNSEnabled, st.DNSBlock = parseTS(created), scan != 0, canary != 0, dnsOn != 0, dnsBlock != 0
+	// Both or neither: half a coordinate pair places a marker in the wrong place.
+	st.Located = lat.Valid && lon.Valid
+	st.Lat, st.Lon = lat.Float64, lon.Float64
+	_ = json.Unmarshal([]byte(ups), &st.DNSUpstreams)
+	return st, nil
+}
+
 // CreateSite inserts a site.
 func (s *Store) CreateSite(ctx context.Context, st Site) error {
-	_, err := s.main.ExecContext(ctx, `INSERT INTO sites (id, tenant_id, name, created_at) VALUES (?, ?, ?, ?)`, st.ID, st.TenantID, st.Name, ts(st.CreatedAt))
+	_, err := s.main.ExecContext(ctx, `INSERT INTO sites (id, tenant_id, name, created_at, address) VALUES (?, ?, ?, ?, ?)`, st.ID, st.TenantID, st.Name, ts(st.CreatedAt), st.Address)
 	return wrap("create site", err)
 }
 
 // Site returns one site.
 func (s *Store) Site(ctx context.Context, siteID string) (Site, error) {
-	var st Site
-	var created string
-	var scan, canary, dnsOn, dnsBlock int
-	var ups string
-	err := s.main.QueryRowContext(ctx, `SELECT id, tenant_id, name, created_at, scan_enabled, canary_enabled, dns_enabled, dns_block, dns_upstreams FROM sites WHERE id = ?`, siteID).Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan, &canary, &dnsOn, &dnsBlock, &ups)
-	st.CreatedAt, st.ScanEnabled, st.CanaryEnabled, st.DNSEnabled, st.DNSBlock = parseTS(created), scan != 0, canary != 0, dnsOn != 0, dnsBlock != 0
-	_ = json.Unmarshal([]byte(ups), &st.DNSUpstreams)
+	st, err := scanSite(s.main.QueryRowContext(ctx, `SELECT `+siteCols+` FROM sites WHERE id = ?`, siteID))
 	return st, wrap("site", err)
 }
 
 // Sites returns all sites, or those of one tenant when tenantID is not empty.
 func (s *Store) Sites(ctx context.Context, tenantID string) ([]Site, error) {
-	q := `SELECT id, tenant_id, name, created_at, scan_enabled, canary_enabled, dns_enabled, dns_block, dns_upstreams FROM sites`
+	q := `SELECT ` + siteCols + ` FROM sites`
 	var args []any
 	if tenantID != "" {
 		q += ` WHERE tenant_id = ?`
@@ -97,15 +109,10 @@ func (s *Store) Sites(ctx context.Context, tenantID string) ([]Site, error) {
 	defer func() { _ = rows.Close() }()
 	var out []Site
 	for rows.Next() {
-		var st Site
-		var created string
-		var scan, canary, dnsOn, dnsBlock int
-		var ups string
-		if err := rows.Scan(&st.ID, &st.TenantID, &st.Name, &created, &scan, &canary, &dnsOn, &dnsBlock, &ups); err != nil {
+		st, err := scanSite(rows)
+		if err != nil {
 			return nil, wrap("sites", err)
 		}
-		st.CreatedAt, st.ScanEnabled, st.CanaryEnabled, st.DNSEnabled, st.DNSBlock = parseTS(created), scan != 0, canary != 0, dnsOn != 0, dnsBlock != 0
-		_ = json.Unmarshal([]byte(ups), &st.DNSUpstreams)
 		out = append(out, st)
 	}
 	return out, wrap("sites", rows.Err())
@@ -114,6 +121,19 @@ func (s *Store) Sites(ctx context.Context, tenantID string) ([]Site, error) {
 // RenameSite changes the name.
 func (s *Store) RenameSite(ctx context.Context, siteID, name string) error {
 	return s.exec1(ctx, "rename site", `UPDATE sites SET name = ? WHERE id = ?`, name, siteID)
+}
+
+// SetSiteLocation stores the address an operator typed and, when located is true,
+// the coordinates looked up for it. Clearing the location (located false) keeps
+// the address: the operator may want to correct it and try again.
+func (s *Store) SetSiteLocation(ctx context.Context, siteID, address string, lat, lon float64, located bool) error {
+	if !located {
+		return s.exec1(ctx, "site location", `UPDATE sites SET address = ?, lat = NULL, lon = NULL WHERE id = ?`, address, siteID)
+	}
+	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+		return fmt.Errorf("site location: %f/%f is not on this planet", lat, lon)
+	}
+	return s.exec1(ctx, "site location", `UPDATE sites SET address = ?, lat = ?, lon = ? WHERE id = ?`, address, lat, lon, siteID)
 }
 
 // ---- boxes -----------------------------------------------------------------------

@@ -57,9 +57,15 @@ func run(dir string) error {
 	if err != nil {
 		return err
 	}
-	must(eng.CreateSite(ctx, store.Site{ID: "site_buero", TenantID: "ten_viico", Name: "Büro Ludwigshafen", CreatedAt: now.Add(-30 * 24 * time.Hour)}, "demo"))
-	must(eng.CreateSite(ctx, store.Site{ID: "site_werk", TenantID: "ten_muster", Name: "Werk Nord", CreatedAt: now.Add(-20 * 24 * time.Hour)}, "demo"))
-	must(eng.CreateSite(ctx, store.Site{ID: "site_lager", TenantID: "ten_muster", Name: "Lager Süd", CreatedAt: now.Add(-10 * 24 * time.Hour)}, "demo"))
+	must(eng.CreateSite(ctx, store.Site{ID: "site_buero", TenantID: "ten_viico", Name: "Büro Ludwigshafen", CreatedAt: now.Add(-30 * 24 * time.Hour), Address: "Musterstraße 1, 67059 Ludwigshafen"}, "demo"))
+	must(eng.CreateSite(ctx, store.Site{ID: "site_werk", TenantID: "ten_muster", Name: "Werk Nord", CreatedAt: now.Add(-20 * 24 * time.Hour), Address: "Beispielweg 7, 67059 Ludwigshafen"}, "demo"))
+	must(eng.CreateSite(ctx, store.Site{ID: "site_lager", TenantID: "ten_muster", Name: "Lager Süd", CreatedAt: now.Add(-10 * 24 * time.Hour), Address: "Beispielallee 22, 68159 Mannheim"}, "demo"))
+
+	// Coordinates as an operator would have looked them up once; the demo must not
+	// call a geocoder. Town centres, not real customer doorsteps.
+	must(st.SetSiteLocation(ctx, "site_buero", "Musterstraße 1, 67059 Ludwigshafen", 49.4775, 8.4450, true))
+	must(st.SetSiteLocation(ctx, "site_werk", "Beispielweg 7, 67059 Ludwigshafen", 49.5120, 8.4050, true))
+	must(st.SetSiteLocation(ctx, "site_lager", "Beispielallee 22, 68159 Mannheim", 49.4875, 8.4660, true))
 
 	boxes := []store.Box{
 		{ID: "box_buero", SiteID: "site_buero", Name: "Büro", HWID: "3f1a9c2e77b04d1a", AgentVersion: "0.1.0", OS: "linux", Arch: "amd64", CertSerial: "1a2b3c", CertNotAfter: now.Add(80 * 24 * time.Hour), Channel: "canary", DiscoveryMode: "sweep", NetbirdStatus: "connected", NetbirdIP: "100.90.12.4", DiskTotalBytes: 250e9, DiskFreeBytes: 212e9, UptimeS: 864000, LastSeen: now, EnrolledAt: now.Add(-28 * 24 * time.Hour)},

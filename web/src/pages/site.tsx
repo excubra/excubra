@@ -28,7 +28,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { get, post, type DeviceCard, type HostCard, type SiteData } from "@/lib/api"
+import { SiteLocationCard } from "@/components/site-location-card"
+import { ConnectIP } from "@/components/connect"
+import { SuggestWatchButton } from "@/components/suggest-watch"
+import { get, post, type DeviceCard, type HostCard, type Me, type SiteData } from "@/lib/api"
 import { fmtShort, fmtTime, pct } from "@/lib/format"
 
 export default function SitePage() {
@@ -39,6 +42,7 @@ export default function SitePage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ["site", id, range], queryFn: () => get<SiteData>(`/api/sites/${id}`, { range }) })
+  const me = useQuery({ queryKey: ["me"], queryFn: () => get<Me>("/api/me") })
   const [view, setView] = useState<"table" | "cards">(() => (localStorage.getItem("ex0.devview") as "table" | "cards") || "table")
   const [kind, setKind] = useState("all")
   const [selected, setSelected] = useState<DeviceCard[]>([])
@@ -64,7 +68,7 @@ export default function SitePage() {
     { id: "sel", enableSorting: false, header: ({ table }) => <Checkbox checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")} onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)} aria-label="Alle" />, cell: ({ row }) => <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)} aria-label="Auswählen" disabled={row.original.IsBox} /> },
     { id: "kind", header: "Art", accessorFn: (r) => `${r.KindLabel} ${r.Vendor}`, cell: ({ row }) => <span className="flex items-center gap-2 text-muted-foreground"><DeviceMark kind={row.original.Kind} vendor={row.original.Vendor} active={row.original.Monitored} />{row.original.KindLabel}</span> },
     { id: "name", header: "Gerät", accessorFn: (r) => r.Name, cell: ({ row }) => <div><Link to={`/devices/${row.original.ID}`} className="font-medium hover:underline">{row.original.Name}</Link>{row.original.Hostname && row.original.Hostname !== row.original.Name && <div className="text-xs text-muted-foreground">{row.original.Hostname}</div>}</div> },
-    { id: "ip", header: "Adresse", accessorFn: (r) => r.IP, cell: ({ row }) => <div className="font-mono text-sm">{row.original.IP || <span className="text-muted-foreground">keine IPv4</span>}<div className="text-xs text-muted-foreground">{row.original.MAC}</div></div> },
+    { id: "ip", header: "Adresse", accessorFn: (r) => r.IP, cell: ({ row }) => <ConnectIP kind={row.original.Kind} ip={row.original.IP} ports={row.original.Ports} sub={row.original.MAC} className="text-sm" /> },
     { id: "vendor", header: "Hersteller", accessorFn: (r) => r.Vendor, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue() || "unbekannt")}</span> },
     { id: "state", header: "Zustand", accessorFn: (r) => (r.Monitored ? r.StateClass : "zz"), cell: ({ row }) => { const r = row.original; if (r.IsBox) return <Badge variant="secondary">diese Box</Badge>; if (r.IsUplink) return <span className="flex gap-1"><StateBadge cls={r.StateClass} /><Badge variant="outline" className="border-primary/40 text-primary">Uplink</Badge></span>; return r.Monitored ? <StateBadge cls={r.StateClass} /> : <span className="text-muted-foreground">nicht beobachtet</span> } },
     { id: "seen", header: "Gesehen", accessorFn: (r) => r.LastSeen, cell: ({ row }) => <span className={"text-xs " + (row.original.GoneAt ? "text-destructive" : "text-muted-foreground")}>{row.original.GoneAt ? <>weg seit <Ago t={row.original.GoneAt} /></> : <>seit {fmtShort(row.original.FirstSeen)}</>}</span> },
@@ -131,6 +135,7 @@ export default function SitePage() {
                   <Button size="sm" variant="ghost" onClick={() => bulk((x) => post(`/api/devices/${x.ID}/ignore`, { ignored: x.Ignored ? "0" : "1" }))}>Ignorieren an/aus</Button>
                 </>
               )}
+              {selected.length === 0 && <SuggestWatchButton siteId={id} onDone={refresh} />}
               <ToggleGroup type="single" value={view} onValueChange={(v) => { if (v) { setView(v as "table" | "cards"); localStorage.setItem("ex0.devview", v) } }} variant="outline" size="sm">
                 <ToggleGroupItem value="table" aria-label="Tabelle"><List /></ToggleGroupItem>
                 <ToggleGroupItem value="cards" aria-label="Karten"><LayoutGrid /></ToggleGroupItem>
@@ -138,9 +143,9 @@ export default function SitePage() {
             </div>
           </div>
           {view === "table" ? (
-            <DataTable columns={devCols} data={devices} search={(r) => r.Text} searchPlaceholder="Name, IP, MAC, Hersteller" selection onSelectionChange={setSelected} pageSize={50} initialSort={[{ id: "state", desc: false }]} rowClass={(r) => (r.Ignored ? "opacity-50" : "") + (r.Monitored && r.StateClass === "down" ? " border-l-2 border-l-destructive" : "")} emptyTitle="Noch keine Geräte gesehen" emptyText="Die Box meldet Geräte mit jedem Heartbeat; der erste Sweep läuft eine halbe Minute nach dem Start." />
+            <DataTable columns={devCols} data={devices} search={(r) => r.Text} searchPlaceholder="Name, IP, MAC, Hersteller" selection onSelectionChange={setSelected} pageSize={50} onRowClick={(r) => navigate(`/devices/${r.ID}`)} initialSort={[{ id: "state", desc: false }]} rowClass={(r) => (r.Ignored ? "opacity-50" : "") + (r.Monitored && r.StateClass === "down" ? " border-l-2 border-l-destructive" : "")} emptyTitle="Noch keine Geräte gesehen" emptyText="Die Box meldet Geräte mit jedem Heartbeat; der erste Sweep läuft eine halbe Minute nach dem Start." />
           ) : (
-            <DeviceCardView devices={devices} onToggle={(r, on) => act.mutate({ path: on ? `/api/devices/${r.ID}/watch` : `/api/hosts/${r.HostID}/unwatch` })} busy={act.isPending} />
+            <DeviceCardView devices={devices} onToggle={(r, on) => act.mutate({ path: on ? `/api/devices/${r.ID}/watch` : `/api/hosts/${r.HostID}/unwatch` })} busy={act.isPending} onOpen={(r) => navigate(`/devices/${r.ID}`)} />
           )}
         </TabsContent>
 
@@ -154,6 +159,10 @@ export default function SitePage() {
         </TabsContent>
 
         <TabsContent value="technik" className="mt-4 flex flex-col gap-6">
+          <section className="flex flex-col gap-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Standort</h2>
+            <SiteLocationCard site={d.Site} map={me.data?.map} onChanged={refresh} />
+          </section>
           <section className="flex flex-col gap-3">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Erkennung</h2>
             <div className="grid gap-4 @5xl/main:grid-cols-2">

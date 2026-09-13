@@ -56,6 +56,12 @@ type Site struct {
 	DNSEnabled   bool
 	DNSBlock     bool
 	DNSUpstreams []string
+	// Where the site is, for the map. Address is what the operator typed; Lat and
+	// Lon mean nothing unless Located is true, because 0/0 is a real place.
+	Address string
+	Lat     float64
+	Lon     float64
+	Located bool
 }
 
 // Box is an enrolled device. SiteID is empty until the console assigns it.
