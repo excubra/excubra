@@ -111,8 +111,8 @@ export default function SitePage() {
           <TabsTrigger value="netz">Netz <Badge variant="secondary" className="ml-1">{d.Devices?.length ?? 0}</Badge></TabsTrigger>
           <TabsTrigger value="ueberwachung">Überwachung <Badge variant={d.Down ? "destructive" : "secondary"} className="ml-1">{d.Monitored}</Badge></TabsTrigger>
           <TabsTrigger value="ereignisse">Ereignisse <Badge variant="secondary" className="ml-1">{d.Events?.length ?? 0}</Badge></TabsTrigger>
+          <TabsTrigger value="technik">Technik</TabsTrigger>
           <TabsTrigger value="ki">KI</TabsTrigger>
-          <TabsTrigger value="technik">Box &amp; Technik</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ki" className="mt-4">
@@ -158,14 +158,22 @@ export default function SitePage() {
           <DataTable columns={evCols} data={d.Events ?? []} search={(r) => `${r.type} ${r.Title} ${r.Info}`} rowClass={(r) => r.Class === "down" ? "border-l-2 border-l-destructive" : ""} emptyTitle="Alles ruhig" emptyText="Kein Ereignis in den letzten 24 Stunden." footer={<Link className="underline" to={`/events?site=${d.Site.ID}`}>Alle Ereignisse dieses Standorts</Link>} />
         </TabsContent>
 
-        <TabsContent value="technik" className="mt-4 flex flex-col gap-4">
-          <CanaryCard siteId={id} />
-          <DNSCard siteId={id} />
-          <ScanCard siteId={id} />
-          <RemoteAccessCard siteId={id} />
-          {d.Box ? <BoxTech box={d.Box} site={d.Site} sites={d.Sites ?? []} tenantNames={d.TenantNames} fingerprint={d.Fingerprint} netbird={d.Netbird} subnets={d.Subnets} onChanged={refresh} /> : (
-            <Alert><Radar /><AlertTitle>Keine Box an diesem Standort</AlertTitle><AlertDescription>Unter <Link className="underline" to="/boxes">Boxen</Link> eine enrollte Box diesem Standort zuordnen.</AlertDescription></Alert>
-          )}
+        <TabsContent value="technik" className="mt-4 flex flex-col gap-6">
+          <section className="flex flex-col gap-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Erkennung</h2>
+            <div className="grid gap-4 @5xl/main:grid-cols-2">
+              <CanaryCard siteId={id} />
+              <DNSCard siteId={id} />
+              <div className="@5xl/main:col-span-2"><ScanCard siteId={id} /></div>
+            </div>
+          </section>
+          <section className="flex flex-col gap-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Zugang und Box</h2>
+            <RemoteAccessCard siteId={id} />
+            {d.Box ? <BoxTech box={d.Box} site={d.Site} sites={d.Sites ?? []} tenantNames={d.TenantNames} fingerprint={d.Fingerprint} netbird={d.Netbird} subnets={d.Subnets} onChanged={refresh} /> : (
+              <Alert><Radar /><AlertTitle>Keine Box an diesem Standort</AlertTitle><AlertDescription>Unter <Link className="underline" to="/boxes">Boxen</Link> eine enrollte Box diesem Standort zuordnen.</AlertDescription></Alert>
+            )}
+          </section>
         </TabsContent>
       </Tabs>
       <span className="hidden" onClick={() => navigate("/")} />

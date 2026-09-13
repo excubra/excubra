@@ -128,6 +128,38 @@ func (s *Server) apiOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, overviewData{statusData: d, Attention: s.buildAttention(r.Context(), d, s.Now())})
 }
 
+// siteRowAPI is one row of the flat site list: the card plus what is open on it.
+// With many customers this list, not the customer tree, is the way in.
+type siteRowAPI struct {
+	siteCard
+	Findings int `json:"findings"` // open, not acknowledged
+}
+
+// apiSites is every site of every customer in one flat, searchable list.
+func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	d, err := s.buildStatus(ctx, "")
+	if err != nil {
+		s.fail(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	acks, _ := s.Store.Acks(ctx)
+	open := map[string]int{}
+	if fs, err := s.Store.OpenFindings(ctx, ""); err == nil {
+		for _, f := range fs {
+			if _, acked := acks["finding/"+f.ID]; !acked && f.SiteID != "" {
+				open[f.SiteID]++
+			}
+		}
+	}
+	rows := make([]siteRowAPI, 0, len(d.Cards))
+	for _, c := range d.Cards {
+		c.Hosts = nil // the list does not show hosts; keep the payload small
+		rows = append(rows, siteRowAPI{siteCard: c, Findings: open[c.Site.ID]})
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
 // ---- tenants -----------------------------------------------------------------------------
 
 type tenantRowAPI struct {

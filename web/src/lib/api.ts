@@ -43,7 +43,7 @@ export async function post<T = { ok: boolean; message: string }>(path: string, f
 
 // ---- types mirrored from the Go side (field names as Go marshals them) ----
 
-export interface Me { user: string; csrf: string; version: string; now: string; secure: boolean; Nav: { Tenants: number; Boxes: number; Unassigned: number; Attention: number; Findings: number } }
+export interface Me { user: string; csrf: string; version: string; now: string; secure: boolean; Nav: { Tenants: number; Sites: number; Boxes: number; Unassigned: number; Attention: number; Findings: number } }
 
 export interface BoxState { ID: string; Status: string; LastHeartbeat: string; SilentSince: string; AgentVersion: string }
 export interface BoxRow {
@@ -70,6 +70,7 @@ export interface EventRow {
   details?: Record<string, unknown>
   TenantName: string; SiteName: string; Class: string; Title: string; Info: string
 }
+export interface SiteRow extends SiteCard { findings: number }
 export interface SiteCard {
   Site: Site; Tenant: Tenant; Box: BoxRow | null; HasBox: boolean; Online: boolean; Monitored: number; Up: number; Down: number; Devices: number
   Class: string; Last: EventRow | null; Hosts: HostRow[] | null

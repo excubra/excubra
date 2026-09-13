@@ -26,6 +26,7 @@ type pageOpts struct {
 // navCounts are the small numbers next to the sidebar entries.
 type navCounts struct {
 	Tenants    int
+	Sites      int
 	Boxes      int
 	Unassigned int
 	Attention  int // hosts down + assigned boxes silent: what needs a person now
@@ -37,6 +38,9 @@ func (s *Server) navCounts(ctx context.Context) navCounts {
 	acks, _ := s.Store.Acks(ctx)
 	if ts, err := s.Store.Tenants(ctx); err == nil {
 		n.Tenants = len(ts)
+	}
+	if ss, err := s.Store.Sites(ctx, ""); err == nil {
+		n.Sites = len(ss)
 	}
 	if bs, err := s.Store.Boxes(ctx, ""); err == nil {
 		for _, b := range bs {

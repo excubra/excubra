@@ -71,7 +71,7 @@ export default function OverviewPage() {
             <TabsTrigger value="events">Ereignisse <Badge variant="secondary" className="ml-1">{d.Events24h}</Badge></TabsTrigger>
           </TabsList>
           <TabsContent value="sites" className="mt-3">
-            <DataTable columns={siteCols} data={d.Cards ?? []} search={(r) => `${r.Site.Name} ${r.Tenant.Name} ${r.Box?.Name ?? ""}`} searchPlaceholder="Standort oder Kunde" onRowClick={(r) => navigate(`/sites/${r.Site.ID}`)} rowClass={(r) => r.Down ? "border-l-2 border-l-destructive" : ""} initialSort={[{ id: "down", desc: true }]} emptyTitle="Noch kein Standort" emptyText={<span>Unter <Link className="underline" to="/tenants">Kunden</Link> den ersten anlegen.</span>} />
+            <DataTable columns={siteCols} data={d.Cards ?? []} search={(r) => `${r.Site.Name} ${r.Tenant.Name} ${r.Box?.Name ?? ""}`} searchPlaceholder="Standort oder Kunde" onRowClick={(r) => navigate(`/sites/${r.Site.ID}`)} rowClass={(r) => r.Down ? "border-l-2 border-l-destructive" : ""} initialSort={[{ id: "down", desc: true }]} emptyTitle="Noch kein Standort" emptyText={<span>Unter <Link className="underline" to="/tenants">Kunden</Link> den ersten anlegen.</span>} footer={<Link className="underline" to="/sites">Alle Standorte</Link>} />
           </TabsContent>
           <TabsContent value="events" className="mt-3">
             <DataTable columns={evCols} data={d.Recent ?? []} rowClass={(r) => r.Class === "down" ? "border-l-2 border-l-destructive" : ""} emptyTitle="Alles ruhig" emptyText="Keine Ereignisse in den letzten 24 Stunden." footer={<Link className="underline" to="/events">Alle Ereignisse</Link>} />

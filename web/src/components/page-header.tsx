@@ -25,7 +25,7 @@ export function PageHeader({ crumbs, title, sub, actions, children }: { crumbs: 
       )}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="flex flex-wrap items-center gap-3 text-2xl font-semibold tracking-tight">{title}</h1>
+          <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight sm:gap-3 sm:text-2xl">{title}</h1>
           {sub && <p className="mt-1 text-sm text-muted-foreground">{sub}</p>}
           {children}
         </div>

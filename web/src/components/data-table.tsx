@@ -11,6 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 
+// What a column may say about itself: alignment, and the classes that let it step
+// aside on a narrow screen (meta: { className: "hidden md:table-cell" }).
+type ColMeta = { align?: string; className?: string }
+const meta = (def: { meta?: unknown }): ColMeta | undefined => def.meta as ColMeta | undefined
+
 // The one table for the console: sortable, searchable, paginated, optional row selection.
 // Client-side on purpose — a customer's devices or a fleet of a thousand customers fit
 // in memory; the server keeps the queries, the browser keeps the interaction fast.
@@ -48,15 +53,15 @@ export function DataTable<T>({
       {(search || toolbar) && (
         <div className="flex flex-wrap items-center gap-2">
           {search && (
-            <div className="relative">
+            <div className="relative w-full sm:w-64">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} placeholder={searchPlaceholder} className="h-8 w-64 pl-8" />
+              <Input value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} placeholder={searchPlaceholder} className="h-8 w-full pl-8" />
             </div>
           )}
           {toolbar}
         </div>
       )}
-      <div className="overflow-hidden rounded-md border">
+      <div className="overflow-x-auto rounded-md border">
         <Table>
           <TableHeader className="bg-muted sticky top-0 z-10">
             {table.getHeaderGroups().map((hg) => (
@@ -64,7 +69,7 @@ export function DataTable<T>({
                 {hg.headers.map((h) => {
                   const sorted = h.column.getIsSorted()
                   return (
-                    <TableHead key={h.id} className={cn(h.column.getCanSort() && "cursor-pointer select-none", (h.column.columnDef.meta as { align?: string } | undefined)?.align === "right" && "text-right")} onClick={h.column.getCanSort() ? h.column.getToggleSortingHandler() : undefined}>
+                    <TableHead key={h.id} className={cn(h.column.getCanSort() && "cursor-pointer select-none", meta(h.column.columnDef)?.align === "right" && "text-right", meta(h.column.columnDef)?.className)} onClick={h.column.getCanSort() ? h.column.getToggleSortingHandler() : undefined}>
                       <span className="inline-flex items-center gap-1">
                         {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
                         {sorted === "asc" && <ArrowUp className="size-3" />}{sorted === "desc" && <ArrowDown className="size-3" />}
@@ -79,7 +84,7 @@ export function DataTable<T>({
             {rows.length ? rows.map((row) => (
               <TableRow key={row.id} data-state={row.getIsSelected() && "selected"} className={cn(onRowClick && "cursor-pointer", rowClass?.(row.original))} onClick={onRowClick ? (e) => { if ((e.target as HTMLElement).closest("button,a,input,[role=switch],[role=menuitem]")) return; onRowClick(row.original) } : undefined}>
                 {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id} className={cn((cell.column.columnDef.meta as { align?: string } | undefined)?.align === "right" && "text-right tabular-nums")}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                  <TableCell key={cell.id} className={cn(meta(cell.column.columnDef)?.align === "right" && "text-right tabular-nums", meta(cell.column.columnDef)?.className)}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                 ))}
               </TableRow>
             )) : (
@@ -96,16 +101,16 @@ export function DataTable<T>({
         <div className="ml-auto flex items-center gap-2">
           {total > pageSize && (
             <>
-              <span className="hidden sm:inline">Zeilen je Seite</span>
+              <span className="hidden lg:inline">Zeilen je Seite</span>
               <Select value={String(table.getState().pagination.pageSize)} onValueChange={(v) => table.setPageSize(Number(v))}>
                 <SelectTrigger size="sm" className="w-[70px]"><SelectValue /></SelectTrigger>
                 <SelectContent>{[10, 25, 50, 100, 250].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
               </Select>
-              <span className="tabular-nums">Seite {table.getState().pagination.pageIndex + 1} von {table.getPageCount()}</span>
-              <Button variant="outline" size="icon-sm" onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()}><ChevronsLeft /></Button>
+              <span className="tabular-nums">{table.getState().pagination.pageIndex + 1}/{table.getPageCount()}</span>
+              <Button variant="outline" size="icon-sm" className="hidden sm:inline-flex" onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()}><ChevronsLeft /></Button>
               <Button variant="outline" size="icon-sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}><ChevronLeft /></Button>
               <Button variant="outline" size="icon-sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}><ChevronRight /></Button>
-              <Button variant="outline" size="icon-sm" onClick={() => table.setPageIndex(table.getPageCount() - 1)} disabled={!table.getCanNextPage()}><ChevronsRight /></Button>
+              <Button variant="outline" size="icon-sm" className="hidden sm:inline-flex" onClick={() => table.setPageIndex(table.getPageCount() - 1)} disabled={!table.getCanNextPage()}><ChevronsRight /></Button>
             </>
           )}
         </div>
