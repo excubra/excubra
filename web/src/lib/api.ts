@@ -102,9 +102,13 @@ export interface DeviceCard {
   Kind: string; KindLabel: string; Name: string; Monitored: boolean; HostID: string; IsUplink: boolean; StateClass: string; StateLabel: string; IsBox: boolean; Text: string
   /** How to reach this device, worked out by the server from the scan and the connectors. */
   Ways?: WayIn[] | null
+  /** The last day of pings; absent when the device is not monitored. */
+  Ping?: Ping | null
 }
 /** One protocol the operator's own client can open. */
 export interface WayIn { kind: string; port: number; note: string }
+/** A device's last day of reachability. hours has 24 values, -1 = nobody looked. */
+export interface Ping { pct: number; rounds: number; failed: number; avgMs: number; lastMs: number; hours: number[] | null }
 /** What the "beobachten, was sich lohnt" rule would do at a site. */
 export interface WatchSuggestion { count: number; names: string[] | null; skipped: Record<string, number>; hasBox: boolean }
 export interface KindCount { Key: string; Label: string; N: number }

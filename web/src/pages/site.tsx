@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { SiteLocationCard } from "@/components/site-location-card"
 import { ConnectIP } from "@/components/connect"
+import { PingCell } from "@/components/ping-bar"
 import { SuggestWatchButton } from "@/components/suggest-watch"
 import { get, post, type DeviceCard, type HostCard, type Me, type SiteData } from "@/lib/api"
 import { fmtShort, fmtTime, pct } from "@/lib/format"
@@ -70,6 +71,7 @@ export default function SitePage() {
     { id: "name", header: "Gerät", accessorFn: (r) => r.Name, cell: ({ row }) => <div><Link to={`/devices/${row.original.ID}`} className="font-medium hover:underline">{row.original.Name}</Link>{row.original.Hostname && row.original.Hostname !== row.original.Name && <div className="text-xs text-muted-foreground">{row.original.Hostname}</div>}</div> },
     { id: "ip", header: "Adresse", accessorFn: (r) => r.IP, cell: ({ row }) => <ConnectIP ip={row.original.IP} ways={row.original.Ways} sub={row.original.MAC} className="text-sm" /> },
     { id: "vendor", header: "Hersteller", accessorFn: (r) => r.Vendor, cell: ({ getValue }) => <span className="text-muted-foreground">{String(getValue() || "unbekannt")}</span> },
+    { id: "ping", header: "Erreichbarkeit", enableSorting: true, accessorFn: (r) => (r.Ping ? r.Ping.pct : -1), meta: { className: "hidden @3xl/main:table-cell" }, cell: ({ row }) => <PingCell ping={row.original.Ping} /> },
     { id: "state", header: "Zustand", accessorFn: (r) => (r.Monitored ? r.StateClass : "zz"), cell: ({ row }) => { const r = row.original; if (r.IsBox) return <Badge variant="secondary">diese Box</Badge>; if (r.IsUplink) return <span className="flex gap-1"><StateBadge cls={r.StateClass} /><Badge variant="outline" className="border-primary/40 text-primary">Uplink</Badge></span>; return r.Monitored ? <StateBadge cls={r.StateClass} /> : <span className="text-muted-foreground">nicht beobachtet</span> } },
     { id: "seen", header: "Gesehen", accessorFn: (r) => r.LastSeen, cell: ({ row }) => <span className={"text-xs " + (row.original.GoneAt ? "text-destructive" : "text-muted-foreground")}>{row.original.GoneAt ? <>weg seit <Ago t={row.original.GoneAt} /></> : <>seit {fmtShort(row.original.FirstSeen)}</>}</span> },
     { id: "watch", header: "Beobachten", enableSorting: false, cell: ({ row }) => { const r = row.original; return r.IsBox ? null : <Switch checked={r.Monitored} disabled={!r.IP || act.isPending} aria-label={`${r.Name} beobachten`} onCheckedChange={(on) => act.mutate({ path: on ? `/api/devices/${r.ID}/watch` : `/api/hosts/${r.HostID}/unwatch` })} /> } },

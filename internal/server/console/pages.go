@@ -197,6 +197,9 @@ type deviceCard struct {
 	// from any connector an operator configured — so the console can offer the
 	// way in instead of making somebody copy an address (see connect.go).
 	Ways []wayIn
+	// The last day of pings, for the bar in the row and on the card. nil when the
+	// device is not monitored (see ping.go).
+	Ping *ping `json:"Ping,omitempty"`
 }
 
 type kindCount struct {
@@ -357,6 +360,14 @@ func (s *Server) buildSite(ctx context.Context, siteID, tab, rng string) (siteDa
 			}
 		}
 	}
+	// The last day of reachability for every monitored host of this site, from one
+	// pass over the rollups rather than one query per device.
+	watched := map[string]bool{}
+	for _, r := range byHostID {
+		watched[r.ID] = true
+	}
+	pings := s.pingsForSite(ctx, site.TenantID, watched, now)
+
 	counts := map[string]int{}
 	for _, dev := range devices {
 		c := deviceCard{Device: dev}
@@ -372,6 +383,8 @@ func (s *Server) buildSite(ctx context.Context, siteID, tab, rng string) (siteDa
 				c.Monitored, c.HostID, c.IsUplink = true, hid, row.IsUplink
 				c.StateClass, c.StateLabel = row.StateClass, row.StateLabel
 				c.Name = row.Name
+				p := withLastRound(pings[hid], row)
+				c.Ping = &p
 			}
 		}
 		if dev.Ignored {
