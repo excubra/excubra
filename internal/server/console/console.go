@@ -194,6 +194,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/me", s.auth(s.apiMe))
 	mux.Handle("GET /api/overview", s.auth(s.apiOverview))
 	mux.Handle("GET /api/search", s.auth(s.apiSearch))
+	mux.Handle("GET /api/sites", s.auth(s.apiSites))
 	mux.Handle("GET /api/tenants", s.auth(s.apiTenants))
 	mux.Handle("GET /api/tenants/{id}", s.auth(s.apiTenant))
 	mux.Handle("POST /api/tenants", s.auth(s.tenantCreate))

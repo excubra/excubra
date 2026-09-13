@@ -12,6 +12,7 @@ import { Clock } from "@/components/clock"
 import { get, setCSRF, type Me } from "@/lib/api"
 import OverviewPage from "@/pages/overview"
 import TenantsPage from "@/pages/tenants"
+import SitesPage from "@/pages/sites"
 import TenantPage from "@/pages/tenant"
 import SitePage from "@/pages/site"
 import DevicePage from "@/pages/device"
@@ -56,11 +57,11 @@ export default function App() {
     <SidebarProvider>
       <AppSidebar me={me.data} onSearch={() => setOpen(true)} />
       <SidebarInset className="@container/main h-svh overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
           <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
-          <div id="crumbs" className="min-w-0 flex-1" />
-          <Clock />
+          <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4 sm:mr-2" />
+          <div id="crumbs" className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" />
+          <div className="hidden sm:block"><Clock /></div>
         </header>
         <main id="main" className="flex-1 overflow-y-auto">
           <div className="flex flex-col gap-6 p-4 md:p-6">
@@ -68,6 +69,7 @@ export default function App() {
               <Route path="/" element={<OverviewPage />} />
               <Route path="/tenants" element={<TenantsPage />} />
               <Route path="/tenants/:id" element={<TenantPage />} />
+              <Route path="/sites" element={<SitesPage />} />
               <Route path="/sites/:id" element={<SitePage />} />
               <Route path="/devices/:id" element={<DevicePage />} />
               <Route path="/hosts/:id" element={<HostPage />} />
