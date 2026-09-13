@@ -29,7 +29,9 @@ func platformSelf() Self {
 // synFilter is a classic BPF program that keeps IPv4 TCP frames with SYN set and
 // ACK clear (no fragments) and drops everything else in the kernel, so the
 // watcher costs nothing on a busy LAN. Offsets are from the Ethernet header.
-var synFilter = []unix.SockFilter{
+// The array (not a slice) keeps len a compile-time constant, so the uint16 below
+// is a constant conversion and cannot overflow.
+var synFilter = [...]unix.SockFilter{
 	{Code: unix.BPF_LD | unix.BPF_H | unix.BPF_ABS, K: 12},              // ethertype
 	{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 9, K: 0x0800},  // not IPv4: drop
 	{Code: unix.BPF_LD | unix.BPF_B | unix.BPF_ABS, K: 23},              // ip protocol
