@@ -46,6 +46,13 @@ export async function post<T = { ok: boolean; message: string }>(path: string, f
 /** Whether a tile background is configured, and what the map must credit. Tiles
  *  are served by this server at /api/map/tiles, never fetched from a foreign host. */
 export interface MapConfig { tiles: boolean; attribution: string }
+/** One organization in the endpoint manager. */
+export interface PatchOrgOption { id: string; name: string }
+/** A customer linked to an organization there. */
+export interface PatchLink { tenantId: string; provider: string; orgId: string; orgName: string; linkedAt: string; linkedBy: string }
+export interface PatchStatus { at: string; tenants: number; machines: number; matched: number; unmatched: string[] | null; findings: number; error: string }
+export interface PatchesData { configured: boolean; baseUrl: string; hasSecret: boolean; status: PatchStatus; links: PatchLink[] | null; orgs: PatchOrgOption[] | null; orgErr: string }
+
 /** One thing an operator pinned to the top of the sidebar. */
 export interface Pin { kind: "tenant" | "site"; id: string; name: string; sub: string; pinnedAt: string }
 export interface Me { user: string; csrf: string; version: string; now: string; secure: boolean; map?: MapConfig; pins?: Pin[] | null; Nav: { Tenants: number; Sites: number; Boxes: number; Unassigned: number; Attention: number; Findings: number } }

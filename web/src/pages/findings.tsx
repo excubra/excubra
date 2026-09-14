@@ -58,7 +58,7 @@ export default function FindingsPage() {
       <PageHeader
         crumbs={[{ label: "Prävention" }]}
         title="Prävention"
-        sub="Was Scan, Live-Erkennung, CVE-Abgleich und Konnektoren gefunden haben: offene Türen von außen, Klartext-Dienste, alte Versionen, bekannte Schwachstellen. Ein Finding bleibt offen, bis die Ursache weg ist."
+        sub="Was Scan, Live-Erkennung, CVE-Abgleich, Patch-Stand und Konnektoren gefunden haben: offene Türen von außen, Klartext-Dienste, alte Versionen, bekannte Schwachstellen. Ein Finding bleibt offen, bis die Ursache weg ist."
         actions={ids.length > 1 ? <Button variant="outline" size="sm" onClick={() => setAll(!allOpen, ids)}>{allOpen ? <><ChevronsDownUp />Alle zuklappen</> : <><ChevronsUpDown />Alle aufklappen</>}</Button> : undefined}
       />
       {d ? (

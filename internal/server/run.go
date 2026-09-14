@@ -23,6 +23,7 @@ import (
 	"github.com/excubra/excubra/internal/agent/update"
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/server/action1"
 	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/api"
 	"github.com/excubra/excubra/internal/server/blocklist"
@@ -33,6 +34,7 @@ import (
 	"github.com/excubra/excubra/internal/server/feed"
 	"github.com/excubra/excubra/internal/server/ingest"
 	"github.com/excubra/excubra/internal/server/maptiles"
+	"github.com/excubra/excubra/internal/server/patches"
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
@@ -290,6 +292,12 @@ func run(envFile string) error {
 	// The map's optional street background. Nothing is fetched unless an operator
 	// set map.tiles; the browser only ever asks this server (internal/server/maptiles).
 	con.Tiles = maptiles.New(filepath.Join(cfg.DataDir, "tiles"))
+	// Windows patch state from the endpoint manager, hourly. It takes the
+	// credentials from the settings at every run, so entering them in the console
+	// is enough; without them every run is a no-op.
+	patchSvc := patches.New(st, action1.New("", "", ""), log)
+	con.Patches = patchSvc
+	go patchSvc.Run(ctx, time.Hour)
 	// a restarted server takes a first look at what it already knows, so the feeds
 	// learn what to fetch without waiting for the next scan round
 	go func() {

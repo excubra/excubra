@@ -22,6 +22,7 @@ import (
 	"github.com/excubra/excubra/internal/server/catalog"
 	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/maptiles"
+	"github.com/excubra/excubra/internal/server/patches"
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
 	"github.com/excubra/excubra/internal/server/store"
@@ -55,6 +56,7 @@ type Server struct {
 	SelfUpdate *selfupdate.Controller // this server's own updates, nil in tests
 	Remote     *remote.Service        // remote access through the box, nil in tests
 	Tiles      *maptiles.Service      // the map background, proxied and cached; nil when off
+	Patches    *patches.Service       // Windows patch state from the endpoint manager, nil when off
 	Vuln       *vuln.Service          // CVE matching, nil when off
 	Blocklist  *blocklist.Service     // the DNS sensors' list, nil when off
 	AI         *ai.Service            // assessments (ADR-0019), nil in tests
@@ -242,6 +244,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/sites/{id}/location", s.auth(s.siteLocationSet))
 	mux.Handle("GET /api/map/tiles/{z}/{x}/{y}", s.auth(s.mapTile))
 	mux.Handle("POST /api/pins", s.auth(s.pinToggle))
+	mux.Handle("GET /api/patches", s.auth(s.apiPatches))
+	mux.Handle("POST /api/patches/credentials", s.auth(s.patchesCredentials))
+	mux.Handle("POST /api/patches/link", s.auth(s.patchesLink))
 	mux.Handle("GET /api/sites/{id}/watch/suggestion", s.auth(s.apiSiteWatchSuggestion))
 	mux.Handle("POST /api/sites/{id}/watch/suggested", s.auth(s.siteWatchSuggested))
 	mux.Handle("GET /api/settings/dns", s.auth(s.apiDNSSettings))
