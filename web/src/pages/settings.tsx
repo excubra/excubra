@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import { get, post, type AISettings, type BlocklistStatus, type NetbirdSettings } from "@/lib/api"
+import { get, post, type AISettings, type BlocklistStatus, type NetbirdSettings, type PatchesData } from "@/lib/api"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
@@ -17,6 +17,7 @@ export default function SettingsPage() {
   const q = useQuery({ queryKey: ["settings-netbird"], queryFn: () => get<{ available: boolean; settings?: NetbirdSettings }>("/api/settings/netbird") })
   const qa = useQuery({ queryKey: ["settings-ai"], queryFn: () => get<{ available: boolean; settings?: AISettings }>("/api/settings/ai") })
   const qv = useQuery({ queryKey: ["settings-vuln"], queryFn: () => get<{ available: boolean; hasKey?: boolean }>("/api/settings/vuln") })
+  const qp = useQuery({ queryKey: ["patches"], queryFn: () => get<PatchesData>("/api/patches") })
   const qd = useQuery({ queryKey: ["settings-dns"], queryFn: () => get<{ available: boolean; status?: BlocklistStatus; extra?: string }>("/api/settings/dns") })
   const d = q.data
   const a = qa.data
@@ -29,6 +30,7 @@ export default function SettingsPage() {
       <div className="flex flex-col gap-4">
         {a.available && a.settings ? <AIForm s={a.settings} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-ai"] })} /> : null}
         {v.available ? <VulnForm hasKey={!!v.hasKey} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-vuln"] })} /> : null}
+        {qp.data ? <PatchesForm d={qp.data} onSaved={() => qc.invalidateQueries({ queryKey: ["patches"] })} /> : null}
         {dn.available && dn.status ? <DNSForm status={dn.status} extra={dn.extra ?? ""} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-dns"] })} /> : null}
         {d.available && d.settings ? <NetbirdForm s={d.settings} onSaved={() => qc.invalidateQueries({ queryKey: ["settings-netbird"] })} /> : <p className="text-sm text-muted-foreground">Fernzugriff ist auf diesem Server nicht aktiv.</p>}
       </div>
@@ -136,6 +138,47 @@ function NetbirdForm({ s, onSaved }: { s: NetbirdSettings; onSaved: () => void }
         <div className="flex items-end gap-2">
           <Button onClick={() => m.mutate({ path: "/api/settings/netbird", form: { url, token, tech_group: tech, lan_group: lan, box_group: box } })} disabled={m.isPending}>Speichern</Button>
           <Button variant="outline" onClick={() => m.mutate({ path: "/api/settings/netbird/test" })} disabled={m.isPending || !s.hasToken}>Verbindung prüfen</Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// Read-only credentials for the endpoint manager. It is the only source that sees
+// inside a Windows machine; a scan sees only what a service announces on the wire.
+function PatchesForm({ d, onSaved }: { d: PatchesData; onSaved: () => void }) {
+  const [url, setUrl] = useState(d.baseUrl)
+  const [cid, setCid] = useState("")
+  const [sec, setSec] = useState("")
+  const m = useMutation({
+    mutationFn: (form: Record<string, string>) => post("/api/patches/credentials", form),
+    onSuccess: (r) => { toast.success(r.message); setSec(""); onSaved() },
+    onError: (e) => toast.error(e.message),
+  })
+  const st = d.status
+  const ran = st?.at && !st.at.startsWith("0001")
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Patch-Stand der Windows-Maschinen (Action1)</CardTitle>
+        <CardDescription>
+          Der Endpunkt-Manager hat einen Agenten auf jeder Maschine und weiß, welche Anwendung in welcher Version läuft — das sieht ein Scan von außen nicht, weil eine Windows-Anwendung kein Banner ins Netz stellt. EX0 liest das stündlich und macht daraus Findings je Gerät.
+          Die Zugangsdaten gehören einem eigenen API-Benutzer nur mit Leserechten; verteilt wird nichts.{d.hasSecret ? " Ein Schlüssel ist hinterlegt." : " Noch kein Schlüssel hinterlegt."}
+          {" "}Welcher Kunde welche Organisation dort ist, wird auf der Kundenseite verknüpft — ohne Verknüpfung wird für einen Kunden nichts gelesen.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 @3xl/main:grid-cols-2">
+        <div className="grid gap-2"><Label htmlFor="a1-url">API-Basis-URL</Label><Input id="a1-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://app.eu.action1.com/api/3.0" className="font-mono" /></div>
+        <div className="grid gap-2"><Label htmlFor="a1-id">Client-ID{d.configured ? " (leer lassen = unverändert)" : ""}</Label><Input id="a1-id" value={cid} onChange={(e) => setCid(e.target.value)} autoComplete="off" className="font-mono" /></div>
+        <div className="grid gap-2"><Label htmlFor="a1-sec">Client-Secret{d.hasSecret ? " (leer lassen = unverändert)" : ""}</Label><Input id="a1-sec" type="password" autoComplete="off" value={sec} onChange={(e) => setSec(e.target.value)} className="font-mono" /></div>
+        <div className="flex items-end gap-2">
+          <Button onClick={() => m.mutate({ baseUrl: url, clientId: cid, clientSecret: sec })} disabled={m.isPending || (!cid && !d.configured)}>Speichern</Button>
+          {d.configured && <Button variant="outline" onClick={() => m.mutate({ baseUrl: url, clientId: "", clientSecret: "" })} disabled={m.isPending}>Zugang entfernen</Button>}
+        </div>
+        <div className="text-sm text-muted-foreground @3xl/main:col-span-2">
+          {d.orgErr ? <p className="text-destructive">Der Manager antwortet nicht: {d.orgErr}</p>
+            : !d.configured ? <p>Ohne Zugangsdaten wird nichts gelesen.</p>
+              : <p>{d.orgs?.length ?? 0} Organisation{(d.orgs?.length ?? 0) === 1 ? "" : "en"} sichtbar, {d.links?.length ?? 0} davon einem Kunden zugeordnet.{ran ? ` Letzter Abgleich: ${st.machines} Maschinen, ${st.matched} einem Gerät zugeordnet, ${st.findings} Finding${st.findings === 1 ? "" : "s"}.` : " Der erste Abgleich läuft kurz nach dem Start."}{st?.error ? ` Zuletzt mit Fehler: ${st.error}` : ""}</p>}
         </div>
       </CardContent>
     </Card>
