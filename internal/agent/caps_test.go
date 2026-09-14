@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseCaps(t *testing.T) {
-	if got := strings.Join(parseCaps("0000000000002000"), ","); got != "CAP_NET_RAW" { // the KfT box of 12.09.2026
+	if got := strings.Join(parseCaps("0000000000002000"), ","); got != "CAP_NET_RAW" { // a real box of 12.09.2026
 		t.Fatalf("raw only: %s", got)
 	}
 	if got := strings.Join(parseCaps("0000000000002400"), ","); got != "CAP_NET_BIND_SERVICE,CAP_NET_RAW" {

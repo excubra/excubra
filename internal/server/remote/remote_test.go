@@ -86,7 +86,7 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 	}
 
 	// a LAN somebody already routes by hand in our stack is refused
-	w.fake.Networks = append(w.fake.Networks, netbird.Network{ID: "net_bridge", Name: "KfT LAN (Bridge)"})
+	w.fake.Networks = append(w.fake.Networks, netbird.Network{ID: "net_bridge", Name: "Beispiel LAN (Bridge)"})
 	w.fake.Res["net_bridge"] = []netbird.Resource{{ID: "res_b", Name: "lan", Address: "192.168.10.0/24", Enabled: true}}
 	if _, err := w.svc.Enable(ctx, "site_a", "192.168.10.0/24", "jeremia"); !errors.Is(err, ErrOverlap) || !strings.Contains(err.Error(), "Bridge") {
 		t.Fatalf("hand-built bridge not refused: %v", err)
