@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
-import { FileText, Network, Plug, Radar, ScrollText, ShieldAlert } from "lucide-react"
+import { FileText, Network, Plug, Radar, ScrollText, ShieldAlert, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
 import { EventList } from "@/components/event-list"
@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { PatchPanel } from "@/components/patch-panel"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -80,6 +81,7 @@ export default function DevicePage() {
           <TabsTrigger value="dienste"><Network className="size-3.5" />Dienste <Badge variant="secondary" className="ml-1">{openServices}</Badge></TabsTrigger>
           <TabsTrigger value="logs"><ScrollText className="size-3.5" />Logs</TabsTrigger>
           <TabsTrigger value="konnektor"><Plug className="size-3.5" />Konnektor</TabsTrigger>
+          <TabsTrigger value="patch"><ShieldCheck className="size-3.5" />Patch-Stand</TabsTrigger>
           <TabsTrigger value="praevention"><ShieldAlert className="size-3.5" />Prävention</TabsTrigger>
         </TabsList>
 
@@ -144,6 +146,10 @@ export default function DevicePage() {
         <TabsContent value="konnektor" className="mt-4">
           <ConnectorPanel deviceId={id} />
         </TabsContent>
+        <TabsContent value="patch" className="mt-4">
+          <PatchPanel deviceId={d.device.ID} />
+        </TabsContent>
+
         <TabsContent value="praevention" className="mt-4">
           <DeviceFindings deviceId={id} />
         </TabsContent>

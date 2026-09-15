@@ -18,6 +18,7 @@ type fakeReader struct {
 	eps      []action1.Endpoint
 	vulns    []action1.Vulnerability
 	software map[string][]action1.Software
+	swFail   map[string]error
 	off      bool
 	fail     error
 }
@@ -31,6 +32,9 @@ func (f *fakeReader) Vulnerabilities(context.Context, string) ([]action1.Vulnera
 	return f.vulns, f.fail
 }
 func (f *fakeReader) EndpointSoftware(_ context.Context, _, epID string) ([]action1.Software, error) {
+	if err := f.swFail[epID]; err != nil {
+		return nil, err
+	}
 	return f.software[epID], nil
 }
 
@@ -228,5 +232,116 @@ func TestKickRunsOnceAndSoon(t *testing.T) {
 	}
 	if svc.Status().Tenants != 1 {
 		t.Fatal("a kick should have run the sync without waiting for the interval")
+	}
+}
+
+// The whole point of keeping unplaced machines: a person has to see them to
+// assign them, and a decision made by hand must survive every later sync.
+func TestAMachineAssignedByHandKeepsItsDevice(t *testing.T) {
+	st := openStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 15, 9, 0, 0, 0, time.UTC)
+	configure(t, st)
+
+	must(t, st.CreateTenant(ctx, store.Tenant{ID: "ten_a", Name: "Kunde A", CreatedAt: now}))
+	must(t, st.CreateSite(ctx, store.Site{ID: "site_a", TenantID: "ten_a", Name: "Haus", CreatedAt: now}))
+	// The box calls it NAS01; the manager calls it FILESERVER. No name match is
+	// ever going to bring these two together.
+	dev, _, _, err := st.UpsertSighting(ctx, "ten_a", "site_a",
+		wire.Sighting{MAC: "00:11:22:33:44:66", IP: "192.0.2.20", Hostname: "NAS01", LastSeen: now}, now)
+	must(t, err)
+
+	r := &fakeReader{
+		eps: []action1.Endpoint{{ID: "ep-fs", Name: "FILESERVER.beispiel.test", Status: "Connected", LastSeen: "2026-09-15_08-00-00"}},
+		vulns: []action1.Vulnerability{{
+			CVE: "CVE-2026-1", CVSS: 9.1, Status: "Overdue", Deadline: now.AddDate(0, 0, -3),
+			Affected: []action1.Affected{{Product: "Beispiel Backup", Versions: []string{"3.0"}}},
+		}},
+		software: map[string][]action1.Software{
+			"ep-fs": {{Name: "Beispiel Backup", Version: "3.0", Missing: []string{"3.1"}}},
+		},
+	}
+	svc := New(st, r, nil)
+	svc.Now = func() time.Time { return now }
+	must(t, st.SetPatchOrg(ctx, store.PatchOrg{TenantID: "ten_a", Provider: Provider, OrgID: "org-1"}, now))
+	must(t, svc.Sync(ctx))
+
+	// Nothing matched, but the machine is on the page with everything about it.
+	rows, err := st.PatchMachines(ctx, "ten_a")
+	must(t, err)
+	if len(rows) != 1 || rows[0].DeviceID != "" {
+		t.Fatalf("an unplaced machine must still be stored: %+v", rows)
+	}
+	if rows[0].CVECount != 1 || rows[0].WorstCVSS != 9.1 || rows[0].Pending != 1 {
+		t.Fatalf("the state should be there even without a device: %+v", rows[0])
+	}
+	if open, err := st.OpenFindings(ctx, ""); err != nil || len(open) != 0 {
+		t.Fatalf("no device, no finding: %+v %v", open, err)
+	}
+
+	// A person decides. From now on it is that device, and it stays.
+	must(t, st.PinPatchMachine(ctx, Provider, "ep-fs", dev.ID))
+	later := now.Add(time.Hour)
+	svc.Now = func() time.Time { return later }
+	must(t, svc.Sync(ctx))
+
+	rows, err = st.PatchMachines(ctx, "ten_a")
+	must(t, err)
+	if len(rows) != 1 || rows[0].DeviceID != dev.ID || !rows[0].Pinned {
+		t.Fatalf("the sync must not take a decision back: %+v", rows)
+	}
+	open, err := st.OpenFindings(ctx, "")
+	must(t, err)
+	if len(open) != 1 || open[0].DeviceID != dev.ID {
+		t.Fatalf("the finding belongs on the assigned device: %+v", open)
+	}
+	m, ok, err := st.PatchMachineForDevice(ctx, dev.ID)
+	must(t, err)
+	if !ok || len(m.Software) == 0 {
+		t.Fatalf("the device page needs the inventory: %+v", m)
+	}
+}
+
+// A machine that is gone at the customer stops being a row here — but a run
+// that could not read everything must not mistake its own gap for a removal.
+func TestCleanupOnlyAfterAWholeRun(t *testing.T) {
+	st := openStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	configure(t, st)
+	must(t, st.CreateTenant(ctx, store.Tenant{ID: "ten_a", Name: "Kunde A", CreatedAt: now}))
+	must(t, st.SetPatchOrg(ctx, store.PatchOrg{TenantID: "ten_a", Provider: Provider, OrgID: "org-1"}, now))
+
+	r := &fakeReader{
+		eps: []action1.Endpoint{
+			{ID: "ep-1", Name: "EINS.beispiel.test", Status: "Connected"},
+			{ID: "ep-2", Name: "ZWEI.beispiel.test", Status: "Connected"},
+		},
+		software: map[string][]action1.Software{"ep-1": {{Name: "A", Version: "1"}}, "ep-2": {{Name: "B", Version: "1"}}},
+	}
+	svc := New(st, r, nil)
+	svc.Now = func() time.Time { return now }
+	must(t, svc.Sync(ctx))
+	if rows, _ := st.PatchMachines(ctx, "ten_a"); len(rows) != 2 {
+		t.Fatalf("both machines should be stored: %+v", rows)
+	}
+
+	// The provider fails for one of them. Nothing may be deleted.
+	r.swFail = map[string]error{"ep-2": errors.New("timeout")}
+	svc.Now = func() time.Time { return now.Add(time.Hour) }
+	must(t, svc.Sync(ctx))
+	if rows, _ := st.PatchMachines(ctx, "ten_a"); len(rows) != 2 {
+		t.Fatalf("a partial run must not delete a machine it could not read: %+v", rows)
+	}
+
+	// It really is gone: a whole run without it removes it.
+	r.swFail = nil
+	r.eps = r.eps[:1]
+	svc.Now = func() time.Time { return now.Add(2 * time.Hour) }
+	must(t, svc.Sync(ctx))
+	rows, err := st.PatchMachines(ctx, "ten_a")
+	must(t, err)
+	if len(rows) != 1 || rows[0].EndpointID != "ep-1" {
+		t.Fatalf("a retired machine should be gone: %+v", rows)
 	}
 }

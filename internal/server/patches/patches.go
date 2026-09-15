@@ -176,49 +176,156 @@ func (s *Service) syncTenant(ctx context.Context, link store.PatchOrg, now time.
 		return 0, 0, nil, err
 	}
 	byName := devicesByName(devices)
+	byID := make(map[string]store.Device, len(devices))
+	for _, d := range devices {
+		byID[d.ID] = d
+	}
+	// What a person already decided by hand. It beats the name match, because
+	// the reason somebody decides by hand is that the names do not agree.
+	pinned := map[string]string{}
+	if rows, err := s.Store.PatchMachines(ctx, link.TenantID); err == nil {
+		for _, r := range rows {
+			if r.Pinned && r.DeviceID != "" {
+				pinned[r.EndpointID] = r.DeviceID
+			}
+		}
+	}
 
+	whole := true // a partial run must not delete what it did not get to see
 	for _, ep := range eps {
 		machines++
-		dev, ok := byName[hostKey(ep.Name)]
+		// Every machine is read, placed or not. The software inventory is what
+		// makes a hole attributable, and it is also what a person needs in front
+		// of them when they decide by hand which device this is.
+		software, serr := s.Reader.EndpointSoftware(ctx, link.OrgID, ep.ID)
+		if serr != nil {
+			s.Log.Warn("patch state: software", "endpoint", ep.Name, "err", serr)
+			whole = false
+			continue
+		}
+		m := action1.Join(ep, software, vulns)
+
+		dev, ok := byID[pinned[ep.ID]]
+		if !ok {
+			dev, ok = byName[hostKey(ep.Name)]
+		}
 		if !ok {
 			// The manager knows this machine and EX0 does not. Say so; do not
 			// invent a device, because a device is what the box saw.
 			unmatched = append(unmatched, ep.Name)
-			continue
 		}
-		software, serr := s.Reader.EndpointSoftware(ctx, link.OrgID, ep.ID)
-		if serr != nil {
-			s.Log.Warn("patch state: software", "endpoint", ep.Name, "err", serr)
-			continue
+		if err := s.save(ctx, link, m, dev.ID, now); err != nil {
+			s.Log.Error("patch machine", "endpoint", ep.Name, "err", err)
 		}
-		m := action1.Join(ep, software, vulns)
-		in := rules.PatchInput{Endpoint: ep.Name, Online: m.Online, LastSeen: m.LastSeen, Missing: m.Pending, Now: now}
-		for _, c := range m.CVEs {
-			in.CVEs = append(in.CVEs, rules.PatchCVE{
-				CVE: c.CVE, CVSS: c.CVSS, KEV: c.KEV, Overdue: c.Overdue(), Deadline: c.Deadline, Product: c.Product,
-			})
-		}
-		var current []store.Finding
-		if f, has := rules.EvaluatePatch(in); has {
-			f.Evidence["source"] = Provider
-			f.Evidence["inventoried"] = m.Inventoried.UTC().Format(time.RFC3339)
-			ev, _ := json.Marshal(f.Evidence)
-			current = append(current, store.Finding{
-				ID: id.New("fnd"), TenantID: dev.TenantID, SiteID: dev.SiteID, DeviceID: dev.ID, ConnectorID: Source,
-				Rule: f.Rule, Key: f.Key, Severity: f.Severity, Title: f.Title, Detail: f.Detail, Evidence: ev,
-			})
+		if ok && s.writeFinding(ctx, m, dev, now) {
 			matched++
 		}
-		resolved, serr := s.Store.SyncDeviceFindings(ctx, dev.ID, Source, current, now)
-		if serr != nil {
-			s.Log.Error("patch findings", "device", dev.ID, "err", serr)
-			continue
-		}
-		for _, fid := range resolved {
-			_ = s.Store.DeleteAck(ctx, "finding", fid)
+	}
+	if whole {
+		if err := s.Store.DropPatchMachines(ctx, Provider, link.OrgID, now); err != nil {
+			s.Log.Warn("patch state: cleanup", "err", err)
 		}
 	}
 	return machines, matched, unmatched, nil
+}
+
+// save stores what the manager knows about one machine, so the console can show
+// it without asking the provider again — and so a machine EX0 cannot place is
+// still on the page instead of only in a log line.
+func (s *Service) save(ctx context.Context, link store.PatchOrg, m action1.Machine, deviceID string, now time.Time) error {
+	row := store.PatchMachine{
+		Provider: Provider, EndpointID: m.Endpoint.ID, TenantID: link.TenantID, OrgID: link.OrgID,
+		Name: m.Endpoint.Name, DeviceID: deviceID, Online: m.Online, LastSeen: m.LastSeen,
+		Inventoried: m.Inventoried, Pending: len(m.Pending), CVECount: len(m.CVEs), SyncedAt: now,
+	}
+	for _, c := range m.CVEs {
+		if c.CVSS > row.WorstCVSS {
+			row.WorstCVSS = c.CVSS
+		}
+		if c.KEV {
+			row.KEV = true
+		}
+	}
+	cves, _ := json.Marshal(machineCVEs(m))
+	updates, _ := json.Marshal(m.Pending)
+	sw, _ := json.Marshal(inventory(m))
+	return s.Store.SavePatchMachine(ctx, row, cves, updates, sw)
+}
+
+// machineCVE is one hole as the console shows it: the CVE, where it sits, and
+// whether the manager has a package ready for it.
+type machineCVE struct {
+	CVE       string    `json:"cve"`
+	CVSS      float64   `json:"cvss"`
+	KEV       bool      `json:"kev"`
+	Status    string    `json:"status"`
+	Deadline  time.Time `json:"deadline"`
+	Product   string    `json:"product"`
+	Version   string    `json:"version"`
+	Patchable bool      `json:"patchable"`
+}
+
+func machineCVEs(m action1.Machine) []machineCVE {
+	out := make([]machineCVE, 0, len(m.CVEs))
+	for _, c := range m.CVEs {
+		out = append(out, machineCVE{
+			CVE: c.CVE, CVSS: c.CVSS, KEV: c.KEV, Status: c.Status, Deadline: c.Deadline,
+			Product: c.Product, Version: c.Version, Patchable: c.Patchable,
+		})
+	}
+	return out
+}
+
+// app is one installed application, the answer to "what actually runs there".
+type app struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Vendor  string `json:"vendor,omitempty"`
+	Update  string `json:"update,omitempty"` // the version the manager has ready
+}
+
+func inventory(m action1.Machine) []app {
+	out := make([]app, 0, len(m.Software))
+	for _, s := range m.Software {
+		a := app{Name: s.Name, Version: s.Version, Vendor: s.Vendor}
+		if len(s.Missing) > 0 {
+			a.Update = s.Missing[0]
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// writeFinding turns a machine into at most one finding on its device, and
+// resolves what is no longer true. It reports whether a finding is open.
+func (s *Service) writeFinding(ctx context.Context, m action1.Machine, dev store.Device, now time.Time) bool {
+	in := rules.PatchInput{Endpoint: m.Endpoint.Name, Online: m.Online, LastSeen: m.LastSeen, Missing: m.Pending, Now: now}
+	for _, c := range m.CVEs {
+		in.CVEs = append(in.CVEs, rules.PatchCVE{
+			CVE: c.CVE, CVSS: c.CVSS, KEV: c.KEV, Overdue: c.Overdue(), Deadline: c.Deadline, Product: c.Product,
+		})
+	}
+	var current []store.Finding
+	open := false
+	if f, has := rules.EvaluatePatch(in); has {
+		f.Evidence["source"] = Provider
+		f.Evidence["inventoried"] = m.Inventoried.UTC().Format(time.RFC3339)
+		ev, _ := json.Marshal(f.Evidence)
+		current = append(current, store.Finding{
+			ID: id.New("fnd"), TenantID: dev.TenantID, SiteID: dev.SiteID, DeviceID: dev.ID, ConnectorID: Source,
+			Rule: f.Rule, Key: f.Key, Severity: f.Severity, Title: f.Title, Detail: f.Detail, Evidence: ev,
+		})
+		open = true
+	}
+	resolved, err := s.Store.SyncDeviceFindings(ctx, dev.ID, Source, current, now)
+	if err != nil {
+		s.Log.Error("patch findings", "device", dev.ID, "err", err)
+		return open
+	}
+	for _, fid := range resolved {
+		_ = s.Store.DeleteAck(ctx, "finding", fid)
+	}
+	return open
 }
 
 // devicesByName indexes a customer's devices by the name the box learned, so a

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/excubra/excubra/internal/server/action1"
 	"github.com/excubra/excubra/internal/server/patches"
@@ -107,6 +109,130 @@ func (s *Server) patchesCredentials(w http.ResponseWriter, r *http.Request) {
 	s.flash(w, r, "Zugangsdaten gespeichert. Die Prüfung läuft stündlich und liest nur.", "/settings")
 }
 
+// apiPatchMachines lists a customer's machines: what the manager knows, and
+// which device each one is here. Machines without a device come first — they
+// are the ones waiting for somebody to decide.
+func (s *Server) apiPatchMachines(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rows, err := s.Store.PatchMachines(ctx, r.URL.Query().Get("tenant"))
+	if err != nil {
+		s.fail(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	names := map[string]string{}
+	for i, m := range rows {
+		if m.DeviceID == "" {
+			continue
+		}
+		if n, ok := names[m.DeviceID]; ok {
+			rows[i].DeviceName = n
+			continue
+		}
+		if d, err := s.Store.Device(ctx, m.DeviceID); err == nil {
+			names[m.DeviceID] = deviceName(d)
+			rows[i].DeviceName = names[m.DeviceID]
+		}
+	}
+	out := map[string]any{"machines": rows}
+	// The devices to choose from, so the assignment happens here and not in a
+	// text field somebody types an id into.
+	if tenant := r.URL.Query().Get("tenant"); tenant != "" {
+		devs, err := s.Store.Devices(ctx, tenant, "", time.Time{})
+		if err != nil {
+			s.fail(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		type option struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			IP   string `json:"ip"`
+		}
+		opts := make([]option, 0, len(devs))
+		for _, d := range devs {
+			if d.Ignored {
+				continue
+			}
+			opts = append(opts, option{ID: d.ID, Name: deviceName(d), IP: d.IP})
+		}
+		sort.Slice(opts, func(i, j int) bool { return strings.ToLower(opts[i].Name) < strings.ToLower(opts[j].Name) })
+		out["devices"] = opts
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// apiDevicePatch is one device's patch state, inventory included. This is the
+// answer to "do I have to open the other portal": no.
+func (s *Server) apiDevicePatch(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	dev, err := s.Store.Device(ctx, r.PathValue("id"))
+	if err != nil {
+		s.fail(w, r, err, http.StatusNotFound)
+		return
+	}
+	out := map[string]any{"linked": false}
+	if m, ok, err := s.Store.PatchMachineForDevice(ctx, dev.ID); err != nil {
+		s.fail(w, r, err, http.StatusInternalServerError)
+		return
+	} else if ok {
+		m.DeviceName = deviceName(dev)
+		out = map[string]any{"linked": true, "machine": m}
+	} else {
+		// Nothing tied to this device yet. Offer what this customer has that is
+		// still free, so the choice is made here instead of in the other portal.
+		rows, _ := s.Store.PatchMachines(ctx, dev.TenantID)
+		free := []store.PatchMachine{}
+		for _, m := range rows {
+			if m.DeviceID == "" {
+				m.CVEs, m.Updates = nil, nil
+				free = append(free, m)
+			}
+		}
+		out["free"] = free
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// patchesAssign ties one machine to one device by hand, or lets go again.
+func (s *Server) patchesAssign(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	endpoint := strings.TrimSpace(r.PostForm.Get("endpoint"))
+	deviceID := strings.TrimSpace(r.PostForm.Get("device"))
+	m, err := s.Store.PatchMachine(ctx, patches.Provider, endpoint)
+	if err != nil {
+		s.fail(w, r, err, statusFor(err))
+		return
+	}
+	back := "/tenants/" + m.TenantID
+	if deviceID == "" {
+		if err := s.Store.PinPatchMachine(ctx, patches.Provider, endpoint, ""); err != nil {
+			s.fail(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		_ = s.Store.Audit(ctx, s.Now(), actor(r), "patches.unassign", endpoint, m.Name)
+		s.kickPatches()
+		s.flash(w, r, "Zuweisung gelöst. „"+m.Name+"“ sucht sich beim nächsten Abgleich wieder selbst ein Gerät über den Namen.", back)
+		return
+	}
+	// Only a device of the same customer: a machine on another customer's device
+	// would put one customer's patch state on another customer's page.
+	dev, err := s.Store.Device(ctx, deviceID)
+	if err != nil {
+		s.fail(w, r, err, statusFor(err))
+		return
+	}
+	if dev.TenantID != m.TenantID {
+		s.fail(w, r, errors.New("dieses Gerät gehört einem anderen Kunden"), http.StatusBadRequest)
+		return
+	}
+	if err := s.Store.PinPatchMachine(ctx, patches.Provider, endpoint, dev.ID); err != nil {
+		s.fail(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	_ = s.Store.Audit(ctx, s.Now(), actor(r), "patches.assign", endpoint, dev.ID)
+	s.kickPatches()
+	s.flash(w, r, "„"+m.Name+"“ gehört jetzt zu "+deviceName(dev)+". Die Zuweisung bleibt, auch wenn die Namen nie zusammenpassen.", "/devices/"+dev.ID+"?tab=patch")
+}
+
 // patchesLink ties one customer to one organization, or unties them.
 func (s *Server) patchesLink(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -122,6 +248,12 @@ func (s *Server) patchesLink(w http.ResponseWriter, r *http.Request) {
 	back := "/tenants/" + t.ID
 	if orgID == "" {
 		if err := s.Store.ClearPatchOrg(ctx, tenantID); err != nil {
+			s.fail(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		// Nothing of this customer is read any more, so nothing of it stays on
+		// the page either.
+		if err := s.Store.DropPatchMachinesOfTenant(ctx, tenantID); err != nil {
 			s.fail(w, r, err, http.StatusInternalServerError)
 			return
 		}

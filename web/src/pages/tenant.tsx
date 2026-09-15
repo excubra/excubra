@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
 import { PinButton } from "@/components/pin-button"
 import { PatchOrgCard } from "@/components/patch-org-card"
+import { PatchMachines } from "@/components/patch-machines"
 import { EventList } from "@/components/event-list"
 import { DataTable } from "@/components/data-table"
 import { StateBadge } from "@/components/status"
@@ -76,6 +77,7 @@ export default function TenantPage() {
         </div>
       </section>
       <PatchOrgCard tenantId={d.tenant.ID} tenantName={d.tenant.Name} />
+      <PatchMachines tenantId={d.tenant.ID} />
       <section className="flex flex-col gap-3">
         <h2 className="text-base font-semibold">Standorte</h2>
         <DataTable columns={cols} data={d.sites ?? []} onRowClick={(r) => navigate(`/sites/${r.Site.ID}`)} rowClass={(r) => r.Down ? "border-l-2 border-l-destructive" : ""} emptyTitle="Noch kein Standort" emptyText="Oben rechts anlegen." />

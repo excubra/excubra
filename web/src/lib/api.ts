@@ -53,6 +53,23 @@ export interface PatchLink { tenantId: string; provider: string; orgId: string; 
 export interface PatchStatus { at: string; tenants: number; machines: number; matched: number; unmatched: string[] | null; findings: number; error: string }
 export interface PatchesData { configured: boolean; baseUrl: string; hasSecret: boolean; status: PatchStatus; links: PatchLink[] | null; orgs: PatchOrgOption[] | null; orgErr: string }
 
+/** One hole on one machine, as the endpoint manager sees it. */
+export interface MachineCVE { cve: string; cvss: number; kev: boolean; status: string; deadline: string; product: string; version: string; patchable: boolean }
+/** One installed application. */
+export interface MachineApp { name: string; version: string; vendor?: string; update?: string }
+/** One machine of the endpoint manager, and the device it is here. */
+export interface PatchMachine {
+  provider: string; endpointId: string; tenantId: string; orgId: string; name: string
+  deviceId: string; deviceName?: string; pinned: boolean; online: boolean
+  lastSeen: string; inventoried: string; syncedAt: string
+  pending: number; cveCount: number; worstCvss: number; kev: boolean
+  cves?: MachineCVE[] | null; updates?: string[] | null; software?: MachineApp[] | null
+}
+export interface DeviceOption { id: string; name: string; ip: string }
+export interface PatchMachinesData { machines: PatchMachine[] | null; devices?: DeviceOption[] | null }
+/** A device's patch state: either a machine, or the machines still free to pick. */
+export interface DevicePatch { linked: boolean; machine?: PatchMachine; free?: PatchMachine[] | null }
+
 /** One thing an operator pinned to the top of the sidebar. */
 export interface Pin { kind: "tenant" | "site"; id: string; name: string; sub: string; pinnedAt: string }
 export interface Me { user: string; csrf: string; version: string; now: string; secure: boolean; map?: MapConfig; pins?: Pin[] | null; Nav: { Tenants: number; Sites: number; Boxes: number; Unassigned: number; Attention: number; Findings: number } }
