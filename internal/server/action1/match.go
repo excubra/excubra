@@ -25,8 +25,9 @@ type Machine struct {
 	Online      bool
 	LastSeen    time.Time
 	CVEs        []MachineCVE
-	Pending     []string  // applications with an update waiting, by name
-	Inventoried time.Time // the newest inventory row; older than the endpoint's last contact means stale data
+	Software    []Software // the whole inventory, for the device page
+	Pending     []string   // applications with an update waiting, by name
+	Inventoried time.Time  // the newest inventory row; older than the endpoint's last contact means stale data
 }
 
 // MachineCVE is one hole on one machine, with the software it sits in.
@@ -51,7 +52,7 @@ func key(product, version string) string {
 
 // Join attributes an organization's vulnerabilities to one machine's software.
 func Join(ep Endpoint, software []Software, vulns []Vulnerability) Machine {
-	m := Machine{Endpoint: ep, Online: strings.EqualFold(ep.Status, "Connected"), LastSeen: parseTime(ep.LastSeen)}
+	m := Machine{Endpoint: ep, Online: strings.EqualFold(ep.Status, "Connected"), LastSeen: parseTime(ep.LastSeen), Software: software}
 
 	installed := map[string]Software{}
 	for _, s := range software {

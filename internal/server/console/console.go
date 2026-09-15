@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -247,6 +248,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/patches", s.auth(s.apiPatches))
 	mux.Handle("POST /api/patches/credentials", s.auth(s.patchesCredentials))
 	mux.Handle("POST /api/patches/link", s.auth(s.patchesLink))
+	mux.Handle("GET /api/patches/machines", s.auth(s.apiPatchMachines))
+	mux.Handle("POST /api/patches/assign", s.auth(s.patchesAssign))
+	mux.Handle("GET /api/devices/{id}/patch", s.auth(s.apiDevicePatch))
 	mux.Handle("GET /api/sites/{id}/watch/suggestion", s.auth(s.apiSiteWatchSuggestion))
 	mux.Handle("POST /api/sites/{id}/watch/suggested", s.auth(s.siteWatchSuggested))
 	mux.Handle("GET /api/settings/dns", s.auth(s.apiDNSSettings))
@@ -393,7 +397,22 @@ func (s *Server) flash(w http.ResponseWriter, r *http.Request, msg, to string) {
 		s.flashes[sess.TokenHash] = msg
 		s.flashMu.Unlock()
 	}
-	http.Redirect(w, r, to, http.StatusSeeOther)
+	http.Redirect(w, r, ownPath(to), http.StatusSeeOther) //nolint:gosec // G710: ownPath is the sanitizer; the analyzer follows the taint, not the check
+}
+
+// ownPath keeps a redirect inside this console. Every target here is built in
+// code, but they are built out of ids that arrive in a form, and a redirect is
+// the one place where a value from a request must never be taken at its word:
+// "//example.test" is a path to a reader and a different site to a browser.
+// Anything that is not a plain absolute path of our own becomes the start page.
+func ownPath(to string) string {
+	if !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") || strings.Contains(to, "\\") {
+		return "/"
+	}
+	if u, err := url.Parse(to); err != nil || u.Scheme != "" || u.Host != "" {
+		return "/"
+	}
+	return to
 }
 
 // flashErr is flash for a request that failed validation: the templates get the same

@@ -63,6 +63,29 @@ information EX0 lacks is sitting there, per machine, already collected.
    and the sync runs hourly. Being throttled out of our own patch data because
    we polled too eagerly would be a self-inflicted outage.
 
+## Amendment, 15.09.2026: the state belongs on the device
+
+Reading the manager and writing a finding is not the same as not needing the
+manager's own portal, which was the point. Three additions, same rules:
+
+8. **Every machine is stored, placed or not** (`patch_machines`), with its
+   pending updates, its matched holes and its whole software inventory. A
+   machine EX0 cannot place is the one a person has to act on, and a machine
+   that exists only in a status line is a machine nobody acts on.
+9. **A person can assign a machine to a device by hand**, from the customer page
+   or from the device's own page, choosing from that customer's devices. The
+   choice is pinned: it survives every later sync and beats the hostname match,
+   because the reason somebody assigns by hand is that the names do not agree
+   and an automatic match would undo them every hour. Only a device of the same
+   customer is accepted.
+10. **The device page carries the patch state** — agent status, last contact,
+    inventory age, the holes with CVSS, KEV flag, deadline and whether a package
+    exists, and the installed software. That is the part no scan from outside
+    can answer, and having it here is the whole reason for the integration.
+
+A sync that could not read every machine of an organization does not delete
+anything: a gap in our own run must not look like a machine that was retired.
+
 ## Consequences
 
 - A Windows machine's patch state appears in Prävention as source „Patch-Stand",

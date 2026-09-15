@@ -67,8 +67,7 @@ export function PatchOrgCard({ tenantId, tenantName }: { tenantId: string; tenan
         )}
         {d.status?.unmatched?.length ? (
           <p className="text-sm text-muted-foreground">
-            {d.status.unmatched.length} Maschine{d.status.unmatched.length === 1 ? "" : "n"} kennt der Manager, EX0 aber nicht: {d.status.unmatched.slice(0, 3).join(", ")}
-            {d.status.unmatched.length > 3 ? " …" : ""}. Ohne Gerät im Inventar gibt es nichts, woran ein Finding hängen könnte.
+            {d.status.unmatched.length} Maschine{d.status.unmatched.length === 1 ? "" : "n"} ohne Gerät — unten in der Liste, dort lässt sich das Gerät auswählen.
           </p>
         ) : null}
       </CardContent>

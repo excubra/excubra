@@ -34,4 +34,4 @@ Rules:
 | [0018](0018-service-scan.md) | The continuous service scan: inside from the box, outside from an outpost (replaces the no-port-scan rule); §7 the live detection on the box: decoy ports, SYN watcher, ARP signals; §8 CVE matching against NVD, OSV and KEV |
 | [0019](0019-ai-assessment.md) | The AI reads and proposes, a person decides: exchangeable provider, per-tenant scope, audited |
 | [0020](0020-dns-sensor.md) | The DNS sensor: the box as the LAN's forwarding resolver, watching for blocklisted domains, random-name storms and tunnels |
-| [0021](0021-patch-state-from-an-endpoint-manager.md) | Patch state from an endpoint manager: read-only, server-side, one finding per machine, mapping by hand |
+| [0021](0021-patch-state-from-an-endpoint-manager.md) | Patch state from an endpoint manager: read-only, server-side, one finding per machine, mapping by hand; §8–10 every machine stored, assigned by hand, shown on the device |
