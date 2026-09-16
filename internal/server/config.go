@@ -17,22 +17,32 @@ type Config struct {
 	DataDir          string
 	IngestListen     string
 	IngestPublicHost string // host[:port] boxes connect to; goes into enrollment keys and the ingest certificate
-	OverlayListen    string // ip:port, never a wildcard
-	OverlayAllowAny  bool   // development only
-	OverlayTLS       string // off | internal | files
-	OverlayCert      string // certificate path when OverlayTLS is files
-	OverlayKey       string // key path when OverlayTLS is files
-	ConsoleURL       string // base URL for webhook links; derived from OverlayListen when empty
-	UpdateBaseURL    string
-	ReleaseCatalog   string // GitHub-style releases URL the server imports release metadata from; "off" disables
-	Feeds            string // end-of-life feed base URL for the version rules (ADR-0018); "" = endoflife.date, "off" disables
-	Vulns            string // "off" disables the CVE matching against NVD, OSV and KEV (ADR-0018 §8)
-	Blocklist        string // "off" disables the DNS blocklist feeds (ADR-0020)
-	SecretKeyFile    string // key that seals secrets at rest: settings and private keys (ADR-0009 amendment); "" = plain
-	SelfUpdate       string // "on": the server installs signed releases of its channel itself (ADR-0006); "off" in containers
-	LogLevel         string
-	LogFormat        string
-	Timezone         string // IANA name used by the console for display; storage stays UTC
+	// LANListen is an extra listener for the machine-readable API alone, on a
+	// network of our own — the private network between our servers at the
+	// hoster, say. Empty means there is none.
+	//
+	// It carries /v1/ and nothing else: no console, no sign-in form, no
+	// session. The rule that the console lives on the overlay stays exactly as
+	// it was; what becomes reachable here is what a program asks for with a
+	// token that is scoped to its tenants.
+	LANListen string // ip:port, never a wildcard; empty = off
+
+	OverlayListen   string // ip:port, never a wildcard
+	OverlayAllowAny bool   // development only
+	OverlayTLS      string // off | internal | files
+	OverlayCert     string // certificate path when OverlayTLS is files
+	OverlayKey      string // key path when OverlayTLS is files
+	ConsoleURL      string // base URL for webhook links; derived from OverlayListen when empty
+	UpdateBaseURL   string
+	ReleaseCatalog  string // GitHub-style releases URL the server imports release metadata from; "off" disables
+	Feeds           string // end-of-life feed base URL for the version rules (ADR-0018); "" = endoflife.date, "off" disables
+	Vulns           string // "off" disables the CVE matching against NVD, OSV and KEV (ADR-0018 §8)
+	Blocklist       string // "off" disables the DNS blocklist feeds (ADR-0020)
+	SecretKeyFile   string // key that seals secrets at rest: settings and private keys (ADR-0009 amendment); "" = plain
+	SelfUpdate      string // "on": the server installs signed releases of its channel itself (ADR-0006); "off" in containers
+	LogLevel        string
+	LogFormat       string
+	Timezone        string // IANA name used by the console for display; storage stays UTC
 }
 
 // DefaultEnvFile is read when it exists and no --env-file was given.
@@ -72,6 +82,7 @@ func LoadConfig(envFile string, getenv func(string) string) (Config, error) {
 		DataDir:          get("EXCUBRA_DATA_DIR", "/var/lib/excubra"),
 		IngestListen:     get("EXCUBRA_INGEST_LISTEN", ":443"),
 		IngestPublicHost: get("EXCUBRA_INGEST_PUBLIC_HOST", ""),
+		LANListen:        get("EXCUBRA_LAN_LISTEN", ""),
 		OverlayListen:    get("EXCUBRA_OVERLAY_LISTEN", ""),
 		OverlayAllowAny:  get("EXCUBRA_OVERLAY_ALLOW_ANY", "") == "1",
 		OverlayTLS:       get("EXCUBRA_OVERLAY_TLS", "off"),
@@ -127,6 +138,20 @@ func ParseEnvFile(r io.Reader) (map[string]string, error) {
 }
 
 // Validate refuses configurations that would expose the console or cannot work.
+// isPrivateIP reports whether an address belongs to a network that carries no
+// traffic from the internet: RFC 1918, loopback, link-local, and the range
+// NetBird hands out (100.64.0.0/10).
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return true
+	}
+	_, cgnat, err := net.ParseCIDR("100.64.0.0/10")
+	return err == nil && cgnat.Contains(ip)
+}
+
 func (c Config) Validate() error {
 	var errs []error
 	if c.IngestPublicHost == "" {
@@ -146,6 +171,22 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("EXCUBRA_OVERLAY_LISTEN %q is not ip:port", c.OverlayListen))
 		case !c.OverlayAllowAny && (host == "" || host == "0.0.0.0" || host == "::" || net.ParseIP(host) == nil):
 			errs = append(errs, fmt.Errorf("EXCUBRA_OVERLAY_LISTEN %q must be a specific IP address, never a wildcard or a name (set EXCUBRA_OVERLAY_ALLOW_ANY=1 for development only)", c.OverlayListen))
+		}
+	}
+	if c.LANListen != "" {
+		host, _, err := net.SplitHostPort(c.LANListen)
+		switch {
+		case err != nil:
+			errs = append(errs, fmt.Errorf("EXCUBRA_LAN_LISTEN %q is not ip:port", c.LANListen))
+		case host == "" || host == "0.0.0.0" || host == "::" || net.ParseIP(host) == nil:
+			errs = append(errs, fmt.Errorf("EXCUBRA_LAN_LISTEN %q must be a specific IP address, never a wildcard or a name", c.LANListen))
+		case !isPrivateIP(net.ParseIP(host)):
+			// A public address here would put the API on the internet, which is
+			// the one thing this listener must never do. No development flag
+			// for it either: there is no case where it is what somebody meant.
+			errs = append(errs, fmt.Errorf("EXCUBRA_LAN_LISTEN %q is a public address — this listener belongs on a network of our own", c.LANListen))
+		case c.LANListen == c.OverlayListen:
+			errs = append(errs, errors.New("EXCUBRA_LAN_LISTEN and EXCUBRA_OVERLAY_LISTEN are the same address"))
 		}
 	}
 	switch c.OverlayTLS {
