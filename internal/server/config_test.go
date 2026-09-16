@@ -85,3 +85,46 @@ func TestValidateRefusesWildcardOverlay(t *testing.T) {
 		t.Fatalf("host/port: %s %s", h, p)
 	}
 }
+
+// Der Zuhörer im eigenen Netz ist genau dafür da: das eigene Netz. Eine
+// öffentliche Adresse hier wäre die API im Internet — und das ist das eine,
+// was dieser Zuhörer nie sein darf.
+func TestTheLANListenerStaysInTheBuilding(t *testing.T) {
+	base := func(lan string) Config {
+		return Config{
+			IngestPublicHost: "ingest.example.test",
+			IngestListen:     ":443",
+			OverlayListen:    "100.64.0.5:8080",
+			OverlayTLS:       "off",
+			SelfUpdate:       "on",
+			LogLevel:         "info",
+			LogFormat:        "text",
+			LANListen:        lan,
+		}
+	}
+	for _, c := range []struct {
+		lan string
+		ok  bool
+	}{
+		{"", true},                  // keiner ist die Vorgabe
+		{"10.100.10.2:8080", true},  // das private Netz zwischen zwei eigenen Maschinen
+		{"192.168.1.5:8080", true},  //
+		{"127.0.0.1:8080", true},    // die eigene Maschine
+		{"0.0.0.0:8080", false},     // ein Platzhalter ist keine Adresse
+		{":8080", false},            //
+		{"203.0.113.9:8080", false}, // öffentlich — genau das nicht
+		{"ex0.intern:8080", false},  // ein Name, keine Adresse
+		{"10.100.10.2", false},      // ohne Port
+	} {
+		err := base(c.lan).Validate()
+		if (err == nil) != c.ok {
+			t.Errorf("EXCUBRA_LAN_LISTEN=%q: %v, erwartet ok=%v", c.lan, err, c.ok)
+		}
+	}
+	// Und nicht dieselbe Adresse wie der Overlay-Zuhörer: Ein Port kann nur
+	// einmal vergeben werden, und der Fehler dabei käme erst beim Starten.
+	cfg := base("100.64.0.5:8080")
+	if err := cfg.Validate(); err == nil {
+		t.Error("dieselbe Adresse zweimal wurde angenommen")
+	}
+}

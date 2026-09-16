@@ -181,12 +181,15 @@ func run(envFile string) error {
 		return err
 	}
 	con.Secure = cfg.OverlayTLS != "off"
-	overlayMux := http.NewServeMux()
-	overlayMux.Handle("/v1/", api.New(eng, st, log).Handler())
-	overlayMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	health := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = fmt.Fprintf(w, "ok %s\n", version.Version)
-	})
+	}
+	apiHandler := api.New(eng, st, log).Handler()
+
+	overlayMux := http.NewServeMux()
+	overlayMux.Handle("/v1/", apiHandler)
+	overlayMux.HandleFunc("GET /healthz", health)
 	overlayMux.Handle("/", con.Handler())
 	overlaySrv := &http.Server{
 		Addr:              cfg.OverlayListen,
@@ -223,6 +226,32 @@ func run(envFile string) error {
 		overlaySrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{oc}}
 	}
 
+	// Der Zuhörer im eigenen Netz, wenn einer eingerichtet ist: nur die API,
+	// keine Konsole. Was hier ankommt, kommt aus einem Netz, das kein Verkehr
+	// aus dem Internet erreicht — und trägt trotzdem ein Token, das nur die
+	// Mandanten sieht, für die es ausgestellt wurde.
+	//
+	// Ohne TLS, und das ist kein Versehen: Zwischen zwei eigenen Maschinen im
+	// selben privaten Netz liegt niemand dazwischen, und ein Zertifikat für
+	// eine Adresse wie 10.100.10.2 wäre eines, das nur wir selbst ausstellen
+	// könnten — ein Umweg, der nichts prüft, was nicht schon feststeht.
+	var lanSrv *http.Server
+	if cfg.LANListen != "" {
+		lanMux := http.NewServeMux()
+		lanMux.Handle("/v1/", apiHandler)
+		lanMux.HandleFunc("GET /healthz", health)
+		lanSrv = &http.Server{
+			Addr:              cfg.LANListen,
+			Handler:           lanMux,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      60 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			MaxHeaderBytes:    64 << 10,
+			ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+		}
+	}
+
 	// bind first, serve second: a port that is taken fails now, and a freshly
 	// installed build has proven itself once both listeners are up
 	var lc net.ListenConfig
@@ -234,11 +263,24 @@ func run(envFile string) error {
 	if err != nil {
 		return fmt.Errorf("overlay listener: %w", err)
 	}
-	errc := make(chan error, 2)
+	var lanLn net.Listener
+	if lanSrv != nil {
+		lanLn, err = lc.Listen(ctx, "tcp", cfg.LANListen)
+		if err != nil {
+			return fmt.Errorf("lan listener: %w", err)
+		}
+	}
+	errc := make(chan error, 3)
 	go func() {
 		log.Info("ingest listening", "addr", cfg.IngestListen)
 		errc <- ingestSrv.ServeTLS(ingestLn, "", "")
 	}()
+	if lanSrv != nil {
+		go func() {
+			log.Info("lan api listening", "addr", cfg.LANListen, "tls", false)
+			errc <- lanSrv.Serve(lanLn)
+		}()
+	}
 	go func() {
 		log.Info("overlay listening", "addr", cfg.OverlayListen, "tls", cfg.OverlayTLS)
 		if overlaySrv.TLSConfig != nil {
@@ -350,6 +392,9 @@ func run(envFile string) error {
 	defer cancel()
 	_ = ingestSrv.Shutdown(shutdownCtx)
 	_ = overlaySrv.Shutdown(shutdownCtx)
+	if lanSrv != nil {
+		_ = lanSrv.Shutdown(shutdownCtx)
+	}
 	return result
 }
 

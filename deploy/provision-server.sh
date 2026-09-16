@@ -136,6 +136,12 @@ EXCUBRA_INGEST_LISTEN=:443
 EXCUBRA_INGEST_PUBLIC_HOST=$INGEST_HOST
 EXCUBRA_OVERLAY_LISTEN=$OVERLAY
 EXCUBRA_OVERLAY_TLS=off
+# An extra listener for the API alone (ADR-0022), on a network of our own —
+# the private network between our servers at the hoster, say. No console, no
+# sign-in, a bearer token as before. Empty means there is none. It has to be a
+# private address; a public one is refused at start.
+#   EXCUBRA_LAN_LISTEN=10.100.10.2:8080
+EXCUBRA_LAN_LISTEN=
 EXCUBRA_LOG_LEVEL=info
 EXCUBRA_LOG_FORMAT=text
 EXCUBRA_TIMEZONE=Europe/Berlin
