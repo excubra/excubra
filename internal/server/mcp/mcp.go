@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/event"
+	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/version"
@@ -35,6 +36,12 @@ type Server struct {
 	Log   *slog.Logger
 	Now   func() time.Time
 	Actor string // who the assistant acts for, in audits
+
+	// For minting enrollment keys (ex0_new_box), the same three things the
+	// console needs. Left empty, that one tool refuses and everything else works.
+	CA       *pki.CA
+	Ingest   string // host the boxes dial
+	IngestPt int
 }
 
 type request struct {
@@ -94,7 +101,7 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	case "initialize":
 		return response{Result: map[string]any{"protocolVersion": Protocol, "capabilities": map[string]any{"tools": map[string]any{}},
 			"serverInfo":   map[string]any{"name": "ex0", "version": version.Version},
-			"instructions": "EX0 (excubra) ist das Monitoring- und Präventionssystem von VIICO für Kundennetze. Du liest Standorte, Geräte, Dienste, Findings, Ereignisse und das Lagebild; du kannst eine Einschätzung speichern (ex0_save_assessment). Du führst nichts aus und quittierst nichts: Ein Mensch entscheidet."}}
+			"instructions": "EX0 (excubra) ist das Monitoring- und Präventionssystem von VIICO für Kundennetze. Du liest Standorte, Geräte, Dienste, Findings, Ereignisse und das Lagebild; du kannst eine Einschätzung speichern (ex0_save_assessment). Einrichten darfst du: Kunde anlegen (ex0_create_tenant), Standort anlegen (ex0_create_site), Enrollment-Key mit Einzeiler erzeugen (ex0_new_box) — das sind Aufträge an den Server, nicht an ein Kundensystem. Alles andere schaltet, quittiert oder führt ein Mensch in der Konsole aus; der Einzeiler auf dem Kunden-Proxmox bleibt ein Mensch mit root."}}
 	case "ping":
 		return response{Result: map[string]any{}}
 	case "tools/list":
@@ -142,6 +149,9 @@ func tools() []tool {
 		{Name: "ex0_situation", Description: "Das vollständige Lagebild eines Standorts als JSON, genau das, was das Nacht-Modell bekommt: Box, Geräte mit Diensten, Außenansicht, Findings, Ereignisse, Konnektor-Facts. Grundlage für eine Einschätzung.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
 		{Name: "ex0_save_assessment", Description: "Speichert deine Einschätzung eines Standorts als KI-Bericht in der Konsole (Reiter KI) und legt gerätegebundene Findings der Quelle „ki“ an. Schema: {\"risk\":\"hoch|mittel|niedrig\",\"summary\":\"2-4 Sätze\",\"priorities\":[{\"title\",\"why\",\"action\",\"device_id\",\"severity\":\"high|medium|low\"}],\"findings\":[{\"device_id\",\"slug\",\"severity\",\"title\",\"detail\"}]}. Nur Geräte-Kennungen aus dem Lagebild.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung"), "result": map[string]any{"type": "object", "description": "die Einschätzung im Schema"}, "model": str("welches Modell du bist, z. B. claude-fable-5-1")}, "site_id", "result")},
 		{Name: "ex0_briefs", Description: "Die bisherigen KI-Einschätzungen eines Standorts, neueste zuerst.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
+		{Name: "ex0_create_tenant", Description: "Legt einen Kunden (Mandanten) an. Einrichtung auf dem Server, kein Zugriff auf Kundensysteme. Kürzel wird zur Kennung ten_<kürzel> und taucht in Webhooks und der API auf: kurz, klein, ohne Umlaute.", InputSchema: schema(map[string]any{"slug": str("Kürzel, a-z 0-9 Bindestrich, z. B. sras"), "name": str("Anzeigename, z. B. Rechtsanwaltskanzlei SRAS")}, "slug", "name")},
+		{Name: "ex0_create_site", Description: "Legt einen Standort für einen Kunden an; mit Adresse wird er serverseitig nachgeschlagen und steht auf der Karte. Einrichtung, kein Zugriff auf Kundensysteme.", InputSchema: schema(map[string]any{"tenant_id": str("Kunden-Kennung, z. B. ten_sras"), "slug": str("Kürzel des Standorts, z. B. kanzlei"), "name": str("Anzeigename, z. B. Kanzlei"), "address": str("Postadresse für die Karte (optional)")}, "tenant_id", "slug", "name")},
+		{Name: "ex0_new_box", Description: "Erzeugt einen Enrollment-Key für einen Standort und liefert die beiden Einzeiler (Proxmox-Host / Box selbst) mit der Release-Version dieses Servers — genau das, was die Konsole unter „Neue Box\" einmalig zeigt. Die Box ordnet sich mit dem Key selbst dem Standort zu (ADR-0017). Der Key ist einmalig und gehört nur in den Befehl.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung, z. B. site_kanzlei"), "note": str("Notiz zum Key, z. B. Container auf dem Kunden-Proxmox (optional)"), "expires_days": map[string]any{"type": "integer", "description": "Gültigkeit in Tagen, Standard 30, höchstens 365"}}, "site_id")},
 	}
 }
 
@@ -204,6 +214,16 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 			out = append(out, map[string]any{"at": b.At, "provider": b.Provider, "model": b.Model, "risk": b.Risk, "summary": b.Summary, "priorities": r.Priorities, "findings": r.Findings, "requested_by": b.RequestedBy})
 		}
 		return pretty(out), nil
+	case "ex0_create_tenant":
+		return s.createTenant(ctx, argString(args, "slug"), argString(args, "name"))
+	case "ex0_create_site":
+		return s.createSite(ctx, argString(args, "tenant_id"), argString(args, "slug"), argString(args, "name"), argString(args, "address"))
+	case "ex0_new_box":
+		days := 0
+		if d, ok := args["expires_days"].(float64); ok {
+			days = int(d)
+		}
+		return s.newBox(ctx, argString(args, "site_id"), argString(args, "note"), days)
 	}
 	return "", errors.New("unknown tool " + name)
 }

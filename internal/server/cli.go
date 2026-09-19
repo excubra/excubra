@@ -1072,5 +1072,14 @@ func mcpCmd(args []string) error {
 	loc, _ := time.LoadLocation(cfg.Timezone)
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	srv := &mcp.Server{Store: st, AI: ai.New(st, log, loc), Log: log, Now: time.Now, Actor: *actor}
+	// The same three things the console has for minting enrollment keys; without
+	// them ex0_new_box refuses and the rest of the tools still work.
+	if ca, err := pki.LoadOrCreateCA(filepath.Join(cfg.DataDir, "ca")); err == nil {
+		host, portStr := cfg.IngestHostPort()
+		port, _ := strconv.Atoi(portStr)
+		srv.CA, srv.Ingest, srv.IngestPt = ca, host, port
+	} else {
+		log.Warn("mcp: enrollment keys unavailable", "err", err)
+	}
 	return srv.Serve(context.Background(), os.Stdin, os.Stdout)
 }

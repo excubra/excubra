@@ -51,3 +51,26 @@ image one package; this decision removes the remaining hands.
 - A box provisioned before this decision still works; it reports its LAN after its
   next update, and gets its remote access switched on then.
 - `remote.auto_lan = 0` keeps the switch manual for operators who want it that way.
+
+## Amendment, 19.09.2026: the three clicks before the key are a session's job too
+
+The rollout had one remaining seam. Everything after the key needs nobody, but
+the key itself — and the customer and site it is made for — were three clicks
+in the console, and a session that prepares a rollout has no console account and
+no business typing into one. The owner's requirement is the same as in the
+Context above: no hand work.
+
+5. **The MCP server (`excubra server mcp`) can create a tenant, create a site and
+   mint an enrollment key** (`ex0_create_tenant`, `ex0_create_site`,
+   `ex0_new_box`). They call the same store functions as the console, are
+   audited under the actor the MCP runs as, and `ex0_new_box` returns exactly
+   what the console shows once: the key inside the two one-liners, with this
+   server's release version. A site with an address is looked up on the server
+   and placed on the map. The one-liners live in `internal/server/installer`, so
+   the console and the MCP cannot drift apart.
+
+What does not change: the box still assigns itself from the key, never from
+anything it sends; the key is one-time and revocable until used; the MCP still
+acknowledges nothing and switches nothing at a customer. And the command on the
+customer's hypervisor is still run by a person with root there — the seam that
+should stay, because it is the customer's machine.
