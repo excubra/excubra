@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/excubra/excubra/internal/event"
 	"github.com/excubra/excubra/internal/id"
 	"github.com/excubra/excubra/internal/pki"
+	"github.com/excubra/excubra/internal/server/installer"
 	"github.com/excubra/excubra/internal/server/state"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/version"
@@ -483,14 +483,14 @@ func (s *Server) apiKeysCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		tenant, _ := s.Store.Tenant(ctx, site.TenantID)
-		hostname = boxHostname(tenant.Name, site.Name)
+		hostname = installer.Hostname(tenant.Name, site.Name)
 		if note == "" {
 			note = tenant.Name + " · " + site.Name
 		}
 	}
 	now := s.Now()
 	var secrets []string
-	var commands []installerCommand
+	var commands []installer.Command
 	for i := 0; i < count; i++ {
 		k, err := pki.NewEnrollmentKey(s.Ingest, s.IngestPt, s.CA.Fingerprint())
 		if err != nil {
@@ -505,7 +505,7 @@ func (s *Server) apiKeysCreate(w http.ResponseWriter, r *http.Request) {
 		_ = s.Store.Audit(ctx, now, actor(r), "key.new", rec.ID, note+" site="+siteID)
 		secrets = append(secrets, k.String())
 		if count == 1 {
-			commands = installerCommands(k.String(), hostname)
+			commands = installer.Commands(k.String(), hostname)
 		}
 	}
 	msg := "Key erzeugt. Einmalig sichtbar."
@@ -513,82 +513,6 @@ func (s *Server) apiKeysCreate(w http.ResponseWriter, r *http.Request) {
 		msg = "Key für den Standort erzeugt. Die Box ordnet sich damit selbst zu."
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg, "secrets": secrets, "commands": commands})
-}
-
-type installerCommand struct {
-	Title string `json:"title"`
-	Cmd   string `json:"cmd"`
-}
-
-// installerBase is where the installers of this server's release live; a
-// development build points at main.
-func installerBase() (base, ver string) {
-	ref := "main"
-	if v := version.Version; regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(v) {
-		ref, ver = "v"+v, v
-	}
-	return "https://raw.githubusercontent.com/excubra/excubra/" + ref + "/image", ver
-}
-
-// reinstallCommand brings an enrolled box's installation up to the current
-// release (units, helper, firewall rules) without touching its identity: the
-// installer without a key, run once on the box.
-func reinstallCommand() string {
-	base, ver := installerBase()
-	cmd := "curl -fsSL " + base + "/ex0-box.sh | bash -s --"
-	if ver != "" {
-		cmd += " --version " + ver
-	}
-	return cmd
-}
-
-// installerCommands are the two ways a box comes to life with this key: on a
-// machine (mini PC, Pi, VM) and as a container on a Proxmox host.
-func installerCommands(key, hostname string) []installerCommand {
-	base, ver := installerBase()
-	args := "--enroll-key '" + key + "'"
-	if hostname != "" {
-		args += " --hostname " + hostname
-	}
-	if ver != "" {
-		args += " --version " + ver
-	}
-	return []installerCommand{
-		{Title: "Auf einem Proxmox-Host (legt den Container an und richtet ihn ein)", Cmd: "curl -fsSL " + base + "/ex0-box-pct.sh | bash -s -- " + args},
-		{Title: "Auf der Box selbst (Mini-PC, Raspberry Pi, VM mit frischem Debian, als root)", Cmd: "curl -fsSL " + base + "/ex0-box.sh | bash -s -- " + args},
-	}
-}
-
-// boxHostname makes a hostname out of tenant and site: letters, digits, dashes.
-func boxHostname(tenant, site string) string {
-	slug := func(v string) string {
-		v = strings.ToLower(strings.TrimSpace(v))
-		r := strings.NewReplacer("ä", "ae", "ö", "oe", "ü", "ue", "ß", "ss")
-		v = r.Replace(v)
-		var b strings.Builder
-		dash := false
-		for _, c := range v {
-			switch {
-			case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
-				b.WriteRune(c)
-				dash = false
-			default:
-				if !dash && b.Len() > 0 {
-					b.WriteByte('-')
-					dash = true
-				}
-			}
-		}
-		return strings.Trim(b.String(), "-")
-	}
-	name := strings.Trim(slug(tenant)+"-"+slug(site), "-")
-	if len(name) > 40 {
-		name = strings.Trim(name[:40], "-")
-	}
-	if name == "" {
-		return "ex0-box"
-	}
-	return "ex0-" + name
 }
 
 type tokenRowAPI struct {

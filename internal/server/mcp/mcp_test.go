@@ -69,7 +69,7 @@ func TestSessionOverStdio(t *testing.T) {
 	}
 	send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	res = send(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
-	if r, _ := res["result"].(map[string]any); len(r["tools"].([]any)) != 8 {
+	if r, _ := res["result"].(map[string]any); len(r["tools"].([]any)) != 11 {
 		t.Fatalf("tools: %v", res)
 	}
 	if !strings.Contains(text(send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ex0_overview","arguments":{}}}`)), "Muster GmbH") {

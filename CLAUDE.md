@@ -41,7 +41,10 @@ Reports — das ist Phase 2 und darf durch das Design nur nicht verbaut werden.
 - Ingest (mTLS, 443) ist der einzige öffentliche Endpunkt. Konsole und Status-API nur am
   Overlay-Listener. Kein gemeinsamer Handler, keine Umleitung.
 - Mandant wird aus dem Client-Zertifikat abgeleitet, nie aus dem Payload.
-  Enrollment-Keys einmalig; Zuordnung nur serverseitig in der Konsole.
+  Enrollment-Keys einmalig; Zuordnung nur serverseitig — in der Konsole oder über
+  die drei Einrichtungs-Werkzeuge des MCP-Servers (`ex0_create_tenant`,
+  `ex0_create_site`, `ex0_new_box`), die dasselbe tun wie die Konsole, unter dem
+  Actor der Sitzung. Nie von der Box aus.
 - Discovery-Modi: `passive`, `sweep`. Der Dienst-Scan (ADR-0018, E20) ist je Standort
   geschaltet, gedrosselt, liest nur; nie Exploits, nie Zugangsdaten. Die Live-Erkennung
   (ADR-0018 §7) öffnet Köder-Ports, antwortet nichts und sendet nichts. Der DNS-Sensor

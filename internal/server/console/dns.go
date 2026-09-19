@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/server/blocklist"
+	"github.com/excubra/excubra/internal/server/installer"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/wire"
 )
@@ -53,7 +54,7 @@ func (s *Server) apiSiteDNS(w http.ResponseWriter, r *http.Request) {
 			v.ReportAt = &at
 		}
 		if len(box.Caps) > 0 && !hasCap(box.Caps, "CAP_NET_BIND_SERVICE") {
-			v.Reinstall = reinstallCommand()
+			v.Reinstall = installer.Reinstall()
 			if box.NetbirdOpIP != "" {
 				v.BoxSSH = "ssh root@" + box.NetbirdOpIP
 			}
