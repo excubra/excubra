@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 184.0 72.0" role="img" aria-label="EX0"><title>EX0</title>
+  <g fill="#FAFAFA"><rect x="0" y="0" width="12.5" height="72.0"/><rect x="0" y="0" width="44.0" height="12.5"/><rect x="0" y="29.75" width="36.96" height="12.5"/><rect x="0" y="59.50" width="44.0" height="12.5"/><polygon points="56.0,0 70.65,0 100.0,72.0 85.35,72.0"/><polygon points="100.0,0 85.35,0 56.0,72.0 70.65,72.0"/></g>
+  <g transform="translate(102.43 -9.57) scale(0.9114)"><defs>
+    <mask id="kanalwd" maskUnits="userSpaceOnUse" x="-10" y="-10" width="120" height="120">
+      <rect x="-10" y="-10" width="120" height="120" fill="#fff"/>
+      <rect x="50.0" y="37.00" width="70" height="26.0" fill="#000"
+            transform="rotate(-45 50.0 50.0)"/>
+    </mask>
+  </defs>
+  <g fill="none" stroke="#22C55E" stroke-linecap="butt">
+    <circle cx="50.0" cy="50.0" r="33.0" stroke-width="13.0" mask="url(#kanalwd)"/>
+    <path d="M28.08 71.92 L88.18 11.82" stroke-width="12.0"/>
+  </g></g>
+</svg>
