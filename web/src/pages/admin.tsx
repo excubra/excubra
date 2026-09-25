@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { get, post, type AuditRow, type KeyRow, type KeysData, type InstallerCommand, type MaintenanceWindow, type TokenRow, type UserRow, type WebhookRow } from "@/lib/api"
+import { get, post, type AuditRow, type KeyRow, type KeysData, type InstallerCommand, type MaintenanceWindow, type SiteOption, type TokenRow, type UserRow, type WebhookRow } from "@/lib/api"
 import { fmtDateTime, fmtShort } from "@/lib/format"
 
 function useAct(keys: string[][]) {
@@ -45,8 +45,9 @@ function CreateDialog({ title, description, fields, onSubmit, pending, trigger, 
       <DialogContent>
         <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
         <div className="grid gap-4">{fields.map((f) => <div key={f.key} className="grid gap-2"><Label htmlFor={f.key}>{f.label}</Label>{f.options ? (
-          <Select value={v[f.key] || "__none"} onValueChange={(val) => setV({ ...v, [f.key]: val === "__none" ? "" : val })}>
-            <SelectTrigger id={f.key}><SelectValue placeholder={f.placeholder} /></SelectTrigger>
+          // An empty value shows the placeholder, unless "none" is one of the options.
+          <Select value={v[f.key] || (f.options.some((o) => !o.value) ? "__none" : "")} onValueChange={(val) => setV({ ...v, [f.key]: val === "__none" ? "" : val })}>
+            <SelectTrigger id={f.key} className="w-full"><SelectValue placeholder={f.placeholder} /></SelectTrigger>
             <SelectContent>{f.options.map((o) => <SelectItem key={o.value || "__none"} value={o.value || "__none"}>{o.label}</SelectItem>)}</SelectContent>
           </Select>
         ) : <Input id={f.key} type={f.type} value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} placeholder={f.placeholder} />}</div>)}</div>
@@ -90,11 +91,12 @@ export function KeysPage() {
 // ---- API-Tokens -------------------------------------------------------------------------
 
 export function TokensPage() {
-  const q = useQuery({ queryKey: ["tokens"], queryFn: () => get<{ tokens: TokenRow[]; tenants: { ID: string; Name: string }[] | null }>("/api/tokens") })
+  const q = useQuery({ queryKey: ["tokens"], queryFn: () => get<{ tokens: TokenRow[]; tenants: { ID: string; Name: string }[] | null; sites: SiteOption[] | null }>("/api/tokens") })
   const act = useAct([["tokens"]])
   const [fresh, setFresh] = useState("")
+  const siteOptions = (q.data?.sites ?? []).map((s) => ({ value: s.id, label: `${s.tenant} · ${s.name}` }))
   const cols: ColumnDef<TokenRow, unknown>[] = [
-    { id: "name", header: "Name", accessorFn: (r) => r.name, cell: ({ row }) => <div><div className="font-medium">{row.original.name}</div><div className="font-mono text-xs text-muted-foreground">{row.original.id}</div></div> },
+    { id: "name", header: "Name", accessorFn: (r) => r.name, cell: ({ row }) => <div><div className="flex items-center gap-2 font-medium">{row.original.name}{row.original.deviceId && <a href={`/devices/${row.original.deviceId}?tab=logs`}><Badge variant="outline">Quelle</Badge></a>}</div><div className="font-mono text-xs text-muted-foreground">{row.original.id}</div></div> },
     { id: "tenants", header: "Mandanten", accessorFn: (r) => r.tenants.join(", "), cell: ({ getValue }) => <span className="font-mono text-xs">{String(getValue()) || "*"}</span> },
     { id: "created", header: "Erstellt", accessorFn: (r) => r.createdAt, cell: ({ getValue }) => <span className="text-muted-foreground">{fmtShort(String(getValue()))}</span> },
     { id: "used", header: "Zuletzt benutzt", accessorFn: (r) => r.lastUsed ?? "", cell: ({ getValue }) => <span className="text-muted-foreground">{getValue() ? fmtShort(String(getValue())) : "nie"}</span> },
@@ -103,9 +105,13 @@ export function TokensPage() {
   ]
   return (
     <>
-      <PageHeader crumbs={[{ label: "API-Tokens" }]} title="API-Tokens" sub="Lesezugriff auf die Status-API, nur im Overlay, je Token auf Mandanten beschränkbar."
-        actions={<CreateDialog title="Neues Token" description="Das Token wird genau einmal angezeigt." fields={[{ key: "name", label: "Name", placeholder: "CRM-Dashboard" }, { key: "tenants", label: "Mandanten (Kennungen, Komma) oder *", def: "*" }]} pending={act.isPending} trigger={<Button size="sm"><Plus />Token erstellen</Button>}
-          onSubmit={(v) => act.mutate({ path: "/api/tokens", form: v }, { onSuccess: (r) => setFresh(r.token ?? "") })} />} />
+      <PageHeader crumbs={[{ label: "API-Tokens" }]} title="API-Tokens" sub="Lesezugriff auf die Status-API, je Token auf Mandanten beschränkbar. Eine Quelle ist eine Anwendung, die sich selbst meldet: Ihr Token liefert nur deren Ereignisse ab und liest nichts."
+        actions={<div className="flex gap-2">
+          <CreateDialog title="Quelle anlegen" description="Eine Anwendung, die ihre Ereignisse selbst schickt — etwa VIIDOC. Sie wird ein Gerät am Standort; ihr Token wird genau einmal angezeigt." fields={[{ key: "site", label: "Standort", placeholder: "Standort wählen", options: siteOptions }, { key: "name", label: "Name", placeholder: "VIIDOC" }, { key: "address", label: "Adresse", placeholder: "10.100.10.3" }]} pending={act.isPending} submitLabel="Quelle anlegen" trigger={<Button size="sm" variant="outline"><Plus />Quelle anlegen</Button>}
+            onSubmit={(v) => act.mutate({ path: "/api/sources", form: v }, { onSuccess: (r) => setFresh(r.token ?? "") })} />
+          <CreateDialog title="Neues Token" description="Das Token wird genau einmal angezeigt." fields={[{ key: "name", label: "Name", placeholder: "CRM-Dashboard" }, { key: "tenants", label: "Mandanten (Kennungen, Komma) oder *", def: "*" }]} pending={act.isPending} trigger={<Button size="sm"><Plus />Token erstellen</Button>}
+            onSubmit={(v) => act.mutate({ path: "/api/tokens", form: v }, { onSuccess: (r) => setFresh(r.token ?? "") })} />
+        </div>} />
       {fresh && <Secret label="Neues Token, einmalig sichtbar" value={fresh} />}
       <DataTable columns={cols} data={q.data?.tokens ?? []} search={(r) => `${r.name} ${r.id}`} emptyTitle="Kein Token" emptyText="Für das CRM-Dashboard später ein Token nur für den passenden Mandanten anlegen." />
     </>

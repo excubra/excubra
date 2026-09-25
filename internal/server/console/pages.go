@@ -84,7 +84,7 @@ type devKind struct{ Key, Label string }
 
 var devKinds = []devKind{
 	{"fw", "Firewall"}, {"rt", "Netzwerk"}, {"srv", "Server"}, {"vm", "VM"}, {"tel", "Telefonie"},
-	{"prn", "Drucker"}, {"lap", "Client"}, {"mob", "Mobil"}, {"box", "EX0-Box"}, {"wan", "Internet-Adresse"}, {"q", "Unbekannt"},
+	{"prn", "Drucker"}, {"lap", "Client"}, {"mob", "Mobil"}, {"box", "EX0-Box"}, {"wan", "Internet-Adresse"}, {"app", "Anwendung"}, {"q", "Unbekannt"},
 }
 
 func kindLabel(key string) string {
@@ -113,6 +113,9 @@ var vendorKinds = []struct{ match, kind string }{
 
 // classifyDevice picks a kind. boxNames are the site's box names/ids, lowercased.
 func classifyDevice(vendor, hostname string, boxNames map[string]bool) string {
+	if vendor == store.SourceVendor { // an application that reports itself (ADR-0023)
+		return "app"
+	}
 	h := strings.ToLower(strings.TrimSuffix(strings.TrimSuffix(hostname, ".local"), ".lan"))
 	if h != "" && boxNames[h] {
 		return "box"

@@ -1123,6 +1123,7 @@ func (s *Server) keyRevoke(w http.ResponseWriter, r *http.Request) {
 type tokensData struct {
 	Tokens   []store.APIToken
 	Tenants  []store.Tenant
+	Sites    []store.Site
 	NewToken string
 	NewName  string
 }
@@ -1133,8 +1134,40 @@ func (s *Server) tokensData(ctx context.Context) (tokensData, error) {
 	if d.Tokens, err = s.Store.APITokens(ctx); err != nil {
 		return d, err
 	}
+	if d.Sites, err = s.Store.Sites(ctx, ""); err != nil {
+		return d, err
+	}
 	d.Tenants, err = s.Store.Tenants(ctx)
 	return d, err
+}
+
+// sourceCreate registers an application that reports itself (ADR-0023): its
+// device on the site and its token, shown once.
+func (s *Server) sourceCreate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	name, address := strings.TrimSpace(r.PostForm.Get("name")), strings.TrimSpace(r.PostForm.Get("address"))
+	site, err := s.Store.Site(ctx, r.PostForm.Get("site"))
+	if err != nil || name == "" || address == "" {
+		s.flashErr(w, r, "Standort, Name und Adresse sind Pflicht.", "/tokens")
+		return
+	}
+	raw := "ex0_" + id.Secret(32)
+	src, err := s.Store.CreateSource(ctx, site, name, address, store.SourceTokenName(name), api.HashToken(raw), s.Now())
+	if errors.Is(err, store.ErrSourceExists) {
+		s.flashErr(w, r, "An diesem Standort gibt es schon ein Gerät mit dieser Adresse.", "/tokens")
+		return
+	}
+	if errors.Is(err, store.ErrSourceInvalid) {
+		s.flashErr(w, r, "Die Adresse ist eine IP-Adresse, etwa 10.100.10.3; der Name hat höchstens 64 Zeichen.", "/tokens")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	_ = s.Store.Audit(ctx, s.Now(), actor(r), "source.new", src.Device.ID, name+" "+address)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": raw, "name": name, "device": src.Device.ID,
+		"message": "Quelle angelegt. Das Token wird nur einmal angezeigt — es gehört in die Einstellungen der Anwendung."})
 }
 
 func (s *Server) tokenCreate(w http.ResponseWriter, r *http.Request) {

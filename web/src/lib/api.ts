@@ -154,7 +154,9 @@ export interface DNSDay { SiteID: string; Day: string; Queries: number; Blocked:
 export interface BlocklistStatus { version: string; domains: number; fetchedAt: string; sources: Record<string, number> }
 export interface SiteDNS { enabled: boolean; block: boolean; upstreams: string[]; hasBox: boolean; boxIp: string; report: DNSReport | null; reportAt: string | null; days: DNSDay[]; findings: number; list: BlocklistStatus; listOff: boolean; reinstall?: string; boxSsh?: string }
 export interface SiteScan { enabled: boolean; hasBox: boolean; canary: boolean; armed: number[] | null; signals: number; last: ScanRound | null; rounds: ScanRound[] | null; services: number; devices: number; findings: number; wan: WanView | null }
-export interface DeviceDetail { device: DeviceCard; tenant: Tenant; site: Site; host: HostCard | null; events: EventRow[] | null; services: ServiceRow[] | null; logsNote: string }
+export interface DeviceDetail { device: DeviceCard; tenant: Tenant; site: Site; host: HostCard | null; events: EventRow[] | null; services: ServiceRow[] | null; logsNote: string; source: SourceCard | null }
+/** An application that reports itself (ADR-0023): no box watches it, so its state is whether it still talks. */
+export interface SourceCard { tokenId: string; lastContact: string; silent: boolean; silentAfterMin: number; openFindings: number }
 export interface BoxesData { Unassigned: BoxRow[] | null; Assigned: BoxRow[] | null }
 export interface BoxTask { ID: string; BoxID: string; Kind: string; IssuedAt: string; IssuedBy: string; ExpiresAt: string; DoneAt: string | null; OK: boolean | null; Detail: string }
 export interface BoxNote { ID: number; BoxID: string; At: string; Text: string }
@@ -181,7 +183,12 @@ export interface MaintenanceWindow { ID: string; Scope: string; TargetID: string
 export interface KeyRow { id: string; note: string; siteId: string; siteName: string; createdAt: string; expiresAt: string; usedAt: string | null; usedBy: string; revokedAt: string | null }
 export interface KeysData { keys: KeyRow[]; sites: { ID: string; Name: string }[] | null }
 export interface InstallerCommand { title: string; cmd: string }
-export interface TokenRow { id: string; name: string; tenants: string[]; createdAt: string; lastUsed: string | null; revokedAt: string | null }
+export interface TokenRow { id: string; name: string; tenants: string[]; createdAt: string; lastUsed: string | null; revokedAt: string | null; deviceId?: string }
+/** A site as a choice in a form: which customer, which place. */
+export interface SiteOption { id: string; name: string; tenant: string }
+/** One entry a source reported about itself (ADR-0023). */
+export interface LogRow { eventId: string; occurredAt: string; receivedAt: string; kind: string; actor: string; ip: string; target: string; summary: string }
+export interface DeviceLogs { entries: LogRow[] | null; source: boolean; days: number; lastContact: string }
 export interface WebhookRow { id: string; name: string; url: string; enabled: boolean; createdAt: string }
 export interface UserRow { id: string; name: string; totp: boolean; disabled: boolean; locked: boolean; lockedUntil: string | null; failedLogins: number; createdAt: string }
 export interface AuditRow { ID: number; At: string; Actor: string; Action: string; Target: string; Summary: string }

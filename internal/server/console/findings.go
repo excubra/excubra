@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/excubra/excubra/internal/server/core"
 	"github.com/excubra/excubra/internal/server/store"
 )
 
@@ -134,6 +135,8 @@ func (s *Server) findingSource(ctx context.Context, connectorID string, kinds ma
 		return "CVE-Abgleich"
 	case "patch":
 		return "Patch-Stand"
+	case core.SourceApp, core.SourceAppCert, core.SourceAppSilence:
+		return "Meldung der Anwendung"
 	case "":
 		return ""
 	}

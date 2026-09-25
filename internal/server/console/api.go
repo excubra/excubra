@@ -14,6 +14,7 @@ import (
 	"github.com/excubra/excubra/internal/id"
 	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/installer"
+	"github.com/excubra/excubra/internal/server/rules"
 	"github.com/excubra/excubra/internal/server/state"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/version"
@@ -275,6 +276,32 @@ type deviceDetail struct {
 	Events   []recentEvent `json:"events"`
 	Services []serviceView `json:"services"` // what the scan saw listening (ADR-0018)
 	LogsNote string        `json:"logsNote"`
+	Source   *sourceCard   `json:"source"` // set when the device is an application that reports itself
+}
+
+// sourceCard is what the device page shows of a source (ADR-0023): no box
+// watches it, so its state is whether it still talks.
+type sourceCard struct {
+	TokenID        string    `json:"tokenId"`
+	LastContact    time.Time `json:"lastContact"`
+	Silent         bool      `json:"silent"`
+	SilentAfterMin int       `json:"silentAfterMin"`
+	OpenFindings   int       `json:"openFindings"`
+}
+
+// sourceOf finds the source a device is, if it is one.
+func (s *Server) sourceOf(ctx context.Context, deviceID string) (store.Source, bool) {
+	list, err := s.Store.Sources(ctx)
+	if err != nil {
+		s.Log.Error("sources", "err", err)
+		return store.Source{}, false
+	}
+	for _, src := range list {
+		if src.Device.ID == deviceID {
+			return src, true
+		}
+	}
+	return store.Source{}, false
 }
 
 func (s *Server) apiDevice(w http.ResponseWriter, r *http.Request) {
@@ -289,7 +316,8 @@ func (s *Server) apiDevice(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, statusFor(err))
 		return
 	}
-	out := deviceDetail{Tenant: sd.Tenant, Site: sd.Site, Services: s.deviceServices(ctx, dev.ID), LogsNote: "Logs je Gerät kommen mit Phase 2 (Syslog-Empfang auf der Box, Agent-Logs). Der Platz hier ist dafür reserviert."}
+	out := deviceDetail{Tenant: sd.Tenant, Site: sd.Site, Services: s.deviceServices(ctx, dev.ID),
+		LogsNote: "Logs schicken Quellen, die sich selbst melden — eine Anwendung wie VIIDOC (ADR-0023). Syslog über die Box kommt mit V5."}
 	for _, c := range sd.Devices {
 		if c.ID == dev.ID {
 			out.Device = c
@@ -308,6 +336,18 @@ func (s *Server) apiDevice(w http.ResponseWriter, r *http.Request) {
 		if e.DeviceID == dev.ID || (out.Host != nil && e.HostID == out.Host.ID) {
 			out.Events = append(out.Events, e)
 		}
+	}
+	if src, ok := s.sourceOf(ctx, dev.ID); ok {
+		sc := &sourceCard{TokenID: src.Token.ID, LastContact: dev.LastSeen, SilentAfterMin: int(rules.SourceSilentAfter.Minutes()),
+			Silent: s.Now().Sub(dev.LastSeen) > rules.SourceSilentAfter}
+		if fs, err := s.Store.FindingsForDevice(ctx, dev.ID, s.Now()); err == nil {
+			for _, f := range fs {
+				if f.ResolvedAt == nil {
+					sc.OpenFindings++
+				}
+			}
+		}
+		out.Source = sc
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -522,6 +562,54 @@ type tokenRowAPI struct {
 	CreatedAt time.Time  `json:"createdAt"`
 	LastUsed  *time.Time `json:"lastUsed"`
 	RevokedAt *time.Time `json:"revokedAt"`
+	// DeviceID is set for a source token (ADR-0023): it posts that device's events.
+	DeviceID string `json:"deviceId,omitempty"`
+}
+
+type siteOptionAPI struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Tenant string `json:"tenant"`
+}
+
+// logRowAPI is one entry a source reported (ADR-0023).
+type logRowAPI struct {
+	EventID    string    `json:"eventId"`
+	OccurredAt time.Time `json:"occurredAt"`
+	ReceivedAt time.Time `json:"receivedAt"`
+	Kind       string    `json:"kind"`
+	Actor      string    `json:"actor"`
+	IP         string    `json:"ip"`
+	Target     string    `json:"target"`
+	Summary    string    `json:"summary"`
+}
+
+// apiDeviceLogs lists what the device reported: the last days (default 7, at
+// most 90), newest first, 500 at most; ?kind=auth keeps auth and its sub-kinds.
+func (s *Server) apiDeviceLogs(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	dev, err := s.Store.Device(ctx, r.PathValue("id"))
+	if err != nil {
+		s.fail(w, r, err, http.StatusNotFound)
+		return
+	}
+	days := 7
+	if n, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil && n > 0 && n <= 90 {
+		days = n
+	}
+	now := s.Now()
+	list, err := s.Store.Logs(ctx, dev.TenantID, dev.ID, now.AddDate(0, 0, -days), now.Add(time.Hour), strings.TrimSpace(r.URL.Query().Get("kind")), 500)
+	if err != nil {
+		s.fail(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	rows := make([]logRowAPI, 0, len(list))
+	for _, e := range list {
+		rows = append(rows, logRowAPI{EventID: e.EventID, OccurredAt: e.OccurredAt, ReceivedAt: e.ReceivedAt, Kind: e.Kind,
+			Actor: e.Actor, IP: e.IP, Target: e.Target, Summary: e.Summary})
+	}
+	_, source := s.sourceOf(ctx, dev.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"entries": rows, "source": source, "days": days, "lastContact": dev.LastSeen})
 }
 
 func (s *Server) apiTokens(w http.ResponseWriter, r *http.Request) {
@@ -532,9 +620,17 @@ func (s *Server) apiTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := make([]tokenRowAPI, 0, len(d.Tokens))
 	for _, t := range d.Tokens {
-		rows = append(rows, tokenRowAPI{ID: t.ID, Name: t.Name, Tenants: t.Tenants, CreatedAt: t.CreatedAt, LastUsed: t.LastUsedAt, RevokedAt: t.RevokedAt})
+		rows = append(rows, tokenRowAPI{ID: t.ID, Name: t.Name, Tenants: t.Tenants, CreatedAt: t.CreatedAt, LastUsed: t.LastUsedAt, RevokedAt: t.RevokedAt, DeviceID: t.DeviceID})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": rows, "tenants": d.Tenants})
+	tenantName := map[string]string{}
+	for _, t := range d.Tenants {
+		tenantName[t.ID] = t.Name
+	}
+	sites := make([]siteOptionAPI, 0, len(d.Sites))
+	for _, st := range d.Sites {
+		sites = append(sites, siteOptionAPI{ID: st.ID, Name: st.Name, Tenant: tenantName[st.TenantID]})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": rows, "tenants": d.Tenants, "sites": sites})
 }
 
 type webhookRowAPI struct {
