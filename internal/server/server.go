@@ -14,6 +14,7 @@ const usage = `usage: excubra server <command> [flags]
   user   add|passwd|disable|enable|list
   key    new [--count N] [--note text] [--expires-days D]
   token  new --name X [--tenants a,b] | list | revoke <id>
+  source add --site S --name X --address A | list   (an application that reports itself)
   tenant add <slug> <name> | list
   site   add <tenant_id> <slug> <name> | list
   box    list | assign <box_id> <site_id> | unassign <box_id>
@@ -43,6 +44,8 @@ func Main(args []string) error {
 		return keyCmd(args)
 	case "token":
 		return tokenCmd(args)
+	case "source":
+		return sourceCmd(args)
 	case "tenant":
 		return tenantCmd(args)
 	case "site":

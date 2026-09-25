@@ -48,6 +48,9 @@ type Engine struct {
 	Vuln *vuln.Service
 	// Blocklist is what the DNS sensors watch for (ADR-0020); nil = off.
 	Blocklist *blocklist.Service
+	// Loc is the house's time zone: "outside working hours" for the source rules
+	// (ADR-0023) means its clock. nil = UTC.
+	Loc *time.Location
 
 	mu      sync.Mutex
 	m       *state.Machine
@@ -677,6 +680,8 @@ func (e *Engine) Tick(ctx context.Context) error {
 	for _, fid := range quiet {
 		_ = e.Store.DeleteAck(ctx, "finding", fid)
 	}
+	// sources that went quiet, and their incidents after a quiet day (ADR-0023)
+	events = append(events, e.sourceTick(ctx, now)...)
 	// windows the machine expired are deleted from the store
 	live := map[string]bool{}
 	for _, w := range e.m.Maintenances() {

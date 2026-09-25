@@ -1,6 +1,8 @@
 // Package api is the status API of contract v1 (salt: "Schnittstelle EX0 → CRM"),
-// served only on the overlay listener. Bearer tokens are scoped to tenants; the
-// CRM writes nothing but maintenance windows and test pings.
+// served on the overlay listener and, where one is set, on the listener in our own
+// network (ADR-0022). Bearer tokens are scoped to tenants; the CRM writes nothing
+// but maintenance windows and test pings. A source token (ADR-0023) posts its
+// application's events and does nothing else.
 package api
 
 import (
@@ -52,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /v1/sites/{site_id}/maintenance", s.auth(s.siteMaintenance))
 	mux.Handle("DELETE /v1/sites/{site_id}/maintenance", s.auth(s.siteMaintenanceEnd))
 	mux.Handle("POST /v1/webhooks/{target_id}/test", s.auth(s.webhookTest))
+	mux.Handle("POST /v1/source/events", s.sourceAuth(s.sourceEvents))
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "no such route")
 	})
@@ -74,6 +77,17 @@ func HashToken(token string) string {
 }
 
 func (s *Server) auth(next http.HandlerFunc) http.Handler {
+	return s.bearer(false, next)
+}
+
+// sourceAuth admits source tokens and nothing else (ADR-0023).
+func (s *Server) sourceAuth(next http.HandlerFunc) http.Handler {
+	return s.bearer(true, next)
+}
+
+// bearer checks the token and its kind: an operator token reads and sets windows,
+// a source token posts its events. Neither is the other.
+func (s *Server) bearer(source bool, next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer"))
 		if raw == "" || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
@@ -84,6 +98,14 @@ func (s *Server) auth(next http.HandlerFunc) http.Handler {
 		tok, err := s.Store.APITokenByHash(r.Context(), HashToken(raw))
 		if err != nil {
 			writeErr(w, http.StatusUnauthorized, "unauthorized", "unknown or revoked token")
+			return
+		}
+		if (tok.DeviceID != "") != source {
+			if source {
+				writeErr(w, http.StatusForbidden, "forbidden", "only a source token posts events")
+			} else {
+				writeErr(w, http.StatusForbidden, "forbidden", "a source token posts its events and nothing else")
+			}
 			return
 		}
 		_ = s.Store.TouchAPIToken(r.Context(), tok.ID, s.Now())
@@ -517,6 +539,27 @@ func decode(r *http.Request, v any) error {
 		return errors.New("invalid JSON body")
 	}
 	return nil
+}
+
+// ---- sources (ADR-0023) ------------------------------------------------------------------
+
+// sourceEvents takes a post of the source the token belongs to.
+func (s *Server) sourceEvents(w http.ResponseWriter, r *http.Request) {
+	var post core.SourcePost
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&post); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "body is not a source post")
+		return
+	}
+	if len(post.Events) > core.MaxSourceEvents {
+		writeErr(w, http.StatusRequestEntityTooLarge, "too_many", "at most 500 events per post")
+		return
+	}
+	n, err := s.Engine.SourceReport(r.Context(), tokenFrom(r), post)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"received": len(post.Events), "stored": n})
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {

@@ -287,6 +287,9 @@ type APIToken struct {
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
+	// DeviceID binds a source token to its device (ADR-0023); empty for an
+	// operator token.
+	DeviceID string
 }
 
 // User is a console account.
