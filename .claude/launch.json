@@ -7,6 +7,13 @@
       "runtimeArgs": ["--prefix", "web", "run", "dev"],
       "port": 5173,
       "url": "http://localhost:5173"
+    },
+    {
+      "name": "console-preview",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["EX0_PREVIEW_SERVE=2h", "EX0_PREVIEW_ADDR=127.0.0.1:18080", "go", "test", "-tags", "preview", "-run", "TestPreviewServe", "-timeout", "3h", "-v", "./internal/server/console/"],
+      "port": 18080,
+      "url": "http://127.0.0.1:18080"
     }
   ]
 }
