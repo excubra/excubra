@@ -175,6 +175,7 @@ func run(envFile string) error {
 	if err != nil {
 		return err
 	}
+	eng.Loc = loc
 	ingestPort, _ := strconv.Atoi(func() string { _, p := cfg.IngestHostPort(); return p }())
 	con, err := console.New(eng, st, ca, log, loc, ingestHost, ingestPort)
 	if err != nil {

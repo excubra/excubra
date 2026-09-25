@@ -63,6 +63,7 @@ const (
 	SourceMaintenance = "server.maintenance"
 	SourceDiscovery   = "server.discovery"
 	SourceSignals     = "server.signals" // live detection on the box (ADR-0018 §7)
+	SourceApp         = "server.app"     // what an application reported about itself (ADR-0023)
 	SourceConsole     = "console"
 )
 

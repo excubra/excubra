@@ -916,13 +916,13 @@ func (s *Store) DeleteWebhookTarget(ctx context.Context, targetID string) error 
 
 // ---- api tokens -----------------------------------------------------------------------
 
-const tokenCols = `id, name, token_hash, tenants, created_at, last_used_at, revoked_at` //nolint:gosec // column names, not credentials
+const tokenCols = `id, name, token_hash, tenants, created_at, last_used_at, revoked_at, device_id` //nolint:gosec // column names, not credentials
 
 func scanToken(sc interface{ Scan(...any) error }) (APIToken, error) {
 	var t APIToken
 	var tenants, created string
 	var used, revoked sql.NullString
-	err := sc.Scan(&t.ID, &t.Name, &t.TokenHash, &tenants, &created, &used, &revoked)
+	err := sc.Scan(&t.ID, &t.Name, &t.TokenHash, &tenants, &created, &used, &revoked, &t.DeviceID)
 	if err != nil {
 		return t, err
 	}
@@ -936,8 +936,8 @@ func (s *Store) CreateAPIToken(ctx context.Context, t APIToken) error {
 		t.Tenants = []string{"*"}
 	}
 	tenants, _ := json.Marshal(t.Tenants)
-	_, err := s.main.ExecContext(ctx, `INSERT INTO api_tokens (id, name, token_hash, tenants, created_at) VALUES (?, ?, ?, ?, ?)`,
-		t.ID, t.Name, t.TokenHash, string(tenants), ts(t.CreatedAt))
+	_, err := s.main.ExecContext(ctx, `INSERT INTO api_tokens (id, name, token_hash, tenants, created_at, device_id) VALUES (?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Name, t.TokenHash, string(tenants), ts(t.CreatedAt), t.DeviceID)
 	return wrap("create api token", err)
 }
 

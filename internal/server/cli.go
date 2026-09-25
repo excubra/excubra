@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -216,6 +217,57 @@ func keyCmd(args []string) error {
 		fmt.Printf("%s\t%s\n", rec.ID, k.String())
 	}
 	return nil
+}
+
+// sourceCmd: excubra server source add --site S --name X --address A | list (ADR-0023).
+// A source is revoked like any token: excubra server token revoke <id>.
+func sourceCmd(args []string) error {
+	fs := flag.NewFlagSet("excubra server source", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "server env file")
+	siteID := fs.String("site", "", "site the source belongs to")
+	name := fs.String("name", "", "the application's name, e.g. VIIDOC")
+	address := fs.String("address", "", "where it runs, e.g. 10.100.10.3")
+	rest, flags := cliArgs(args)
+	if err := fs.Parse(flags); err != nil {
+		return err
+	}
+	const usage = "usage: excubra server source add --site S --name X --address A | list"
+	if len(rest) == 0 {
+		return errors.New(usage)
+	}
+	st, _, err := cliStore(*envFile)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	now := time.Now()
+	switch rest[0] {
+	case "add":
+		site, err := st.Site(ctx, *siteID)
+		if err != nil {
+			return fmt.Errorf("site %q: %w", *siteID, err)
+		}
+		raw := "ex0_" + id.Secret(32)
+		src, err := st.CreateSource(ctx, site, *name, *address, store.SourceTokenName(*name), api.HashToken(raw), now)
+		if err != nil {
+			return err
+		}
+		_ = st.Audit(ctx, now, "cli", "source.new", src.Device.ID, *name+" "+*address)
+		fmt.Printf("source %s on %s (device %s, token %s) — the token, shown once:\n%s\n", *name, site.ID, src.Device.ID, src.Token.ID, raw)
+		return nil
+	case "list":
+		list, err := st.Sources(ctx)
+		if err != nil {
+			return err
+		}
+		for _, src := range list {
+			fmt.Printf("%s\t%-16s %-16s site=%s token=%s last=%s\n", src.Device.ID, src.Device.Hostname, src.Device.IP,
+				src.Device.SiteID, src.Token.ID, src.Device.LastSeen.Local().Format("2006-01-02 15:04"))
+		}
+		return nil
+	}
+	return fmt.Errorf("source: unknown subcommand %q", rest[0])
 }
 
 // tokenCmd: excubra server token new --name X [--tenants a,b] | list | revoke <id>

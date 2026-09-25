@@ -38,8 +38,9 @@ Reports — das ist Phase 2 und darf durch das Design nur nicht verbaut werden.
 
 - Verbindungsaufbau nur Box → Server. Der Server kann beim Kunden nichts auslösen; er
   wählt nur aus einer festen Liste von Check-Arten und gibt Subnetze an.
-- Ingest (mTLS, 443) ist der einzige öffentliche Endpunkt. Konsole und Status-API nur am
-  Overlay-Listener. Kein gemeinsamer Handler, keine Umleitung.
+- Ingest (mTLS, 443) ist der einzige öffentliche Endpunkt. Konsole nur am Overlay-Listener;
+  die Status-API am Overlay und am eigenen Netz (ADR-0022), dort melden auch Quellen
+  (ADR-0023). Kein gemeinsamer Handler, keine Umleitung.
 - Mandant wird aus dem Client-Zertifikat abgeleitet, nie aus dem Payload.
   Enrollment-Keys einmalig; Zuordnung nur serverseitig — in der Konsole oder über
   die drei Einrichtungs-Werkzeuge des MCP-Servers (`ex0_create_tenant`,
