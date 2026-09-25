@@ -1,8 +1,8 @@
-import { Box, CircleHelp, Globe, Laptop, Monitor, Network, Phone, Printer, Server, Shield, Smartphone } from "lucide-react"
+import { AppWindow, Box, CircleHelp, Globe, Laptop, Monitor, Network, Phone, Printer, Server, Shield, Smartphone } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { VendorMark } from "@/components/vendor-mark"
 
-const map: Record<string, typeof Box> = { fw: Shield, rt: Network, srv: Server, vm: Monitor, tel: Phone, prn: Printer, lap: Laptop, mob: Smartphone, box: Box, wan: Globe, q: CircleHelp }
+const map: Record<string, typeof Box> = { fw: Shield, rt: Network, srv: Server, vm: Monitor, tel: Phone, prn: Printer, lap: Laptop, mob: Smartphone, box: Box, wan: Globe, app: AppWindow, q: CircleHelp }
 
 export function KindIcon({ kind, className }: { kind: string; className?: string }) {
   const Icon = map[kind] ?? CircleHelp
@@ -14,7 +14,8 @@ export function DeviceMark({ kind, vendor, className, active }: { kind: string; 
   // Every known vendor gets its own mark — the brand where a CC0 source has it,
   // a monogram where it does not. Only a device whose vendor we never learned
   // falls back to the kind icon.
-  if (vendor && vendor.trim() && !/^(hersteller )?unbekannt$/i.test(vendor.trim())) {
+  // An application that reports itself has no maker, only its kind.
+  if (kind !== "app" && vendor && vendor.trim() && !/^(hersteller )?unbekannt$/i.test(vendor.trim())) {
     return <VendorMark vendor={vendor} className={cn("size-4 shrink-0", className)} />
   }
   return <KindIcon kind={kind} className={cn(active && "text-primary", className)} />

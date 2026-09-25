@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
-import { FileText, Network, Plug, Radar, ScrollText, ShieldAlert, ShieldCheck } from "lucide-react"
+import { Network, Plug, Radar, ScrollText, ShieldAlert, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/page-header"
 import { EventList } from "@/components/event-list"
@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { get, post, type DeviceDetail, type ServiceRow } from "@/lib/api"
 import { ConnectorPanel } from "@/components/connector-panel"
 import { DeviceFindings } from "@/components/device-findings"
+import { SourceLogs } from "@/components/source-logs"
 import { fmtDateTime, fmtTime, pct } from "@/lib/format"
 
 function Row({ k, children, mono }: { k: string; children: React.ReactNode; mono?: boolean }) {
@@ -31,10 +32,11 @@ function Row({ k, children, mono }: { k: string; children: React.ReactNode; mono
 export default function DevicePage() {
   const { id = "" } = useParams()
   const [params, setParams] = useSearchParams()
-  const tab = params.get("tab") || "uebersicht"
   const navigate = useNavigate()
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ["device", id], queryFn: () => get<DeviceDetail>(`/api/devices/${id}`) })
+  // An application that reports itself has its logs where a device has its overview.
+  const tab = params.get("tab") || (q.data?.source ? "logs" : "uebersicht")
   const act = useMutation({
     mutationFn: ({ path, form }: { path: string; form?: Record<string, string> }) => post(path, form),
     onSuccess: (r) => { toast.success(r.message); qc.invalidateQueries({ queryKey: ["device", id] }) },
@@ -54,6 +56,7 @@ export default function DevicePage() {
   if (!d) return <Skeleton className="h-64" />
   const dev = d.device
   const host = d.host
+  const src = d.source
   const openServices = (d.services ?? []).filter((s) => !s.GoneAt).length
   // The ways in come with the device, worked out on the server from the scan and
   // the connectors — not from a table of port numbers in the browser.
@@ -61,33 +64,44 @@ export default function DevicePage() {
   return (
     <>
       <PageHeader crumbs={[{ label: "Kunden", to: "/tenants" }, { label: d.tenant.Name, to: `/tenants/${d.tenant.ID}` }, { label: d.site.Name, to: `/sites/${d.site.ID}` }, { label: dev.Name }]}
-        title={<><DeviceMark kind={dev.Kind} vendor={dev.Vendor} className={"size-6 " + (dev.Monitored ? "text-primary" : "text-muted-foreground")} />{dev.Name}{dev.Monitored && <StateBadge cls={dev.StateClass} label={dev.StateLabel} />}{dev.IsUplink && <Badge variant="outline" className="border-primary/40 text-primary">Uplink</Badge>}{dev.IsBox && <Badge variant="secondary">diese Box</Badge>}</>}
-        sub={<span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">{dev.KindLabel} · <ConnectIP ip={dev.IP} ways={ways} /> · {dev.Vendor || "Hersteller unbekannt"}</span>}
-        actions={!dev.IsBox && <label className="flex items-center gap-2 text-sm"><span className="text-muted-foreground">Beobachten</span><Switch checked={dev.Monitored} disabled={!dev.IP || act.isPending} onCheckedChange={(on) => act.mutate({ path: on ? `/api/devices/${dev.ID}/watch` : `/api/hosts/${dev.HostID}/unwatch` })} /></label>} />
+        title={<><DeviceMark kind={dev.Kind} vendor={dev.Vendor} className={"size-6 " + (dev.Monitored ? "text-primary" : "text-muted-foreground")} />{dev.Name}{dev.Monitored && <StateBadge cls={dev.StateClass} label={dev.StateLabel} />}{dev.IsUplink && <Badge variant="outline" className="border-primary/40 text-primary">Uplink</Badge>}{dev.IsBox && <Badge variant="secondary">diese Box</Badge>}{src && <Badge variant="outline">meldet sich selbst</Badge>}</>}
+        sub={<span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">{dev.KindLabel} · <ConnectIP ip={dev.IP} ways={ways} />{!src && <> · {dev.Vendor || "Hersteller unbekannt"}</>}</span>}
+        actions={!dev.IsBox && !src && <label className="flex items-center gap-2 text-sm"><span className="text-muted-foreground">Beobachten</span><Switch checked={dev.Monitored} disabled={!dev.IP || act.isPending} onCheckedChange={(on) => act.mutate({ path: on ? `/api/devices/${dev.ID}/watch` : `/api/hosts/${dev.HostID}/unwatch` })} /></label>} />
 
-      <StatGrid>
-        <StatCard label="Zustand" value={dev.Monitored ? dev.StateLabel : "nicht beobachtet"} tone={dev.Monitored ? (dev.StateClass === "down" ? "bad" : dev.StateClass === "up" ? "ok" : undefined) : undefined}
-          line1={host && !host.State.Since.startsWith("0001") ? <>seit <Ago t={host.State.Since} /></> : dev.Monitored ? "noch keine Prüfung" : "Einschalten, dann prüft die Box jede Minute"} line2={host ? `Prüfung ${host.Checks}` : "ICMP-Ping von der Box im LAN"} />
-        <StatCard label="Verfügbarkeit 24 h" value={host ? `${pct(host.Avail.Pct)} %` : "–"} tone={host && host.Avail.Pct < 90 ? "bad" : undefined} line1={host ? `${host.Avail.Failed} von ${host.Avail.Rounds} Prüfungen fehlgeschlagen` : "Erst mit Beobachtung"} line2={host?.IsUplink ? "Uplink: meldet für alle dahinter" : host?.UplinkName ? `hinter ${host.UplinkName}` : "kein Uplink zugeordnet"} />
-        <StatCard label="Im Netz seit" value={<span className="text-xl">{fmtDateTime(dev.FirstSeen)}</span>} line1={dev.GoneAt ? <span className="text-destructive">weg seit <Ago t={dev.GoneAt} /></span> : <>zuletzt gesehen <Ago t={dev.LastSeen} /></>} line2={dev.Ignored ? "im Inventar ignoriert" : "aus der Discovery der Box"} />
-        <StatCard label="Ereignisse" value={d.events?.length ?? 0} line1={d.events?.[0]?.Title ?? "Kein Ereignis"} line2={d.events?.[0] ? `zuletzt ${fmtTime(d.events[0].occurred_at)}` : "letzte 24 Stunden"} />
-      </StatGrid>
+      {src ? (
+        <StatGrid>
+          <StatCard label="Meldet sich" value={src.silent ? "still" : "ja"} tone={src.silent ? "bad" : "ok"}
+            line1={<>letzte Meldung <Ago t={src.lastContact} /></>} line2={`still heißt: ${src.silentAfterMin} Minuten ohne Meldung`} />
+          <StatCard label="Offene Befunde" value={src.openFindings} tone={src.openFindings > 0 ? "bad" : undefined} to={`/devices/${dev.ID}?tab=praevention`}
+            line1={src.openFindings > 0 ? "aus dem, was sie gemeldet hat" : "nichts Auffälliges"} line2="die Regeln prüfen jede Meldung" />
+          <StatCard label="Angelegt" value={<span className="text-xl">{fmtDateTime(dev.FirstSeen)}</span>} line1="als Quelle mit eigenem Token" line2="der Token kann nur melden, nichts lesen" />
+          <StatCard label="Ereignisse" value={d.events?.length ?? 0} line1={d.events?.[0]?.Title ?? "Kein Ereignis"} line2={d.events?.[0] ? `zuletzt ${fmtTime(d.events[0].occurred_at)}` : "letzte 24 Stunden"} />
+        </StatGrid>
+      ) : (
+        <StatGrid>
+          <StatCard label="Zustand" value={dev.Monitored ? dev.StateLabel : "nicht beobachtet"} tone={dev.Monitored ? (dev.StateClass === "down" ? "bad" : dev.StateClass === "up" ? "ok" : undefined) : undefined}
+            line1={host && !host.State.Since.startsWith("0001") ? <>seit <Ago t={host.State.Since} /></> : dev.Monitored ? "noch keine Prüfung" : "Einschalten, dann prüft die Box jede Minute"} line2={host ? `Prüfung ${host.Checks}` : "ICMP-Ping von der Box im LAN"} />
+          <StatCard label="Verfügbarkeit 24 h" value={host ? `${pct(host.Avail.Pct)} %` : "–"} tone={host && host.Avail.Pct < 90 ? "bad" : undefined} line1={host ? `${host.Avail.Failed} von ${host.Avail.Rounds} Prüfungen fehlgeschlagen` : "Erst mit Beobachtung"} line2={host?.IsUplink ? "Uplink: meldet für alle dahinter" : host?.UplinkName ? `hinter ${host.UplinkName}` : "kein Uplink zugeordnet"} />
+          <StatCard label="Im Netz seit" value={<span className="text-xl">{fmtDateTime(dev.FirstSeen)}</span>} line1={dev.GoneAt ? <span className="text-destructive">weg seit <Ago t={dev.GoneAt} /></span> : <>zuletzt gesehen <Ago t={dev.LastSeen} /></>} line2={dev.Ignored ? "im Inventar ignoriert" : "aus der Discovery der Box"} />
+          <StatCard label="Ereignisse" value={d.events?.length ?? 0} line1={d.events?.[0]?.Title ?? "Kein Ereignis"} line2={d.events?.[0] ? `zuletzt ${fmtTime(d.events[0].occurred_at)}` : "letzte 24 Stunden"} />
+        </StatGrid>
+      )}
 
       <Tabs value={tab} onValueChange={(t) => { const p = new URLSearchParams(params); p.set("tab", t); setParams(p, { replace: true }) }}>
         <TabsList>
           <TabsTrigger value="uebersicht">Übersicht</TabsTrigger>
-          <TabsTrigger value="ueberwachung">Überwachung</TabsTrigger>
+          {!src && <TabsTrigger value="ueberwachung">Überwachung</TabsTrigger>}
           <TabsTrigger value="ereignisse">Ereignisse <Badge variant="secondary" className="ml-1">{d.events?.length ?? 0}</Badge></TabsTrigger>
-          <TabsTrigger value="dienste"><Network className="size-3.5" />Dienste <Badge variant="secondary" className="ml-1">{openServices}</Badge></TabsTrigger>
+          {!src && <TabsTrigger value="dienste"><Network className="size-3.5" />Dienste <Badge variant="secondary" className="ml-1">{openServices}</Badge></TabsTrigger>}
           <TabsTrigger value="logs"><ScrollText className="size-3.5" />Logs</TabsTrigger>
-          <TabsTrigger value="konnektor"><Plug className="size-3.5" />Konnektor</TabsTrigger>
-          <TabsTrigger value="patch"><ShieldCheck className="size-3.5" />Patch-Stand</TabsTrigger>
+          {!src && <TabsTrigger value="konnektor"><Plug className="size-3.5" />Konnektor</TabsTrigger>}
+          {!src && <TabsTrigger value="patch"><ShieldCheck className="size-3.5" />Patch-Stand</TabsTrigger>}
           <TabsTrigger value="praevention"><ShieldAlert className="size-3.5" />Prävention</TabsTrigger>
         </TabsList>
 
         <TabsContent value="uebersicht" className="mt-4 grid gap-4 @4xl/main:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle>Gerät</CardTitle><CardDescription>Was die Box über das Gerät weiß.</CardDescription></CardHeader>
+            <CardHeader><CardTitle>Gerät</CardTitle><CardDescription>{src ? "Eine Anwendung, die ihre Ereignisse selbst schickt. Keine Box sieht sie, deshalb hat sie keine MAC." : "Was die Box über das Gerät weiß."}</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-3">
               <Row k="Name">{dev.Name}{dev.Hostname && dev.Hostname !== dev.Name ? <span className="text-muted-foreground"> · meldet sich als {dev.Hostname}</span> : ""}</Row>
               <Row k="Art">{dev.KindLabel}</Row>
@@ -141,7 +155,7 @@ export default function DevicePage() {
             : <Empty className="border"><EmptyHeader><EmptyMedia variant="icon"><Network /></EmptyMedia><EmptyTitle>Noch kein Scan</EmptyTitle><EmptyDescription>Der Schwachstellen-Scan wird am Standort unter Box &amp; Technik eingeschaltet. Die Box tastet die Geräte dann täglich ab: Dienste, Versionen, Zertifikate.</EmptyDescription></EmptyHeader></Empty>}
         </TabsContent>
         <TabsContent value="logs" className="mt-4">
-          <Empty className="border"><EmptyHeader><EmptyMedia variant="icon"><FileText /></EmptyMedia><EmptyTitle>Logs je Gerät kommen mit Phase 2</EmptyTitle><EmptyDescription>{d.logsNote} Geplant: Syslog der Firewall, Agent-Logs, Zeitraum und Filter, Live-Ansicht.</EmptyDescription></EmptyHeader></Empty>
+          <SourceLogs deviceId={id} note={d.logsNote} />
         </TabsContent>
         <TabsContent value="konnektor" className="mt-4">
           <ConnectorPanel deviceId={id} />
