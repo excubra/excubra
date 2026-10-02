@@ -1,10 +1,17 @@
-// Package mcp is EX0 for an assistant: a Model Context Protocol server over
-// stdio, meant to be started through SSH from a machine in the operator overlay
-// (`ssh root@ex0 excubra server mcp`), so nothing new listens anywhere. It reads
-// what the console shows — tenants, sites, devices, services, findings, events,
-// the situation packet — and stores an assessment the assistant wrote. It
-// acknowledges nothing, changes nothing else: the planner role from the concept
-// (salt: Vollausbau 3.8), it reads and proposes.
+// Package mcp is EX0 for an assistant: a Model Context Protocol server, reached
+// through SSH from a machine in the operator overlay (`ssh root@ex0 excubra
+// server mcp`), so nothing new listens anywhere. It reads what the console
+// shows — tenants, sites, devices, services, findings, events, the situation
+// packet — and stores an assessment the assistant wrote.
+//
+// And it sets a customer up (ADR-0017 amendment, ADR-0024): tenant, site,
+// enrollment key with the complete command, the site's LAN, the hand-over to
+// the customer's VPN, what is monitored, the scan with the consent on record,
+// and one answer to "how far is this site". Set-up is work on our server; it
+// is audited under the session's actor and reaches no customer system.
+//
+// It acknowledges nothing and operates nothing: a finding, an outage, a
+// device's credentials stay with a person in the console.
 package mcp
 
 import (
@@ -43,6 +50,12 @@ type Server struct {
 	CAFingerprint string
 	Ingest        string // host the boxes dial
 	IngestPt      int
+
+	// The running server's engine and services, for the set-up tools
+	// (rollout.go). nil when the command answers from the files.
+	Engine Engine
+	Remote Remote
+	Watch  Watcher
 }
 
 type request struct {
@@ -102,7 +115,7 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	case "initialize":
 		return response{Result: map[string]any{"protocolVersion": Protocol, "capabilities": map[string]any{"tools": map[string]any{}},
 			"serverInfo":   map[string]any{"name": "ex0", "version": version.Version},
-			"instructions": "EX0 (excubra) ist das Monitoring- und Präventionssystem von VIICO für Kundennetze. Du liest Standorte, Geräte, Dienste, Findings, Ereignisse und das Lagebild; du kannst eine Einschätzung speichern (ex0_save_assessment). Einrichten darfst du: Kunde anlegen (ex0_create_tenant), Standort anlegen (ex0_create_site), Enrollment-Key mit Einzeiler erzeugen (ex0_new_box) — das sind Aufträge an den Server, nicht an ein Kundensystem. Alles andere schaltet, quittiert oder führt ein Mensch in der Konsole aus; der Einzeiler auf dem Kunden-Proxmox bleibt ein Mensch mit root."}}
+			"instructions": instructions}}
 	case "ping":
 		return response{Result: map[string]any{}}
 	case "tools/list":
@@ -123,6 +136,15 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	}
 	return response{Error: &rpcError{Code: -32601, Message: "method not found: " + req.Method}}
 }
+
+// instructions is what a session reads first.
+const instructions = "EX0 (excubra) ist das Monitoring- und Präventionssystem von VIICO für Kundennetze. " +
+	"Lesen: Standorte, Geräte, Dienste, Findings, Ereignisse, Lagebild; eine Einschätzung speichern (ex0_save_assessment). " +
+	"Einrichten — ein Kunde in einer Sitzung, in dieser Reihenfolge: ex0_create_tenant, ex0_create_site, ex0_new_box (mit allen Container-Werten und den SSH-Schlüsseln der Techniker; liefert den vollständigen Befehl), " +
+	"dann ex0_rollout_status, bis die Box da ist; ex0_site_lan nur, wenn der Status es verlangt (LAN außerhalb RFC 1918, überlappendes Netz); ex0_customer_vpn, wenn der Kunde ein eigenes VPN bekommt; " +
+	"ex0_watch_suggestion und ex0_watch für die Überwachung; ex0_site_scan nur mit festgehaltener Einwilligung. ex0_rollout_status sagt zu jedem Schritt, was fehlt. " +
+	"Das alles sind Aufträge an unseren Server, kein Zugriff auf ein Kundensystem. Der Befehl aus ex0_new_box läuft mit root auf dem Proxmox oder der Box des Kunden: Den führt aus, wer dort Zugang hat. " +
+	"Quittieren, Wartung, DNS-Sensor, Konnektor-Zugangsdaten und alles Operative bleiben bei einem Menschen in der Konsole."
 
 type tool struct {
 	Name        string         `json:"name"`
@@ -169,6 +191,32 @@ func tools() []tool {
 			"memory":       integer("Proxmox: RAM in MiB, Standard 1024"),
 			"ssh_keys":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "öffentliche SSH-Schlüssel der Techniker für root auf der Box (je einer: Typ, Schlüssel, optional Name). Ohne Schlüssel kommt niemand per SSH auf die Box"},
 		}, "site_id")},
+		{Name: "ex0_rollout_status", Description: "Wie weit ist dieser Standort? Jeder Schritt eines Rollouts mit Zustand (ok, open, waiting, optional), Begründung und dem nächsten Handgriff: Box, Version, Techniker-VPN, LAN, Fernzugriff, Kunden-VPN, Geräte, Überwachung, Scan. Nach jedem Schritt aufrufen statt zu raten; »done: true« ist die Abnahme.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
+		{Name: "ex0_site_lan", Description: "Schaltet den Fernzugriff auf das LAN eines Standorts ein: Das Netz erscheint im Techniker-Stack als eigener Eintrag, geroutet über die Box. Normalerweise passiert das von selbst; dieses Werkzeug ist für die Fälle, in denen ex0_rollout_status es verlangt — ein anderes Netz als das gemeldete, ein behobener Konflikt, oder ein LAN außerhalb RFC 1918 (z. B. 192.0.2.0/24). Letzteres nur mit confirm_public: true und nur, wenn ein Mensch für diesen Kunden bestätigt hat, dass das Netz wirklich so nummeriert ist.", InputSchema: schema(map[string]any{
+			"site_id":        str("Standort-Kennung"),
+			"lan":            str("das LAN in CIDR-Schreibweise; ohne Angabe das Netz, das die Box meldet"),
+			"confirm_public": map[string]any{"type": "boolean", "description": "true erklärt ein Netz außerhalb RFC 1918 zum LAN dieses Standorts. Nur nach Bestätigung durch einen Menschen; steht im Audit-Log"},
+		}, "site_id")},
+		{Name: "ex0_customer_vpn", Description: "Übergibt der Box eines Standorts den Zugang zum eigenen NetBird-Stack des Kunden (Mitarbeiter-VPN): Management-URL und Setup-Key der Box-Gruppe. Die Box holt den Schlüssel einmalig ab und tritt bei; der Server vergisst ihn danach. Ein Einmal-Key ist richtig: Er geht durch diese Sitzung.", InputSchema: schema(map[string]any{
+			"site_id":        str("Standort-Kennung"),
+			"management_url": str("https://<kunde>.vpn.… — der Stack des Kunden"),
+			"setup_key":      str("Setup-Key der Box-Gruppe dieses Stacks, einmalig verwendbar"),
+		}, "site_id", "management_url", "setup_key")},
+		{Name: "ex0_watch_suggestion", Description: "Was die Regel »beobachten, was zählt« an diesem Standort einschalten würde (Firewall, Netzwerk, Server, VMs, Telefonie, Drucker), was sie übergeht und warum, und was schon beobachtet wird — mit Geräte-Kennungen für ex0_watch.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
+		{Name: "ex0_watch", Description: "Schaltet die Überwachung ein. suggested: true übernimmt den Vorschlag der Regel (Ping; Firewall und Router als Uplink). devices nimmt einzelne Geräte auf oder ändert beobachtete: je Gerät device_id, optional checks (icmp, tcp:<port>, http(s)-URL — andere Prüfungen kennt die Box nicht) und uplink. Die Box prüft ab der nächsten Minute. Nicht beobachten, was kommt und geht (Laptops, Telefone ohne feste Adresse): Das macht jeden Abend Störungen.", InputSchema: schema(map[string]any{
+			"site_id":   str("Standort-Kennung"),
+			"suggested": map[string]any{"type": "boolean", "description": "den Vorschlag aus ex0_watch_suggestion übernehmen"},
+			"devices": map[string]any{"type": "array", "description": "einzelne Geräte", "items": map[string]any{"type": "object", "properties": map[string]any{
+				"device_id": str("Geräte-Kennung"),
+				"checks":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "icmp | tcp:<port> | http(s)://… ; ohne Angabe Ping (neu) bzw. unverändert"},
+				"uplink":    map[string]any{"type": "boolean", "description": "der Weg nach draußen: fällt er aus, wird nur er gemeldet"},
+			}, "required": []string{"device_id"}}},
+		}, "site_id")},
+		{Name: "ex0_site_scan", Description: "Schaltet den Schwachstellen-Scan eines Standorts (innen durch die Box, außen durch den Außenposten). Einschalten braucht die Einwilligung des Kunden (E20): consent sagt in einem Satz, wer wann zugestimmt hat und wo es steht — er kommt ins Audit-Log. Ohne Einwilligung bleibt der Scan aus.", InputSchema: schema(map[string]any{
+			"site_id": str("Standort-Kennung"),
+			"on":      map[string]any{"type": "boolean", "description": "an oder aus"},
+			"consent": str("beim Einschalten Pflicht: wer hat wann eingewilligt, wo steht es"),
+		}, "site_id", "on")},
 	}
 }
 
@@ -241,6 +289,29 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 			days = int(d)
 		}
 		return s.newBox(ctx, argString(args, "site_id"), argString(args, "note"), days, installerArgs(args))
+	case "ex0_rollout_status":
+		return s.rolloutStatus(ctx, argString(args, "site_id"))
+	case "ex0_site_lan":
+		confirm, _ := args["confirm_public"].(bool)
+		return s.siteLAN(ctx, argString(args, "site_id"), argString(args, "lan"), confirm)
+	case "ex0_customer_vpn":
+		key, _ := args["setup_key"].(string)
+		return s.customerVPN(ctx, argString(args, "site_id"), argString(args, "management_url"), strings.TrimSpace(key))
+	case "ex0_watch_suggestion":
+		return s.watchSuggestion(ctx, argString(args, "site_id"))
+	case "ex0_watch":
+		picks, err := watchArgs(args)
+		if err != nil {
+			return "", err
+		}
+		suggested, _ := args["suggested"].(bool)
+		return s.watchApply(ctx, argString(args, "site_id"), suggested, picks)
+	case "ex0_site_scan":
+		on, ok := args["on"].(bool)
+		if !ok {
+			return "", errors.New("on: true oder false")
+		}
+		return s.siteScan(ctx, argString(args, "site_id"), on, argString(args, "consent"))
 	}
 	return "", errors.New("unknown tool " + name)
 }

@@ -179,6 +179,10 @@ func TestNetbirdClaimOnce(t *testing.T) {
 	if _, err := s.ClaimNetbirdKey(ctx, "box_1", t0); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second claim: %v", err)
 	}
+	// handed over means gone: the row remembers where and when, not the key
+	if left, err := s.NetbirdKey(ctx, "box_1"); err != nil || left.SetupKey != "" || left.ManagementURL != "https://a.vpn.example" || left.ClaimedAt == nil {
+		t.Fatalf("after the claim: %+v %v", left, err)
+	}
 	must(t, s.SetNetbirdKey(ctx, NetbirdKey{BoxID: "box_1", ManagementURL: "https://a.vpn.example", SetupKey: "sk2", CreatedAt: t0})) // re-issue
 	if _, err := s.ClaimNetbirdKey(ctx, "box_1", t0); err != nil {
 		t.Fatalf("re-issued claim: %v", err)

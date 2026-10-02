@@ -311,7 +311,7 @@ func run(envFile string) error {
 	// to it — so a session works with the unsealed CA, the engine and the
 	// services of this process, and nothing new listens on a network.
 	mcpSrv := &mcp.Server{Store: st, AI: aiSvc, Log: log, Now: time.Now, Actor: "mcp",
-		CAFingerprint: ca.Fingerprint(), Ingest: ingestHost, IngestPt: ingestPort}
+		CAFingerprint: ca.Fingerprint(), Ingest: ingestHost, IngestPt: ingestPort, Engine: eng, Remote: rem, Watch: con}
 	go func() {
 		if err := mcpSrv.ServeSocket(ctx, filepath.Join(cfg.DataDir, mcp.SocketName)); err != nil {
 			log.Warn("mcp socket unavailable; `excubra server mcp` answers from the files instead", "err", err)

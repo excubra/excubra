@@ -442,7 +442,15 @@ func (s *Store) ClaimNetbirdKeyProfile(ctx context.Context, boxID, profile strin
 	if n, _ := res.RowsAffected(); n != 1 {
 		return NetbirdKey{}, ErrNotFound
 	}
-	return s.NetbirdKeyProfile(ctx, boxID, profile)
+	k, err := s.NetbirdKeyProfile(ctx, boxID, profile)
+	if err != nil {
+		return NetbirdKey{}, err
+	}
+	// Handed over means gone: the row keeps where the box went and when, not
+	// the key. (A key that was good for more than one use would otherwise lie
+	// here for as long as the box lives.)
+	_, _ = s.main.ExecContext(ctx, `UPDATE netbird_keys SET setup_key = '' WHERE box_id = ? AND profile = ?`, boxID, profile)
+	return k, nil
 }
 
 // DeleteNetbirdKey removes the customer-stack record.

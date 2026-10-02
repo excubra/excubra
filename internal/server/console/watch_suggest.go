@@ -2,6 +2,7 @@ package console
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/excubra/excubra/internal/id"
 	"github.com/excubra/excubra/internal/server/store"
+	"github.com/excubra/excubra/internal/server/watch"
 	"github.com/excubra/excubra/internal/wire"
 )
 
@@ -75,27 +77,45 @@ func stableAddress(ip string) bool {
 	return !a.IsLinkLocalUnicast() && !a.IsLoopback() && !a.IsUnspecified() && !a.IsMulticast()
 }
 
-// siteWatchSuggested switches monitoring on for everything the rule picks.
-func (s *Server) siteWatchSuggested(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	siteID := r.PathValue("id")
-	back := "/sites/" + siteID + "?tab=netz"
+// WatchProposal answers what the rule would switch on at a site, what it leaves
+// out and why, and what is watched already — for the console's button and for a
+// session that sets a site up (ADR-0024).
+func (s *Server) WatchProposal(ctx context.Context, siteID string) (watch.Proposal, error) {
 	d, err := s.buildSite(ctx, siteID, "netz", "24h")
 	if err != nil {
-		s.fail(w, r, err, statusFor(err))
-		return
+		return watch.Proposal{}, err
+	}
+	sug := suggestWatch(d.Devices)
+	checks := map[string][]string{}
+	for _, h := range d.Hosts {
+		for _, c := range h.Host.Checks {
+			checks[h.ID] = append(checks[h.ID], c.Label())
+		}
+	}
+	out := watch.Proposal{HasBox: d.Box != nil, Add: []watch.Device{}, Skipped: sug.Skipped, Watched: []watch.Device{}}
+	for _, c := range sug.Add {
+		out.Add = append(out.Add, watch.Device{DeviceID: c.ID, Name: c.Name, IP: c.IP, Kind: c.KindLabel, Uplink: isUplinkKind(c.Kind)})
+	}
+	for _, c := range d.Devices {
+		if c.Monitored {
+			out.Watched = append(out.Watched, watch.Device{DeviceID: c.ID, Name: c.Name, IP: c.IP, Kind: c.KindLabel, Uplink: c.IsUplink, HostID: c.HostID, Checks: checks[c.HostID], State: c.StateLabel})
+		}
+	}
+	return out, nil
+}
+
+// WatchSuggested switches monitoring on for everything the rule picks.
+func (s *Server) WatchSuggested(ctx context.Context, siteID, actor string) (watch.Outcome, error) {
+	d, err := s.buildSite(ctx, siteID, "netz", "24h")
+	if err != nil {
+		return watch.Outcome{}, err
 	}
 	box, err := s.activeBox(ctx, siteID)
 	if err != nil {
-		s.flashErr(w, r, "Diesem Standort ist keine Box zugeordnet; erst eine Box zuordnen.", back)
-		return
+		return watch.Outcome{}, errNoBox
 	}
 	sug := suggestWatch(d.Devices)
-	if len(sug.Add) == 0 {
-		s.flash(w, r, "Nichts hinzuzufügen: "+explainSkipped(sug.Skipped), back)
-		return
-	}
-	var added, failed int
+	out := watch.Outcome{Added: []string{}, Skipped: sug.Skipped}
 	for _, c := range sug.Add {
 		h := store.Host{
 			ID: id.New("host"), TenantID: c.TenantID, SiteID: c.SiteID, BoxID: box.ID, DeviceID: c.ID,
@@ -103,41 +123,136 @@ func (s *Server) siteWatchSuggested(w http.ResponseWriter, r *http.Request) {
 			IsUplink: isUplinkKind(c.Kind),
 			Checks:   []wire.CheckConfig{{Type: wire.CheckICMP}}, CreatedAt: s.Now(),
 		}
-		if err := s.Engine.CreateHost(ctx, h, actor(r)); err != nil {
-			failed++
+		if err := s.Engine.CreateHost(ctx, h, actor); err != nil {
+			out.Failed = append(out.Failed, c.Name+": "+err.Error())
 			s.Log.Warn("suggested watch", "device", c.ID, "err", err)
 			continue
 		}
-		added++
+		out.Added = append(out.Added, c.Name)
 	}
-	_ = s.Store.Audit(ctx, s.Now(), actor(r), "site.watch.suggested", siteID, fmt.Sprintf("%d aufgenommen, %d fehlgeschlagen", added, failed))
+	if len(sug.Add) > 0 {
+		_ = s.Store.Audit(ctx, s.Now(), actor, "site.watch.suggested", siteID, fmt.Sprintf("%d aufgenommen, %d fehlgeschlagen", len(out.Added), len(out.Failed)))
+	}
+	return out, nil
+}
+
+// errNoBox: a site without a box has nobody to do the checking.
+var errNoBox = errors.New("diesem Standort ist keine Box zugeordnet")
+
+// WatchDevices switches monitoring on for the devices named, with the checks
+// named — and for a device that is watched already, changes its checks or its
+// uplink flag. It is the console's device card and host form in one call, for a
+// session that knows which devices matter and how to ask them.
+func (s *Server) WatchDevices(ctx context.Context, siteID, actor string, picks []watch.Pick) (watch.Outcome, error) {
+	d, err := s.buildSite(ctx, siteID, "netz", "24h")
+	if err != nil {
+		return watch.Outcome{}, err
+	}
+	box, err := s.activeBox(ctx, siteID)
+	if err != nil {
+		return watch.Outcome{}, errNoBox
+	}
+	cards := map[string]deviceCard{}
+	for _, c := range d.Devices {
+		cards[c.ID] = c
+	}
+	out := watch.Outcome{Added: []string{}}
+	for _, p := range picks {
+		c, ok := cards[p.DeviceID]
+		switch {
+		case !ok:
+			out.Failed = append(out.Failed, p.DeviceID+": kein Gerät dieses Standorts")
+			continue
+		case c.IsBox:
+			out.Failed = append(out.Failed, c.Name+": die Box beobachtet sich nicht selbst")
+			continue
+		}
+		if c.Monitored {
+			h, err := s.Store.Host(ctx, c.HostID)
+			if err != nil {
+				out.Failed = append(out.Failed, c.Name+": "+err.Error())
+				continue
+			}
+			if len(p.Checks) > 0 {
+				h.Checks = p.Checks
+			}
+			if p.Uplink != nil {
+				h.IsUplink = *p.Uplink
+			}
+			if err := s.Engine.UpdateHost(ctx, h, actor); err != nil {
+				out.Failed = append(out.Failed, c.Name+": "+err.Error())
+				continue
+			}
+			out.Updated = append(out.Updated, c.Name)
+			continue
+		}
+		if c.IP == "" {
+			out.Failed = append(out.Failed, c.Name+": das Gerät hat keine IPv4-Adresse gezeigt, ohne Adresse kann die Box es nicht prüfen")
+			continue
+		}
+		h := store.Host{ID: id.New("host"), TenantID: c.TenantID, SiteID: c.SiteID, BoxID: box.ID, DeviceID: c.ID,
+			Name: c.Name, Address: c.IP, MAC: c.MAC, Vendor: c.Vendor, IsUplink: isUplinkKind(c.Kind),
+			Checks: []wire.CheckConfig{{Type: wire.CheckICMP}}, CreatedAt: s.Now()}
+		if len(p.Checks) > 0 {
+			h.Checks = p.Checks
+		}
+		if p.Uplink != nil {
+			h.IsUplink = *p.Uplink
+		}
+		if err := s.Engine.CreateHost(ctx, h, actor); err != nil {
+			out.Failed = append(out.Failed, c.Name+": "+err.Error())
+			continue
+		}
+		out.Added = append(out.Added, c.Name)
+	}
+	return out, nil
+}
+
+// siteWatchSuggested is the console's button for WatchSuggested.
+func (s *Server) siteWatchSuggested(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	siteID := r.PathValue("id")
+	back := "/sites/" + siteID + "?tab=netz"
+	out, err := s.WatchSuggested(ctx, siteID, actor(r))
+	switch {
+	case errors.Is(err, errNoBox):
+		s.flashErr(w, r, "Diesem Standort ist keine Box zugeordnet; erst eine Box zuordnen.", back)
+		return
+	case err != nil:
+		s.fail(w, r, err, statusFor(err))
+		return
+	}
+	added, failed := len(out.Added), len(out.Failed)
+	if added == 0 && failed == 0 {
+		s.flash(w, r, "Nichts hinzuzufügen: "+explainSkipped(out.Skipped), back)
+		return
+	}
 	msg := fmt.Sprintf("%d Gerät%s aufgenommen; die Box prüft sie ab der nächsten Minute.", added, plural(added, "", "e"))
 	if failed > 0 {
 		msg += fmt.Sprintf(" %d konnten nicht aufgenommen werden.", failed)
 	}
-	if len(sug.Skipped) > 0 {
-		msg += " Übergangen: " + explainSkipped(sug.Skipped) + "."
+	if len(out.Skipped) > 0 {
+		msg += " Übergangen: " + explainSkipped(out.Skipped) + "."
 	}
 	s.flash(w, r, msg, back)
 }
 
 // apiSiteWatchSuggestion answers what the rule would do, without doing it.
 func (s *Server) apiSiteWatchSuggestion(w http.ResponseWriter, r *http.Request) {
-	d, err := s.buildSite(r.Context(), r.PathValue("id"), "netz", "24h")
+	p, err := s.WatchProposal(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.fail(w, r, err, statusFor(err))
 		return
 	}
-	sug := suggestWatch(d.Devices)
-	names := make([]string, 0, len(sug.Add))
-	for _, c := range sug.Add {
+	names := make([]string, 0, len(p.Add))
+	for _, c := range p.Add {
 		names = append(names, c.Name)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"count":   len(sug.Add),
+		"count":   len(p.Add),
 		"names":   names,
-		"skipped": sug.Skipped,
-		"hasBox":  d.Box != nil,
+		"skipped": p.Skipped,
+		"hasBox":  p.HasBox,
 	})
 }
 

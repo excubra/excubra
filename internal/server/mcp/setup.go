@@ -65,10 +65,17 @@ func (s *Server) createSite(ctx context.Context, tenantID, slug, name, address s
 		return "", fmt.Errorf("%s gibt es schon", sid)
 	}
 	now := s.Now()
-	if err := s.Store.CreateSite(ctx, store.Site{ID: sid, TenantID: tenantID, Name: name, CreatedAt: now}); err != nil {
-		return "", err
+	if s.Engine != nil {
+		// in the server: the engine keeps the sites in memory and audits itself
+		if err := s.Engine.CreateSite(ctx, store.Site{ID: sid, TenantID: tenantID, Name: name, CreatedAt: now}, s.Actor); err != nil {
+			return "", err
+		}
+	} else {
+		if err := s.Store.CreateSite(ctx, store.Site{ID: sid, TenantID: tenantID, Name: name, CreatedAt: now}); err != nil {
+			return "", err
+		}
+		_ = s.Store.Audit(ctx, now, s.Actor, "site.create", sid, name)
 	}
-	_ = s.Store.Audit(ctx, now, s.Actor, "site.create", sid, name)
 	out := map[string]any{"site_id": sid, "tenant_id": tenantID, "name": name, "next": "ex0_new_box mit site_id " + sid}
 
 	address = strings.TrimSpace(address)
