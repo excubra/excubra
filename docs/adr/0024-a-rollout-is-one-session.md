@@ -1,6 +1,6 @@
 # ADR-0024: A rollout is one session
 
-Status: accepted · Date: 2026-10-02 · Decision E30
+Status: accepted · Date: 2026-10-02 · Decision E30 · Amended 2026-10-02 (an uplink is a relation)
 
 ## Context
 
@@ -62,7 +62,7 @@ The tools a session has, each audited under the actor it runs as:
 | `ex0_rollout_status` | every step of a rollout with its state (`ok`, `open`, `waiting`, `optional`) and the next move; `done: true` is the acceptance |
 | `ex0_site_lan` | remote access for another network than the reported one, or for one outside RFC 1918 (§4) |
 | `ex0_customer_vpn` | hands the site's box the customer's own NetBird stack (management URL, setup key); the server forgets the key once the box claimed it |
-| `ex0_watch_suggestion`, `ex0_watch` | the console's "beobachten, was zählt" and single devices with their checks — the closed list of check types (ADR-0003) is the only thing it can ask for |
+| `ex0_watch_suggestion`, `ex0_watch` | the console's "beobachten, was zählt" and single devices with their checks — the closed list of check types (ADR-0003) is the only thing it can ask for; `behind` places a device behind another watched one (amendment below) |
 | `ex0_site_scan` | the service scan; switching it on takes the customer's consent as a sentence, which goes into the audit log (ADR-0018, E20) |
 
 The line that does not move: the server still cannot make a box do anything
@@ -169,3 +169,26 @@ traffic for that range with it. It is in the audit log.
   none; the installer without a key and with `--ssh-key`, run once on the box,
   adds them.
 - The command is longer. It is also complete: nothing is appended by hand.
+
+## Amendment, 02.10.2026: an uplink is a relation, not a mark
+
+The first hour on the production server showed `ex0_rollout_status` asking for
+an uplink at a site where nothing was wrong, and promising that the mark would
+turn forty outages into one. It does not. The state machine suppresses a host
+while a host it sits *behind* is down (`parent_host_id`, ADR-0004); the mark
+"Uplink" on a host suppresses nothing, and neither the console's proposal nor
+`ex0_watch` ever put a device behind another. Nor did a rollout need it: a cut
+line silences the box, and box silence is one event with every host frozen.
+
+- `ex0_rollout_status` asks that devices are watched, not that one is an uplink.
+- `ex0_watch` takes `behind`: the watched device a device sits behind. That is
+  for what a person knows about a site and the box cannot see — a branch behind
+  a tunnel, a hall behind a radio bridge. The device in front gets the mark, so
+  the console shows the relation from both ends. Refused: behind something
+  that is not watched, behind itself, a circle.
+- The console's "Als Uplink" says what the mark does.
+
+Rejected: putting everything the proposal adds behind the firewall. In a flat
+LAN the box sits behind that firewall too, so its outage is box silence anyway;
+what the relation would add is one way to lose sight of a site — a firewall
+that stops answering a ping while everything behind it runs.

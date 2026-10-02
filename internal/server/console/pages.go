@@ -566,7 +566,7 @@ func (s *Server) hostUplink(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, http.StatusInternalServerError)
 		return
 	}
-	msg := h.Name + " ist jetzt der Uplink: fällt er aus, wird nur er gemeldet."
+	msg := h.Name + " ist jetzt als Uplink markiert. Was dahinter hängt, legt jeder Host auf seiner Seite fest (»Uplink dieses Hosts«); fällt der Uplink aus, wird für diese Hosts nur er gemeldet."
 	if !h.IsUplink {
 		msg = h.Name + " ist kein Uplink mehr."
 	}

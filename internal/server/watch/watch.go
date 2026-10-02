@@ -13,7 +13,8 @@ type Device struct {
 	Name     string   `json:"name"`
 	IP       string   `json:"ip"`
 	Kind     string   `json:"kind"`              // what it is, in words: Firewall, Server, Telefonie …
-	Uplink   bool     `json:"uplink,omitempty"`  // the way out of the site: its outage is one outage, not forty
+	Uplink   bool     `json:"uplink,omitempty"`  // marked as something other hosts can sit behind
+	Behind   string   `json:"behind,omitempty"`  // the watched device this one sits behind, by name
 	HostID   string   `json:"host_id,omitempty"` // set when the device is watched
 	Checks   []string `json:"checks,omitempty"`  // icmp, tcp:443, http
 	State    string   `json:"state,omitempty"`   // erreichbar, ausgefallen, …
@@ -33,6 +34,10 @@ type Pick struct {
 	DeviceID string
 	Checks   []wire.CheckConfig // empty: a ping for a new host, unchanged for a watched one
 	Uplink   *bool              // nil: by kind for a new host, unchanged for a watched one
+	// Behind names the device this one sits behind: while that one is down, this
+	// one's outage is not reported. "" takes it out from behind anything, nil
+	// leaves it as it is. The device named has to be watched itself.
+	Behind *string
 }
 
 // Outcome is what switching on did, by device name.

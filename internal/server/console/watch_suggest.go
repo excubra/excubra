@@ -62,9 +62,11 @@ func suggestWatch(devices []deviceCard) suggestedForWatch {
 	return out
 }
 
-// isUplinkKind marks the way out of the site. A firewall or router carries
-// everything behind it, and the state machine suppresses the children of a dead
-// uplink — so one cut line becomes one outage instead of forty.
+// isUplinkKind marks what other hosts can sit behind: a firewall, a router. The
+// mark alone suppresses nothing. The state machine suppresses a host while the
+// host it sits behind is down (ParentID), and which host sits behind which is
+// something a person knows — a branch behind a tunnel, a hall behind a bridge.
+// A cut line needs none of it: the box falls silent, and that is one event.
 func isUplinkKind(kind string) bool { return kind == "fw" || kind == "rt" }
 
 // stableAddress rejects what will not still be the same host tomorrow: link-local
@@ -86,11 +88,12 @@ func (s *Server) WatchProposal(ctx context.Context, siteID string) (watch.Propos
 		return watch.Proposal{}, err
 	}
 	sug := suggestWatch(d.Devices)
-	checks := map[string][]string{}
+	checks, behind := map[string][]string{}, map[string]string{}
 	for _, h := range d.Hosts {
 		for _, c := range h.Host.Checks {
 			checks[h.ID] = append(checks[h.ID], c.Label())
 		}
+		behind[h.ID] = h.UplinkName
 	}
 	out := watch.Proposal{HasBox: d.Box != nil, Add: []watch.Device{}, Skipped: sug.Skipped, Watched: []watch.Device{}}
 	for _, c := range sug.Add {
@@ -98,7 +101,7 @@ func (s *Server) WatchProposal(ctx context.Context, siteID string) (watch.Propos
 	}
 	for _, c := range d.Devices {
 		if c.Monitored {
-			out.Watched = append(out.Watched, watch.Device{DeviceID: c.ID, Name: c.Name, IP: c.IP, Kind: c.KindLabel, Uplink: c.IsUplink, HostID: c.HostID, Checks: checks[c.HostID], State: c.StateLabel})
+			out.Watched = append(out.Watched, watch.Device{DeviceID: c.ID, Name: c.Name, IP: c.IP, Kind: c.KindLabel, Uplink: c.IsUplink, Behind: behind[c.HostID], HostID: c.HostID, Checks: checks[c.HostID], State: c.StateLabel})
 		}
 	}
 	return out, nil
@@ -140,9 +143,10 @@ func (s *Server) WatchSuggested(ctx context.Context, siteID, actor string) (watc
 var errNoBox = errors.New("diesem Standort ist keine Box zugeordnet")
 
 // WatchDevices switches monitoring on for the devices named, with the checks
-// named — and for a device that is watched already, changes its checks or its
-// uplink flag. It is the console's device card and host form in one call, for a
-// session that knows which devices matter and how to ask them.
+// named — and for a device that is watched already, changes its checks, its
+// uplink mark or the device it sits behind. It is the console's device card and
+// host form in one call, for a session that knows which devices matter and how
+// to ask them.
 func (s *Server) WatchDevices(ctx context.Context, siteID, actor string, picks []watch.Pick) (watch.Outcome, error) {
 	d, err := s.buildSite(ctx, siteID, "netz", "24h")
 	if err != nil {
@@ -157,6 +161,13 @@ func (s *Server) WatchDevices(ctx context.Context, siteID, actor string, picks [
 		cards[c.ID] = c
 	}
 	out := watch.Outcome{Added: []string{}}
+	// hostOf: the host a device is watched as — also one this very call made
+	hostOf := map[string]string{}
+	for _, c := range d.Devices {
+		if c.Monitored {
+			hostOf[c.ID] = c.HostID
+		}
+	}
 	for _, p := range picks {
 		c, ok := cards[p.DeviceID]
 		switch {
@@ -167,8 +178,13 @@ func (s *Server) WatchDevices(ctx context.Context, siteID, actor string, picks [
 			out.Failed = append(out.Failed, c.Name+": die Box beobachtet sich nicht selbst")
 			continue
 		}
-		if c.Monitored {
-			h, err := s.Store.Host(ctx, c.HostID)
+		parentID, err := s.behind(ctx, p, c, cards, hostOf, actor)
+		if err != nil {
+			out.Failed = append(out.Failed, c.Name+": "+err.Error())
+			continue
+		}
+		if hostID := hostOf[c.ID]; hostID != "" {
+			h, err := s.Store.Host(ctx, hostID)
 			if err != nil {
 				out.Failed = append(out.Failed, c.Name+": "+err.Error())
 				continue
@@ -178,6 +194,9 @@ func (s *Server) WatchDevices(ctx context.Context, siteID, actor string, picks [
 			}
 			if p.Uplink != nil {
 				h.IsUplink = *p.Uplink
+			}
+			if p.Behind != nil {
+				h.ParentID = parentID
 			}
 			if err := s.Engine.UpdateHost(ctx, h, actor); err != nil {
 				out.Failed = append(out.Failed, c.Name+": "+err.Error())
@@ -199,13 +218,57 @@ func (s *Server) WatchDevices(ctx context.Context, siteID, actor string, picks [
 		if p.Uplink != nil {
 			h.IsUplink = *p.Uplink
 		}
+		h.ParentID = parentID
 		if err := s.Engine.CreateHost(ctx, h, actor); err != nil {
 			out.Failed = append(out.Failed, c.Name+": "+err.Error())
 			continue
 		}
+		hostOf[c.ID] = h.ID
 		out.Added = append(out.Added, c.Name)
 	}
 	return out, nil
+}
+
+// behind resolves the device a pick wants to sit behind into that device's host,
+// and marks it as an uplink so the console shows the relation from both ends.
+// Refused: a device that is not watched (nobody would notice it going down), the
+// device itself, and a circle.
+func (s *Server) behind(ctx context.Context, p watch.Pick, c deviceCard, cards map[string]deviceCard, hostOf map[string]string, actor string) (string, error) {
+	if p.Behind == nil || *p.Behind == "" {
+		return "", nil
+	}
+	pc, ok := cards[*p.Behind]
+	switch {
+	case !ok:
+		return "", errors.New("behind: " + *p.Behind + " ist kein Gerät dieses Standorts")
+	case pc.ID == c.ID:
+		return "", errors.New("behind: ein Gerät hängt nicht hinter sich selbst")
+	case hostOf[pc.ID] == "":
+		return "", errors.New("behind: " + pc.Name + " wird selbst nicht beobachtet — erst aufnehmen, dann dahinter hängen")
+	}
+	parent, err := s.Store.Host(ctx, hostOf[pc.ID])
+	if err != nil {
+		return "", err
+	}
+	// a circle: the device it wants to sit behind sits behind it already
+	self := hostOf[c.ID]
+	for id, hops := parent.ParentID, 0; id != "" && self != "" && hops < 64; hops++ {
+		if id == self {
+			return "", errors.New("behind: " + pc.Name + " hängt selbst hinter " + c.Name)
+		}
+		up, err := s.Store.Host(ctx, id)
+		if err != nil {
+			break
+		}
+		id = up.ParentID
+	}
+	if !parent.IsUplink {
+		parent.IsUplink = true
+		if err := s.Engine.UpdateHost(ctx, parent, actor); err != nil {
+			return "", err
+		}
+	}
+	return parent.ID, nil
 }
 
 // siteWatchSuggested is the console's button for WatchSuggested.

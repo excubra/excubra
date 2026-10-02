@@ -203,13 +203,14 @@ func tools() []tool {
 			"setup_key":      str("Setup-Key der Box-Gruppe dieses Stacks, einmalig verwendbar"),
 		}, "site_id", "management_url", "setup_key")},
 		{Name: "ex0_watch_suggestion", Description: "Was die Regel »beobachten, was zählt« an diesem Standort einschalten würde (Firewall, Netzwerk, Server, VMs, Telefonie, Drucker), was sie übergeht und warum, und was schon beobachtet wird — mit Geräte-Kennungen für ex0_watch.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
-		{Name: "ex0_watch", Description: "Schaltet die Überwachung ein. suggested: true übernimmt den Vorschlag der Regel (Ping; Firewall und Router als Uplink). devices nimmt einzelne Geräte auf oder ändert beobachtete: je Gerät device_id, optional checks (icmp, tcp:<port>, http(s)-URL — andere Prüfungen kennt die Box nicht) und uplink. Die Box prüft ab der nächsten Minute. Nicht beobachten, was kommt und geht (Laptops, Telefone ohne feste Adresse): Das macht jeden Abend Störungen.", InputSchema: schema(map[string]any{
+		{Name: "ex0_watch", Description: "Schaltet die Überwachung ein. suggested: true übernimmt den Vorschlag der Regel (je ein Ping). devices nimmt einzelne Geräte auf oder ändert beobachtete: je Gerät device_id, optional checks (icmp, tcp:<port>, http(s)-URL — andere Prüfungen kennt die Box nicht) und behind. Die Box prüft ab der nächsten Minute. Eine gekappte Leitung ist auch ohne Zutun eine einzige Meldung (die Box verstummt); behind ist für Geräte, die die Box nur über ein anderes erreicht — eine Filiale hinter einem Tunnel, eine Halle hinter einer Funkbrücke. Nicht beobachten, was kommt und geht (Laptops, Telefone ohne feste Adresse): Das macht jeden Abend Störungen.", InputSchema: schema(map[string]any{
 			"site_id":   str("Standort-Kennung"),
 			"suggested": map[string]any{"type": "boolean", "description": "den Vorschlag aus ex0_watch_suggestion übernehmen"},
 			"devices": map[string]any{"type": "array", "description": "einzelne Geräte", "items": map[string]any{"type": "object", "properties": map[string]any{
 				"device_id": str("Geräte-Kennung"),
 				"checks":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "icmp | tcp:<port> | http(s)://… ; ohne Angabe Ping (neu) bzw. unverändert"},
-				"uplink":    map[string]any{"type": "boolean", "description": "der Weg nach draußen: fällt er aus, wird nur er gemeldet"},
+				"behind":    str("Geräte-Kennung eines beobachteten Geräts, hinter dem dieses hängt: Solange jenes ausgefallen ist, wird der Ausfall von diesem nicht gemeldet. Leer löst die Zuordnung"),
+				"uplink":    map[string]any{"type": "boolean", "description": "nur die Markierung »Uplink« in der Konsole; behind setzt sie am anderen Gerät von selbst"},
 			}, "required": []string{"device_id"}}},
 		}, "site_id")},
 		{Name: "ex0_site_scan", Description: "Schaltet den Schwachstellen-Scan eines Standorts (innen durch die Box, außen durch den Außenposten). Einschalten braucht die Einwilligung des Kunden (E20): consent sagt in einem Satz, wer wann zugestimmt hat und wo es steht — er kommt ins Audit-Log. Ohne Einwilligung bleibt der Scan aus.", InputSchema: schema(map[string]any{

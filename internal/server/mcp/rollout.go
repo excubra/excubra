@@ -173,7 +173,7 @@ func watchArgs(args map[string]any) ([]watch.Pick, error) {
 	for _, v := range list {
 		m, ok := v.(map[string]any)
 		if !ok {
-			return nil, errors.New("devices: je Gerät ein Objekt {device_id, checks?, uplink?}")
+			return nil, errors.New("devices: je Gerät ein Objekt {device_id, checks?, uplink?, behind?}")
 		}
 		p := watch.Pick{DeviceID: argString(m, "device_id")}
 		if p.DeviceID == "" {
@@ -203,6 +203,10 @@ func watchArgs(args map[string]any) ([]watch.Pick, error) {
 		if up, ok := m["uplink"].(bool); ok {
 			p.Uplink = &up
 		}
+		if b, ok := m["behind"].(string); ok {
+			b = strings.TrimSpace(b)
+			p.Behind = &b
+		}
 		picks = append(picks, p)
 	}
 	return picks, nil
@@ -217,7 +221,7 @@ func (s *Server) watchSuggestion(ctx context.Context, siteID string) (string, er
 		return "", err
 	}
 	return pretty(map[string]any{"site_id": siteID, "has_box": p.HasBox, "would_add": p.Add, "skipped": p.Skipped, "watched": p.Watched,
-		"next": "ex0_watch mit suggested: true übernimmt would_add (Ping, Firewall und Router als Uplink); mit devices lassen sich Geräte einzeln und mit eigener Prüfung aufnehmen oder ändern"}), nil
+		"next": "ex0_watch mit suggested: true übernimmt would_add (je ein Ping); mit devices lassen sich Geräte einzeln und mit eigener Prüfung aufnehmen oder ändern, und mit behind hinter ein anderes beobachtetes Gerät hängen, wenn sie nur über dieses erreichbar sind"}), nil
 }
 
 func (s *Server) watchApply(ctx context.Context, siteID string, suggested bool, picks []watch.Pick) (string, error) {
@@ -384,20 +388,24 @@ func (s *Server) rolloutStatus(ctx context.Context, siteID string) (string, erro
 		add("devices", "waiting", "noch keine Geräte", "die erste Erkennung braucht einige Minuten (passiv, dazu ein ARP-Sweep alle 15 Minuten)")
 	}
 
+	// A cut line is one event without anybody's doing: the box falls silent and
+	// its hosts are frozen. Which host sits behind which is a refinement for sites
+	// where the box reaches some devices only through another one — nothing a
+	// rollout has to wait for.
 	hosts, _ := s.Store.Hosts(ctx, site.TenantID, box.ID)
-	uplinks := 0
+	behind := 0
 	for _, h := range hosts {
-		if h.IsUplink {
-			uplinks++
+		if h.ParentID != "" {
+			behind++
 		}
 	}
 	switch {
 	case len(hosts) == 0:
 		add("watch", "open", "nichts wird beobachtet", "ex0_watch_suggestion ansehen, dann ex0_watch")
-	case uplinks == 0:
-		add("watch", "open", fmt.Sprintf("%d Geräte werden beobachtet, keines ist Uplink", len(hosts)), "Firewall oder Router als Uplink setzen (ex0_watch mit uplink: true), sonst macht eine gekappte Leitung vierzig Störungen statt einer")
+	case behind > 0:
+		add("watch", "ok", fmt.Sprintf("%d Geräte werden beobachtet, %d davon hängen hinter einem anderen", len(hosts), behind), "")
 	default:
-		add("watch", "ok", fmt.Sprintf("%d Geräte werden beobachtet, %d davon Uplink", len(hosts), uplinks), "")
+		add("watch", "ok", fmt.Sprintf("%d Geräte werden beobachtet", len(hosts)), "")
 	}
 
 	if site.ScanEnabled {

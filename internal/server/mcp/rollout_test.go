@@ -19,9 +19,13 @@ import (
 	"github.com/excubra/excubra/internal/wire"
 )
 
-type nopPub struct{}
+// recPub keeps what the engine publishes, the way the webhook queue would.
+type recPub struct{ events []event.Event }
 
-func (nopPub) Publish(context.Context, event.Event) error { return nil }
+func (p *recPub) Publish(_ context.Context, ev event.Event) error {
+	p.events = append(p.events, ev)
+	return nil
+}
 
 // rollout is a server with everything a session's set-up tools reach: the
 // engine, the console's watch rule, remote access against a pretend NetBird.
@@ -31,6 +35,7 @@ type rollout struct {
 	eng  *core.Engine
 	rem  *remote.Service
 	fake *netbird.Fake
+	pub  *recPub
 	s    *Server
 	now  time.Time
 }
@@ -43,9 +48,9 @@ func newRollout(t *testing.T) *rollout {
 	t.Cleanup(func() { _ = st.Close() })
 	ca, err := pki.LoadOrCreateCA(dir + "/ca")
 	must(t, err)
-	r := &rollout{t: t, st: st, now: time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)}
+	r := &rollout{t: t, st: st, pub: &recPub{}, now: time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)}
 	now := func() time.Time { return r.now }
-	r.eng, err = core.Load(context.Background(), st, nopPub{}, slog.New(slog.DiscardHandler))
+	r.eng, err = core.Load(context.Background(), st, r.pub, slog.New(slog.DiscardHandler))
 	must(t, err)
 	r.eng.Now = now
 	con, err := console.New(r.eng, st, ca, slog.New(slog.DiscardHandler), time.UTC, "ingest.example.test", 443)
@@ -187,8 +192,8 @@ func TestARolloutInOneSession(t *testing.T) {
 	for _, h := range hosts {
 		switch h.DeviceID {
 		case fw:
-			if !h.IsUplink {
-				t.Fatal("the firewall is the uplink: one cut line is one outage")
+			if !h.IsUplink || h.ParentID != "" {
+				t.Fatalf("the firewall carries the uplink mark, and nothing is put behind anything by itself: %+v", h)
 			}
 		case dc:
 			if len(h.Checks) != 2 || h.Checks[1].Type != wire.CheckTCP || h.Checks[1].Port != 53 || h.IsUplink {
@@ -210,6 +215,11 @@ func TestARolloutInOneSession(t *testing.T) {
 	out := w["devices"].(map[string]any)
 	if len(out["failed"].([]any)) != 1 || len(out["added"].([]any)) != 1 {
 		t.Fatalf("picked by hand: %v", w)
+	}
+	// watched is enough: a cut line is one event because the box falls silent,
+	// not because somebody marked an uplink
+	if st, d, _ := r.status("site_werk"); st["watch"] != "ok" || !strings.Contains(d["watch"], "4 Geräte") {
+		t.Fatalf("watch: %v %v", st, d)
 	}
 
 	// the customer's own VPN: handed to the box, claimed once, forgotten by the server
@@ -317,5 +327,114 @@ func TestSetUpToolsNeedTheRunningServer(t *testing.T) {
 	}
 	if out, err := s.call(ctx, "ex0_rollout_status", map[string]any{"site_id": "site_a"}); err != nil || !strings.Contains(out, "\"step\": \"box\"") {
 		t.Fatalf("reading works from the files: %v %s", err, out)
+	}
+}
+
+// What sits behind what is something a person knows; a session can say it. From
+// then on the outage of the device in front is the only one reported.
+func TestADeviceBehindAnother(t *testing.T) {
+	r := newRollout(t)
+	ctx := context.Background()
+	r.call("ex0_create_tenant", map[string]any{"slug": "muster", "name": "Muster GmbH"})
+	r.call("ex0_create_site", map[string]any{"tenant_id": "ten_muster", "slug": "werk", "name": "Werk"})
+	r.box("box_werk", "site_werk", wire.Heartbeat{Box: wire.BoxInfo{LAN: []string{"192.168.10.0/24"}, LANIP: "192.168.10.60"}})
+	seen := func(mac, ip, vendor, host string) string {
+		dev, _, _, err := r.st.UpsertSighting(ctx, "ten_muster", "site_werk", wire.Sighting{MAC: mac, IP: ip, Vendor: vendor, Hostname: host, LastSeen: r.now}, r.now)
+		must(t, err)
+		return dev.ID
+	}
+	bridge := seen("00:09:0f:00:00:01", "192.168.10.2", "Ubiquiti Inc", "bruecke-halle")
+	plc := seen("94:40:c9:00:00:02", "192.168.10.70", "Hewlett Packard Enterprise", "HALLE-SRV")
+	cam := seen("80:5e:c0:00:00:03", "192.168.10.71", "Yealink", "")
+	other := seen("f8:75:a4:00:00:04", "192.168.10.90", "LCFC(HeFei) Electronics", "LAPTOP-7")
+
+	// both in one call: the bridge first, then what hangs behind it
+	w := r.call("ex0_watch", map[string]any{"site_id": "site_werk", "devices": []any{
+		map[string]any{"device_id": bridge, "uplink": false},
+		map[string]any{"device_id": plc, "behind": bridge},
+		map[string]any{"device_id": cam},
+	}})
+	if out := w["devices"].(map[string]any); len(out["added"].([]any)) != 3 || out["failed"] != nil {
+		t.Fatalf("three devices, one behind the bridge: %v", w)
+	}
+	// and a watched one afterwards
+	w = r.call("ex0_watch", map[string]any{"site_id": "site_werk", "devices": []any{map[string]any{"device_id": cam, "behind": bridge}}})
+	if out := w["devices"].(map[string]any); len(out["updated"].([]any)) != 1 || out["failed"] != nil {
+		t.Fatalf("the phone moves behind the bridge: %v", w)
+	}
+	hosts, _ := r.st.Hosts(ctx, "ten_muster", "box_werk")
+	id := map[string]store.Host{}
+	for _, h := range hosts {
+		id[h.DeviceID] = h
+	}
+	if len(hosts) != 3 || id[plc].ParentID != id[bridge].ID || id[cam].ParentID != id[bridge].ID || id[bridge].ParentID != "" {
+		t.Fatalf("hosts: %+v", hosts)
+	}
+	if !id[bridge].IsUplink {
+		t.Fatal("what others sit behind shows as an uplink in the console, whatever the pick said about the mark")
+	}
+	sug := r.call("ex0_watch_suggestion", map[string]any{"site_id": "site_werk"})
+	behind := 0
+	for _, v := range sug["watched"].([]any) {
+		if v.(map[string]any)["behind"] == "bruecke-halle" {
+			behind++
+		}
+	}
+	if behind != 2 {
+		t.Fatalf("the proposal says what sits behind what: %v", sug["watched"])
+	}
+	if st, d, _ := r.status("site_werk"); st["watch"] != "ok" || !strings.Contains(d["watch"], "2 davon hängen hinter einem anderen") {
+		t.Fatalf("status: %v %v", st, d)
+	}
+
+	// the effect: the bridge and what is behind it stop answering — one outage
+	b, _ := r.st.Box(ctx, "box_werk")
+	fail := func(ok bool) wire.Round {
+		return wire.Round{At: r.now, OK: ok, Checks: []wire.CheckResult{{Type: wire.CheckICMP, OK: ok}}}
+	}
+	for i := 0; i < 3; i++ {
+		_, err := r.eng.Heartbeat(ctx, b, wire.Heartbeat{SentAt: r.now, Agent: wire.AgentInfo{Version: "0.0.0-dev"}, Hosts: []wire.HostReport{
+			{HostID: id[bridge].ID, Rounds: []wire.Round{fail(false)}},
+			{HostID: id[plc].ID, Rounds: []wire.Round{fail(false)}},
+			{HostID: id[cam].ID, Rounds: []wire.Round{fail(false)}},
+		}})
+		must(t, err)
+	}
+	for dev, want := range map[string]string{bridge: "", plc: "uplink:" + id[bridge].ID, cam: "uplink:" + id[bridge].ID} {
+		v, err := r.eng.HostView(ctx, id[dev].ID)
+		if err != nil || v.Suppressed != want {
+			t.Fatalf("%s: suppressed %q, want %q (%v)", v.Name, v.Suppressed, want, err)
+		}
+	}
+	var down []string
+	for _, e := range r.pub.events {
+		if e.Type == event.HostDown {
+			down = append(down, e.HostID)
+		}
+	}
+	if len(down) != 1 || down[0] != id[bridge].ID {
+		t.Fatalf("one outage is reported, the bridge's: %v", down)
+	}
+
+	// what cannot be: behind something unwatched, behind itself, in a circle, behind nothing known
+	for _, c := range []struct {
+		pick map[string]any
+		why  string
+	}{
+		{map[string]any{"device_id": plc, "behind": other}, "wird selbst nicht beobachtet"},
+		{map[string]any{"device_id": plc, "behind": plc}, "nicht hinter sich selbst"},
+		{map[string]any{"device_id": bridge, "behind": plc}, "hängt selbst hinter"},
+		{map[string]any{"device_id": plc, "behind": "dev_gibtesnicht"}, "kein Gerät dieses Standorts"},
+	} {
+		w := r.call("ex0_watch", map[string]any{"site_id": "site_werk", "devices": []any{c.pick}})
+		failed, _ := w["devices"].(map[string]any)["failed"].([]any)
+		if len(failed) != 1 || !strings.Contains(failed[0].(string), c.why) {
+			t.Fatalf("%v must be refused with %q: %v", c.pick, c.why, w)
+		}
+	}
+	// and out from behind it again
+	r.call("ex0_watch", map[string]any{"site_id": "site_werk", "devices": []any{map[string]any{"device_id": cam, "behind": ""}}})
+	if h, _ := r.st.Host(ctx, id[cam].ID); h.ParentID != "" {
+		t.Fatalf("taken out from behind the bridge: %+v", h)
 	}
 }
