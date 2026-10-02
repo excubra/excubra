@@ -97,6 +97,25 @@ func seedPreview(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 
+	// A customer whose LAN was numbered with public addresses (ADR-0024 §4): the
+	// box says which network it sits in, and the remote-access card asks for the
+	// declaration before it can be switched on.
+	post("/api/tenants", url.Values{"slug": {"kanzlei"}, "name": {"Kanzlei Beispiel"}})
+	post("/api/tenants/ten_kanzlei/sites", url.Values{"slug": {"buero"}, "name": {"Büro"}})
+	kbox := store.Box{ID: "box_kb7x2m9q4dzr", HWID: "7c20e5d8a1f9463b", CertSerial: "91b4d7e2f60a4c35b8e1d09a7c3f52e6",
+		CertNotAfter: now.Add(89 * 24 * time.Hour), EnrolledAt: now.Add(-time.Hour), Channel: "stable", DiscoveryMode: "sweep", OS: "linux", Arch: "amd64"}
+	must(t, f.st.CreateBox(ctx, kbox))
+	f.eng.RegisterBox(store.Box{ID: kbox.ID})
+	post("/api/boxes/"+kbox.ID+"/assign", url.Values{"site_id": {"site_buero"}})
+	kbox, err = f.st.Box(ctx, kbox.ID)
+	must(t, err)
+	if _, err := f.eng.Heartbeat(ctx, kbox, wire.Heartbeat{SentAt: now.Add(-20 * time.Second), Agent: wire.AgentInfo{Version: "v0.20.0", UptimeS: 3000},
+		Box:             wire.BoxInfo{DiskTotalBytes: 8_000_000_000, DiskFreeBytes: 6_500_000_000, LANOther: []string{"192.0.2.0/24"}, LANIP: "192.0.2.79"},
+		NetbirdOperator: &wire.NetbirdInfo{Status: wire.NetbirdConnected, IP: "100.90.0.9"},
+		Discovery:       wire.DiscoveryReport{Seen: []wire.Sighting{{MAC: "02:00:00:11:11:6f", IP: "192.0.2.111", Vendor: "Fortinet, Inc.", LastSeen: now.Add(-30 * time.Second)}}}}); err != nil {
+		t.Fatal(err)
+	}
+
 	// VIIDOC reports itself from the private network.
 	post("/api/tenants", url.Values{"slug": {"viico"}, "name": {"VIICO GmbH"}})
 	post("/api/tenants/ten_viico/sites", url.Values{"slug": {"rechenzentrum"}, "name": {"Rechenzentrum"}})

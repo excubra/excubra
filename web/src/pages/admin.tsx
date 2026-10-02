@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -35,22 +36,35 @@ function Secret({ label, value }: { label: string; value: string }) {
   )
 }
 
-type CreateField = { key: string; label: string; placeholder?: string; type?: string; def?: string; options?: { value: string; label: string }[] }
-function CreateDialog({ title, description, fields, onSubmit, pending, trigger, submitLabel }: { title: string; description: string; fields: CreateField[]; onSubmit: (v: Record<string, string>) => void; pending: boolean; trigger: ReactNode; submitLabel?: string }) {
+// more: an optional field, folded away under the dialog's "more" line until somebody needs it.
+type CreateField = { key: string; label: string; placeholder?: string; type?: string; def?: string; options?: { value: string; label: string }[]; more?: boolean }
+function CreateDialog({ title, description, fields, onSubmit, pending, trigger, submitLabel, moreLabel }: { title: string; description: string; fields: CreateField[]; onSubmit: (v: Record<string, string>) => void; pending: boolean; trigger: ReactNode; submitLabel?: string; moreLabel?: string }) {
   const [open, setOpen] = useState(false)
   const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((f) => [f.key, f.def ?? ""])))
+  const field = (f: CreateField) => (
+    <div key={f.key} className={f.type === "textarea" ? "col-span-full grid gap-2" : "grid gap-2"}><Label htmlFor={f.key}>{f.label}</Label>{f.options ? (
+      // An empty value shows the placeholder, unless "none" is one of the options.
+      <Select value={v[f.key] || (f.options.some((o) => !o.value) ? "__none" : "")} onValueChange={(val) => setV({ ...v, [f.key]: val === "__none" ? "" : val })}>
+        <SelectTrigger id={f.key} className="w-full"><SelectValue placeholder={f.placeholder} /></SelectTrigger>
+        <SelectContent>{f.options.map((o) => <SelectItem key={o.value || "__none"} value={o.value || "__none"}>{o.label}</SelectItem>)}</SelectContent>
+      </Select>
+    ) : f.type === "textarea"
+      ? <Textarea id={f.key} value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} placeholder={f.placeholder} rows={2} className="font-mono text-xs" />
+      : <Input id={f.key} type={f.type} value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} placeholder={f.placeholder} />}</div>
+  )
+  const more = fields.filter((f) => f.more)
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
-        <div className="grid gap-4">{fields.map((f) => <div key={f.key} className="grid gap-2"><Label htmlFor={f.key}>{f.label}</Label>{f.options ? (
-          // An empty value shows the placeholder, unless "none" is one of the options.
-          <Select value={v[f.key] || (f.options.some((o) => !o.value) ? "__none" : "")} onValueChange={(val) => setV({ ...v, [f.key]: val === "__none" ? "" : val })}>
-            <SelectTrigger id={f.key} className="w-full"><SelectValue placeholder={f.placeholder} /></SelectTrigger>
-            <SelectContent>{f.options.map((o) => <SelectItem key={o.value || "__none"} value={o.value || "__none"}>{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-        ) : <Input id={f.key} type={f.type} value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} placeholder={f.placeholder} />}</div>)}</div>
+        <div className="grid gap-4">{fields.filter((f) => !f.more).map(field)}</div>
+        {more.length > 0 && (
+          <details className="group">
+            <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">{moreLabel ?? "Mehr"}</summary>
+            <div className="mt-3 grid grid-cols-2 gap-4">{more.map(field)}</div>
+          </details>
+        )}
         <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Abbrechen</Button><Button onClick={() => { onSubmit(v); setOpen(false) }} disabled={pending}>{submitLabel ?? "Anlegen"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
@@ -77,8 +91,13 @@ export function KeysPage() {
   return (
     <>
       <PageHeader crumbs={[{ label: "Neue Box" }]} title="Neue Box" sub="Ein Key je Box, einmal gültig, mit Standort. Die Box meldet sich, ordnet sich selbst zu, tritt dem Techniker-Stack bei, ihr LAN wird freigeschaltet. Einen Befehl kopieren, fertig."
-        actions={<CreateDialog title="Neue Box" description="Der Key wird genau einmal angezeigt, zusammen mit dem Befehl für den Proxmox-Host oder die Box selbst." submitLabel="Key erzeugen"
-          fields={[{ key: "site_id", label: "Standort", options: siteOptions, placeholder: "Standort wählen" }, { key: "note", label: "Notiz (optional)", placeholder: "z. B. Lagergerät Nr. 3" }, { key: "expires_days", label: "Gültig (Tage)", type: "number", def: "30" }]}
+        actions={<CreateDialog title="Neue Box" description="Der Key wird genau einmal angezeigt, zusammen mit dem vollständigen Befehl für den Proxmox-Host oder die Box selbst." submitLabel="Key erzeugen"
+          moreLabel="Container und SSH-Schlüssel"
+          fields={[{ key: "site_id", label: "Standort", options: siteOptions, placeholder: "Standort wählen" }, { key: "note", label: "Notiz (optional)", placeholder: "z. B. Lagergerät Nr. 3" }, { key: "expires_days", label: "Gültig (Tage)", type: "number", def: "30" },
+            { key: "ip", label: "Feste Adresse", placeholder: "192.168.10.60/24", more: true }, { key: "gw", label: "Gateway", placeholder: "192.168.10.1", more: true },
+            { key: "ctid", label: "Container-ID", type: "number", placeholder: "nächste freie", more: true }, { key: "bridge", label: "Bridge", placeholder: "vmbr0", more: true },
+            { key: "storage", label: "Speicher", placeholder: "local-lvm", more: true }, { key: "memory", label: "RAM (MiB)", type: "number", placeholder: "1024", more: true },
+            { key: "ssh_keys", label: "SSH-Schlüssel der Techniker, einer je Zeile", type: "textarea", placeholder: "ssh-ed25519 AAAA… name", more: true }]}
           pending={act.isPending} trigger={<Button size="sm"><Plus />Neue Box</Button>}
           onSubmit={(v) => act.mutate({ path: "/api/keys", form: v }, { onSuccess: (r) => { setFresh(r.secrets ?? []); setCmds(r.commands ?? []) } })} />} />
       {fresh.map((s) => <Secret key={s} label="Enrollment-Key, einmalig sichtbar" value={s} />)}

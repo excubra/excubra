@@ -209,7 +209,10 @@ export interface FindingView {
 export interface FindingsData { open: FindingView[]; resolved?: FindingView[]; counts: Record<string, number> }
 export interface SamplePoint { at: string; value: number }
 export interface RemoteAccessRow { SiteID: string; TenantID: string; BoxID: string; CIDR: string; Enabled: boolean; State: "key" | "joining" | "wiring" | "active" | "off" | "error"; Detail: string; PeerID: string; PeerIP: string; NetworkID: string; ResourceID: string; RouterID: string; RequestedBy: string; CreatedAt: string; UpdatedAt: string }
-export interface SiteRemote { configured: boolean; access: RemoteAccessRow | null; suggested: string; boxOperator: string; boxOpIp: string; labels: Record<string, string> }
+/** other: networks outside RFC 1918 the box sits in; declared: those an operator
+ *  said are this site's own LAN. One in other and not in declared takes that
+ *  statement before it can be switched on. */
+export interface SiteRemote { configured: boolean; access: RemoteAccessRow | null; suggested: string; boxOperator: string; boxOpIp: string; labels: Record<string, string>; other: string[] | null; declared: string[] | null }
 export interface NetbirdSettings { url: string; hasToken: boolean; techGroup: string; lanGroup: string; boxGroup: string }
 export interface AISettings { provider: string; url: string; model: string; hasKey: boolean }
 export interface AIPriority { title: string; why: string; action: string; device_id?: string; severity: string }

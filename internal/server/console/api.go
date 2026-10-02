@@ -532,7 +532,7 @@ func (s *Server) apiKeysCreate(w http.ResponseWriter, r *http.Request) {
 	// What is known about the container goes into the command, not next to it.
 	opts, err := installerOptions(f)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Nicht erzeugt: " + err.Error()})
+		s.flashErr(w, r, "Nicht erzeugt — "+err.Error(), "/keys")
 		return
 	}
 	now := s.Now()

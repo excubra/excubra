@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Ago } from "@/components/clock"
@@ -20,6 +21,7 @@ export function RemoteAccessCard({ siteId }: { siteId: string }) {
   const q = useQuery({ queryKey: ["site-remote", siteId], queryFn: () => get<SiteRemote>(`/api/sites/${siteId}/remote`), refetchInterval: 15_000 })
   const d = q.data
   const [cidr, setCidr] = useState("")
+  const [declare, setDeclare] = useState(false)
   const refresh = () => qc.invalidateQueries({ queryKey: ["site-remote", siteId] })
   const m = useMutation({
     mutationFn: ({ path, form }: { path: string; form?: Record<string, string> }) => post(path, form),
@@ -32,6 +34,9 @@ export function RemoteAccessCard({ siteId }: { siteId: string }) {
   const cls = !a ? "text-muted-foreground" : a.State === "active" ? "border-primary/40 text-primary" : a.State === "error" ? "border-destructive/40 text-destructive" : a.State === "off" ? "text-muted-foreground" : "border-foreground/40"
   const busy = a && (a.State === "key" || a.State === "joining" || a.State === "wiring")
   const value = cidr || a?.CIDR || d.suggested
+  // A LAN numbered with public addresses: the box sits in it, nobody has said yet
+  // that it is this customer's own. Switching it on takes that statement.
+  const needsDeclaration = (d.other ?? []).includes(value.trim()) && !(d.declared ?? []).includes(value.trim())
   return (
     <Card className={a?.State === "error" ? "border-destructive/40" : ""}>
       <CardHeader>
@@ -64,8 +69,14 @@ export function RemoteAccessCard({ siteId }: { siteId: string }) {
         {(!a || !a.Enabled || a.State === "error") && (
           <div className="flex flex-wrap items-end gap-2">
             <div className="grid gap-1"><Label htmlFor="ra-cidr">LAN (CIDR)</Label><Input id="ra-cidr" value={value} onChange={(e) => setCidr(e.target.value)} placeholder="192.168.10.0/24" className="w-56 font-mono" /></div>
-            <Button size="sm" onClick={() => m.mutate({ path: `/api/sites/${siteId}/remote/enable`, form: { cidr: value } })} disabled={m.isPending || !d.configured || !value}><Power />{a ? "Wieder einschalten" : "Einschalten"}</Button>
+            <Button size="sm" onClick={() => m.mutate({ path: `/api/sites/${siteId}/remote/enable`, form: needsDeclaration && declare ? { cidr: value, declare: "1" } : { cidr: value } })} disabled={m.isPending || !d.configured || !value || (needsDeclaration && !declare)}><Power />{a && !needsDeclaration ? "Wieder einschalten" : "Einschalten"}</Button>
             {d.suggested && !a && <span className="text-xs text-muted-foreground">Vorschlag aus den Geräten: {d.suggested}</span>}
+            {needsDeclaration && (
+              <label className="flex basis-full items-start gap-2 text-sm">
+                <Checkbox checked={declare} onCheckedChange={(v) => setDeclare(v === true)} className="mt-0.5" />
+                <span><span className="font-mono">{value}</span> ist das LAN dieses Kunden, obwohl es kein privater Adressbereich ist. <span className="text-muted-foreground">Die Route nimmt den Internetverkehr der Techniker für diesen Bereich mit.</span></span>
+              </label>
+            )}
           </div>
         )}
       </CardContent>
