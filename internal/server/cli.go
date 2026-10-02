@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -196,7 +197,8 @@ func keyCmd(args []string) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	ca, err := pki.LoadOrCreateCA(filepath.Join(cfg.DataDir, "ca"))
+	// the pin is in the certificate; the CA's key stays sealed (ADR-0009)
+	pin, err := pki.CAFingerprint(filepath.Join(cfg.DataDir, "ca"))
 	if err != nil {
 		return err
 	}
@@ -205,7 +207,7 @@ func keyCmd(args []string) error {
 	ctx := context.Background()
 	now := time.Now()
 	for i := 0; i < *count; i++ {
-		k, err := pki.NewEnrollmentKey(host, port, ca.Fingerprint())
+		k, err := pki.NewEnrollmentKey(host, port, pin)
 		if err != nil {
 			return err
 		}
@@ -1107,8 +1109,14 @@ func aiCmd(args []string) error {
 	return fmt.Errorf("usage: excubra server ai test | assess <site_id> | packet <site_id> | import <site_id> [--file f.json] [--by who] [--model label]")
 }
 
-// mcpCmd serves EX0 over the Model Context Protocol on stdin/stdout — started
-// through SSH from a machine in the operator overlay, nothing new listens.
+// mcpCmd is EX0 for an assistant, on stdin/stdout — started through SSH from a
+// machine in the operator overlay, so nothing new listens anywhere. The tools
+// live in the running server (ADR-0024); this command carries the session's
+// lines to its socket and the answers back, and waits when the server restarts.
+//
+// Without a server on the socket — it is down, or older than the socket — the
+// command answers from the files itself: everything that reads, and the set-up
+// steps that are plain rows. What needs the engine says so.
 func mcpCmd(args []string) error {
 	fs := flag.NewFlagSet("excubra server mcp", flag.ContinueOnError)
 	envFile := fs.String("env-file", "", "server env file")
@@ -1116,6 +1124,27 @@ func mcpCmd(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	cfg, err := LoadConfig(*envFile, os.Getenv)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	sock := filepath.Join(cfg.DataDir, mcp.SocketName)
+	// a server in the middle of a restart has no socket for a few seconds; a
+	// session that starts right then should still get the real thing
+	for i := 0; i < 8; i++ {
+		if mcp.Reachable(ctx, sock) {
+			return mcp.Proxy(ctx, sock, *actor, os.Stdin, os.Stdout)
+		}
+		if _, err := os.Stat(sock); err == nil {
+			break // a socket nobody answers on: a server that died, not one that restarts
+		}
+		if i == 0 && !serverUnitActive(ctx) {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
 	st, cfg, err := cliStore(*envFile)
 	if err != nil {
 		return err
@@ -1123,15 +1152,34 @@ func mcpCmd(args []string) error {
 	defer func() { _ = st.Close() }()
 	loc, _ := time.LoadLocation(cfg.Timezone)
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	log.Warn("mcp: no server on the socket; answering from the files with a reduced set of tools", "socket", sock)
 	srv := &mcp.Server{Store: st, AI: ai.New(st, log, loc), Log: log, Now: time.Now, Actor: *actor}
-	// The same three things the console has for minting enrollment keys; without
-	// them ex0_new_box refuses and the rest of the tools still work.
-	if ca, err := pki.LoadOrCreateCA(filepath.Join(cfg.DataDir, "ca")); err == nil {
+	// What minting an enrollment key takes: the CA's pin and the ingest address.
+	// The pin is read from the certificate — the CA's key is sealed at rest and
+	// this command has no reason to open it (29.09.2026: it could not, and a
+	// rollout fell back to a click in the console).
+	if pin, err := pki.CAFingerprint(filepath.Join(cfg.DataDir, "ca")); err == nil {
 		host, portStr := cfg.IngestHostPort()
 		port, _ := strconv.Atoi(portStr)
-		srv.CA, srv.Ingest, srv.IngestPt = ca, host, port
+		srv.CAFingerprint, srv.Ingest, srv.IngestPt = pin, host, port
 	} else {
 		log.Warn("mcp: enrollment keys unavailable", "err", err)
 	}
-	return srv.Serve(context.Background(), os.Stdin, os.Stdout)
+	return srv.Serve(ctx, os.Stdin, os.Stdout)
+}
+
+// serverUnitActive reports whether systemd runs (or is starting) the server:
+// only then is a missing socket worth waiting for.
+func serverUnitActive(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "systemctl", "is-active", "excubra-server").Output()
+	if err != nil && len(out) == 0 {
+		return false
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "active", "activating", "reloading":
+		return true
+	}
+	return false
 }

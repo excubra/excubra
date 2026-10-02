@@ -26,7 +26,7 @@ func TestSetupWithoutAPerson(t *testing.T) {
 	}
 	ctx := context.Background()
 	now := time.Date(2026, 9, 19, 9, 0, 0, 0, time.UTC)
-	s := &Server{Store: st, Now: func() time.Time { return now }, Actor: "jeremia", CA: ca, Ingest: "ingest.example.test", IngestPt: 443}
+	s := &Server{Store: st, Now: func() time.Time { return now }, Actor: "jeremia", CAFingerprint: ca.Fingerprint(), Ingest: "ingest.example.test", IngestPt: 443}
 
 	// the customer
 	out, err := s.call(ctx, "ex0_create_tenant", map[string]any{"slug": "MUSTER", "name": " Kanzlei Muster "})

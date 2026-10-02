@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/excubra/excubra/internal/event"
-	"github.com/excubra/excubra/internal/pki"
 	"github.com/excubra/excubra/internal/server/ai"
 	"github.com/excubra/excubra/internal/server/store"
 	"github.com/excubra/excubra/internal/version"
@@ -37,11 +36,13 @@ type Server struct {
 	Now   func() time.Time
 	Actor string // who the assistant acts for, in audits
 
-	// For minting enrollment keys (ex0_new_box), the same three things the
-	// console needs. Left empty, that one tool refuses and everything else works.
-	CA       *pki.CA
-	Ingest   string // host the boxes dial
-	IngestPt int
+	// For minting enrollment keys (ex0_new_box): the CA's pin and the address
+	// boxes dial. The pin comes from the certificate; the CA's private key is
+	// not needed and not held here. Left empty, that one tool refuses and
+	// everything else works.
+	CAFingerprint string
+	Ingest        string // host the boxes dial
+	IngestPt      int
 }
 
 type request struct {

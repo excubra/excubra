@@ -34,6 +34,7 @@ import (
 	"github.com/excubra/excubra/internal/server/feed"
 	"github.com/excubra/excubra/internal/server/ingest"
 	"github.com/excubra/excubra/internal/server/maptiles"
+	"github.com/excubra/excubra/internal/server/mcp"
 	"github.com/excubra/excubra/internal/server/patches"
 	"github.com/excubra/excubra/internal/server/remote"
 	"github.com/excubra/excubra/internal/server/selfupdate"
@@ -304,6 +305,17 @@ func run(envFile string) error {
 	rem := remote.New(st, log)
 	con.Remote = rem
 	go rem.Run(ctx, 30*time.Second)
+	// The assistant's way in (ADR-0024): the MCP tools, served on a socket in the
+	// data directory. `excubra server mcp`, started through SSH, is only the pipe
+	// to it — so a session works with the unsealed CA, the engine and the
+	// services of this process, and nothing new listens on a network.
+	mcpSrv := &mcp.Server{Store: st, AI: aiSvc, Log: log, Now: time.Now, Actor: "mcp",
+		CAFingerprint: ca.Fingerprint(), Ingest: ingestHost, IngestPt: ingestPort}
+	go func() {
+		if err := mcpSrv.ServeSocket(ctx, filepath.Join(cfg.DataDir, mcp.SocketName)); err != nil {
+			log.Warn("mcp socket unavailable; `excubra server mcp` answers from the files instead", "err", err)
+		}
+	}()
 	if cfg.SelfUpdate == "on" {
 		go func() {
 			if err := su.Run(ctx); err != nil {

@@ -149,6 +149,26 @@ func LoadOrCreateCA(dir string) (*CA, error) {
 	return LoadCA(certPEM, keyPEM)
 }
 
+// CAFingerprint reads the CA certificate in dir and returns the pin an enrollment
+// key carries. It needs the certificate only: minting a key says which CA a box
+// will trust, it signs nothing — so a command that only mints keys never has to
+// open the CA's private key, sealed or not, and never creates a CA by accident
+// in a directory that has none.
+func CAFingerprint(dir string) (string, error) {
+	certPEM, err := os.ReadFile(filepath.Join(dir, CACertFile))
+	if err != nil {
+		return "", fmt.Errorf("pki: CA certificate: %w", err)
+	}
+	cert, err := ParseCertPEM(certPEM)
+	if err != nil {
+		return "", fmt.Errorf("pki: CA certificate: %w", err)
+	}
+	if !cert.IsCA {
+		return "", errors.New("pki: CA certificate is not a CA")
+	}
+	return FingerprintOf(cert), nil
+}
+
 // LoadCA parses a CA from PEM.
 func LoadCA(certPEM, keyPEM []byte) (*CA, error) {
 	cert, err := ParseCertPEM(certPEM)

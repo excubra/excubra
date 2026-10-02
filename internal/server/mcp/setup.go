@@ -105,7 +105,7 @@ func (s *Server) createSite(ctx context.Context, tenantID, slug, name, address s
 // into the command and nowhere else, is consumed on enrollment, and can be
 // revoked in the console until then.
 func (s *Server) newBox(ctx context.Context, siteID, note string, days int) (string, error) {
-	if s.CA == nil || s.Ingest == "" {
+	if s.CAFingerprint == "" || s.Ingest == "" {
 		return "", errors.New("this MCP server was started without the CA and ingest address; enrollment keys need both")
 	}
 	site, err := s.Store.Site(ctx, siteID)
@@ -123,7 +123,7 @@ func (s *Server) newBox(ctx context.Context, siteID, note string, days int) (str
 	if note == "" {
 		note = tenant.Name + " · " + site.Name
 	}
-	k, err := pki.NewEnrollmentKey(s.Ingest, s.IngestPt, s.CA.Fingerprint())
+	k, err := pki.NewEnrollmentKey(s.Ingest, s.IngestPt, s.CAFingerprint)
 	if err != nil {
 		return "", err
 	}

@@ -47,6 +47,14 @@ func TestPrivateKeyFilesAreSealedAtRest(t *testing.T) {
 	if _, err := LoadOrCreateCA(dir); err == nil || !strings.Contains(err.Error(), "sealed") {
 		t.Fatalf("sealed key without the secret key must be refused: %v", err)
 	}
+	// What an enrollment key pins is in the certificate: a command that mints
+	// keys reads it without the secret key, and without touching the key file.
+	if fp, err := CAFingerprint(dir); err != nil || fp != ca.Fingerprint() {
+		t.Fatalf("the pin must be readable while the key stays sealed: %q, %v", fp, err)
+	}
+	if _, err := CAFingerprint(t.TempDir()); err == nil {
+		t.Fatal("a directory without a CA has no pin, and must not get a CA made for it")
+	}
 	other, _ := secretbox.FromBytes([]byte("wrong key"))
 	KeySeal, KeyOpen = other.SealBytes, other.OpenBytes
 	if _, err := LoadOrCreateCA(dir); err == nil {
