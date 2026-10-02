@@ -151,9 +151,12 @@ type NetbirdKey struct {
 	BoxID         string
 	Profile       string // customer (default) or operator
 	ManagementURL string
-	SetupKey      string
-	CreatedAt     time.Time
-	ClaimedAt     *time.Time
+	// SetupKey goes to the box that claims it and to nobody else: it is not part
+	// of what the console's API shows about a hand-over, and the row forgets it
+	// once it was claimed.
+	SetupKey  string `json:"-"`
+	CreatedAt time.Time
+	ClaimedAt *time.Time
 }
 
 // RemoteAccess is one site's LAN in the operator's overlay (salt: Vollausbau B).

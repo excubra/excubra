@@ -232,12 +232,19 @@ func TestWorkflowsOverTheAPI(t *testing.T) {
 	if status, _, _ := f.post("/api/boxes/box_1/settings", url.Values{"name": {"Büro"}, "channel": {"canary"}, "discovery_mode": {"sweep"}, "discovery_subnets": {"192.168.10.0/24"}}, true); status != 200 {
 		t.Fatal("box settings")
 	}
-	if status, _, _ := f.post("/api/boxes/box_1/netbird", url.Values{"management_url": {"https://a.vpn.example"}, "setup_key": {"sk"}}, true); status != 200 {
+	if status, _, _ := f.post("/api/boxes/box_1/netbird", url.Values{"management_url": {"https://a.vpn.example"}, "setup_key": {"nbsk-only-for-the-box"}}, true); status != 200 {
 		t.Fatal("netbird key")
 	}
 	status, body = f.get("/api/boxes/box_1")
 	if status != 200 || !strings.Contains(body, "Büro") || !strings.Contains(body, "a.vpn.example") || !strings.Contains(body, "192.168.10.0/24") {
 		t.Fatalf("box detail: %d", status)
+	}
+	// the key is for the box that claims it: the console shows that one waits, never which
+	if strings.Contains(body, "nbsk-only-for-the-box") {
+		t.Fatal("the box page hands out the NetBird setup key")
+	}
+	if _, list := f.get("/api/boxes"); strings.Contains(list, "nbsk-only-for-the-box") {
+		t.Fatal("the box list hands out the NetBird setup key")
 	}
 	box, _ := f.st.Box(ctx, "box_1")
 	hb := wire.Heartbeat{SentAt: time.Now(), Agent: wire.AgentInfo{Version: "0.1.0", OS: "linux", Arch: "amd64"},

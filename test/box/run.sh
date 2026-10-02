@@ -117,7 +117,22 @@ if wanted T1; then
     elif [ "$(docker exec ex0box-T1 grep -c . /root/.ssh/authorized_keys)" != 1 ]; then fail T1 "authorized_keys"
     elif ! docker exec ex0box-T1 sh -c 'ssh-keyscan -T 3 127.0.0.1 2>/dev/null | grep -q ssh-'; then fail T1 "sshd does not answer"
     elif docker exec ex0box-T1 test -e /var/lib/excubra-agent/enroll; then fail T1 "the key file was not consumed"
-    else pass T1; fi
+    else
+      # the server's side of the same story, the way a session asks for it: the
+      # box is there and has said which network it sits in
+      ok=0
+      for _ in $(seq 1 45); do
+        mcp ex0_rollout_status '{"site_id":"site_buero"}' > "$W/T1.status" 2>/dev/null || true
+        if python3 - "$W/T1.status" <<'PY2'
+import json, sys
+st = {s["step"]: s["state"] for s in json.load(open(sys.argv[1]))["steps"]}
+sys.exit(0 if st.get("box") == "ok" and st.get("lan") == "ok" and st.get("version") == "ok" else 1)
+PY2
+        then ok=1; break; fi
+        sleep 2
+      done
+      if [ "$ok" = 1 ]; then pass T1; else fail T1 "ex0_rollout_status does not show the box with its LAN: $(tr -d '\n' < "$W/T1.status" | cut -c1-300)"; fi
+    fi
   else fail T1 "exit $? — $(tail -1 "$W/T1.log")"; fi
 
   if wanted T2; then
