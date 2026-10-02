@@ -19,28 +19,52 @@ site, the box assigns itself, joins the operator stack, reports its LAN, and the
 server switches remote access on. Ten boxes on the shelf differ in nothing but
 their key.
 
-## The normal way: one command, printed by the console
+## The normal way: one command, complete
 
-In the console: **Neue Box** → pick the site → the key appears once, together with
-two commands. Copy the one you need.
+A session makes it with `ex0_new_box`, a person in the console under **Neue Box**
+(pick the site; container values and technicians' keys under "Container und
+SSH-Schlüssel"). The key appears once, inside two commands. What is known about
+the container is in the command — nothing is appended by hand (ADR-0024).
 
 On a **Proxmox host** (creates and provisions the container):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/excubra/excubra/v0.2.8/image/ex0-box-pct.sh | bash -s -- --enroll-key 'EX0:1:…' --hostname ex0-kunde-standort --version 0.2.8
+curl -fsSL https://raw.githubusercontent.com/excubra/excubra/v0.20.0/image/ex0-box-pct.sh -o /tmp/ex0-box-pct.sh && bash /tmp/ex0-box-pct.sh --enroll-key 'EX0:1:…' --hostname ex0-kunde-standort --version 0.20.0 --ctid 200 --ip 192.168.10.60/24 --gw 192.168.10.1 --storage local-lvm --ssh-key 'ssh-ed25519 AAAA… name'
 ```
 
-On the **box itself** (fresh Debian 13, as root: mini PC, Raspberry Pi, VM):
+On the **box itself** (fresh Debian 13, as root: a mini PC or a Raspberry Pi — never
+a hypervisor or a server that does something else; the script refuses a Proxmox host):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/excubra/excubra/v0.2.8/image/ex0-box.sh | bash -s -- --enroll-key 'EX0:1:…' --hostname ex0-kunde-standort --version 0.2.8
+curl -fsSL https://raw.githubusercontent.com/excubra/excubra/v0.20.0/image/ex0-box.sh -o /tmp/ex0-box.sh && bash /tmp/ex0-box.sh --enroll-key 'EX0:1:…' --hostname ex0-kunde-standort --version 0.20.0 --ssh-key 'ssh-ed25519 AAAA… name'
 ```
+
+A file first, a run second: piped straight into a shell, a download that fails is
+an empty script that ends quietly.
 
 `ex0-box.sh` downloads the release, verifies `SHA256SUMS` against the release public
 key and runs `provision-box.sh`. `ex0-box-pct.sh` fetches the Debian 13 template if
 missing, creates an unprivileged container with nesting and `/dev/net/tun`, starts
-it and runs `ex0-box.sh` inside (`--ctid`, `--bridge`, `--ip`/`--gw`, `--storage`,
-`--disk`, `--memory` when the defaults do not fit).
+it and runs `ex0-box.sh` inside. Its defaults when a value is not given: the next
+free container id, `vmbr0` (else the bridge of the host's default route), DHCP,
+`local-lvm` or `local-zfs` (else the first storage that takes a container), 8 GiB,
+1024 MiB. A fixed address is the better choice — the box is the LAN's router for
+the technicians — and one that already answers on the network is refused.
+
+## What it says at the end
+
+Every script ends with one line, and its exit status says the same:
+
+```
+EX0-RESULT: ok ctid=200 hostname=ex0-kunde-standort box=box_…
+EX0-RESULT: failed step=installer — the installer inside container 200 failed — …
+```
+
+`provision-box.sh` waits for the enrollment before it says `ok`, and tells a key
+the server refused (used, expired, revoked) from a server the box cannot reach
+(outbound 443 blocked, TLS inspection). After a failure the same command can be
+run again: `ex0-box-pct.sh` finds its own container by hostname and carries on in
+it. `ex0_rollout_status` shows the server's side of the same story.
 
 ## From a checkout (development)
 
@@ -55,6 +79,11 @@ keine lokale Firewall.
 
 ## Options
 
+- `--ssh-key 'ssh-ed25519 AAAA… name'` (repeatable) puts a technician's public key
+  into root's `authorized_keys`. Without one nobody can log in: sshd takes keys only
+  and the box has no password. The keys come with the command, never from the
+  server (ADR-0024 §3). To add one later, run the installer again without an
+  enrollment key and with `--ssh-key`.
 - `--ssh-lan` keeps SSH reachable on the LAN (pilot in the office). Without it the box
   has no open port on the LAN; SSH comes over the operator overlay.
 - `--netbird-version 0.78.1` pins the client (the default is in the script). A guest
@@ -88,6 +117,15 @@ puts the box there at once; a key without a site leaves it under Boxen →
 "nicht zugeordnet" until somebody assigns it. Within minutes the inventory fills,
 the operator peer appears in the technicians' stack, and the LAN the box reports
 is switched on for remote access.
+
+## Trying a change before it is released
+
+`test/box/run.sh` runs the installers the way a rollout meets them: a local server,
+a Debian 13 with systemd in Docker, a pretend Proxmox whose "container" is the
+machine itself (`test/box/pve-stubs`), real enrollments — and the failure paths: a
+spent key, a server out of reach, a download that fails, values that cannot work.
+`EX0_RAW_BASE` points the scripts at a checkout served locally; the binary still
+has to verify against the release public key.
 
 ## Raspberry Pi (arm64)
 

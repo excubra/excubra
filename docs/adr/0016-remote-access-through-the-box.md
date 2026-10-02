@@ -1,6 +1,6 @@
 # ADR-0016: Remote access through the box — the customer LAN in the operator's overlay
 
-Status: accepted · Date: 2026-09-12 · Amended 2026-09-12 (the box image is one package)
+Status: accepted · Date: 2026-09-12 · Amended 2026-09-12 (the box image is one package) · ADR-0024 §4 adds a LAN outside RFC 1918, declared per site
 
 ## Context
 

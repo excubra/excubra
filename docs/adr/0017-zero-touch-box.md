@@ -1,6 +1,6 @@
 # ADR-0017: A box needs nobody after it is plugged in
 
-Status: accepted · Date: 2026-09-12
+Status: accepted · Date: 2026-09-12 · extended by ADR-0024 (the rest of a rollout as a session's work; the installer's result line)
 
 ## Context
 

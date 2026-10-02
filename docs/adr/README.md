@@ -37,3 +37,4 @@ Rules:
 | [0021](0021-patch-state-from-an-endpoint-manager.md) | Patch state from an endpoint manager: read-only, server-side, one finding per machine, mapping by hand; §8–10 every machine stored, assigned by hand, shown on the device |
 | [0022](0022-api-listener-on-our-own-network.md) | An API listener on a network of our own: `/v1/` and `/healthz` on a private address, no console |
 | [0023](0023-an-application-reports-itself.md) | An application reports itself — the source: a device with its own posting-only token, events in the day files' `logs`, rules make findings |
+| [0024](0024-a-rollout-is-one-session.md) | A rollout is one session: the MCP server inside the running server, set-up tools for a session, an installer that says what happened, and a LAN outside RFC 1918 declared per site |

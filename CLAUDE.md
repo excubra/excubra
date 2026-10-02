@@ -43,13 +43,18 @@ Reports — das ist Phase 2 und darf durch das Design nur nicht verbaut werden.
   (ADR-0023). Kein gemeinsamer Handler, keine Umleitung.
 - Mandant wird aus dem Client-Zertifikat abgeleitet, nie aus dem Payload.
   Enrollment-Keys einmalig; Zuordnung nur serverseitig — in der Konsole oder über
-  die drei Einrichtungs-Werkzeuge des MCP-Servers (`ex0_create_tenant`,
-  `ex0_create_site`, `ex0_new_box`), die dasselbe tun wie die Konsole, unter dem
-  Actor der Sitzung. Nie von der Box aus.
+  die Einrichtungs-Werkzeuge des MCP-Servers (ADR-0024: Kunde, Standort, Key mit
+  vollständigem Befehl, LAN, Kunden-VPN, Überwachung, Scan mit Einwilligung), die
+  dasselbe tun wie die Konsole, unter dem Actor der Sitzung. Nie von der Box aus.
+  Der MCP richtet ein; quittieren und betreiben bleibt beim Menschen.
 - Discovery-Modi: `passive`, `sweep`. Der Dienst-Scan (ADR-0018, E20) ist je Standort
   geschaltet, gedrosselt, liest nur; nie Exploits, nie Zugangsdaten. Die Live-Erkennung
   (ADR-0018 §7) öffnet Köder-Ports, antwortet nichts und sendet nichts. Der DNS-Sensor
   (ADR-0020) ist je Standort aus, bis der Router auf die Box zeigt; er loggt keine Anfragen.
+- SSH-Schlüssel der Techniker kommen mit dem Installer-Befehl auf die Box (`--ssh-key`),
+  nie vom Server: Der darf beim Kunden keine Tür öffnen können (ADR-0024 §3).
+- Ein LAN außerhalb RFC 1918 gilt erst als LAN, wenn ein Mensch es je Standort erklärt
+  hat (ADR-0024 §4); die Box meldet es nur.
 - Agent unprivilegiert (CAP_NET_RAW, CAP_NET_BIND_SERVICE), darf nie schaden: Ringpuffer Drop-Oldest, blockiert
   nie eine Anwendung, keine lokale Config-Datei (nur Key/Zertifikat + State-Verzeichnis).
 - Updates nur signiert (Public Key einkompiliert); der Server kann nicht signieren.
@@ -69,6 +74,8 @@ Reports — das ist Phase 2 und darf durch das Design nur nicht verbaut werden.
   Raw-Sockets (ARP/ICMP) — die haben Linux-Build-Tags und Fakes für Tests.
 - Abhängigkeiten minimal: Stdlib zuerst. Jede neue Bibliothek braucht einen Satz in
   `docs/adr/0008-dependencies.md`, sonst kommt sie nicht rein.
+- Vor einem Release, das den Installer oder die Box-Seite berührt: `test/box/run.sh`
+  (lokaler Server, Debian 13 mit systemd in Docker, Proxmox-Attrappe, echte Enrollments).
 - Kleine, lauffähige Schritte, jeder Schritt ein Commit. Zustandsmaschine mit
   Tabellentests für JEDEN Übergang. Reports und Ereignisse mit Golden-Files
   (`fixtures/`).
