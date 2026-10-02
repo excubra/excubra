@@ -55,7 +55,12 @@ var (
 	ErrNotConfigured = errors.New("remote: operator stack not configured")
 	ErrNoBox         = errors.New("remote: the site has no box")
 	ErrOverlap       = errors.New("remote: LAN overlaps another site's")
-	ErrBadCIDR       = errors.New("remote: LAN must be a private IPv4 network")
+	ErrBadCIDR       = errors.New("remote: LAN must be an IPv4 network of hosts in CIDR notation (/8 to /30)")
+	// ErrNotDeclared: the network is outside RFC 1918 and nobody has said that
+	// it is this customer's LAN all the same (ADR-0024).
+	ErrNotDeclared = errors.New("remote: the network is outside RFC 1918 and was not declared the site's LAN")
+	// ErrNotAttached: a network can only be declared when the site's box sits in it.
+	ErrNotAttached = errors.New("remote: the site's box does not report this network")
 )
 
 // Service runs remote access for all sites.
@@ -65,6 +70,9 @@ type Service struct {
 	Now   func() time.Time
 	// NewClient builds the API client from settings; tests replace it.
 	NewClient func(url, token string) *netbird.Client
+	// SetLocalNets stores a site's declared networks; the server sets it to the
+	// engine's function so the rules see the declaration at once. nil: the store.
+	SetLocalNets func(ctx context.Context, siteID string, nets []string, actor string) error
 
 	mu   sync.Mutex
 	busy map[string]bool
@@ -148,13 +156,19 @@ func (s *Service) Test(ctx context.Context) (int, error) {
 // the network right away (the box is already a peer) or leaves the row waiting for
 // the box to join — the peer side runs by itself, see ensurePeer.
 func (s *Service) Enable(ctx context.Context, siteID, cidr, actor string) (store.RemoteAccess, error) {
-	prefix, err := parseLAN(cidr)
+	prefix, private, err := parseLAN(cidr)
 	if err != nil {
 		return store.RemoteAccess{}, err
 	}
 	site, err := s.Store.Site(ctx, siteID)
 	if err != nil {
 		return store.RemoteAccess{}, err
+	}
+	// A route to public address space in the technicians' overlay takes real
+	// internet traffic for that range with it: only for a network an operator
+	// declared to be this site's LAN.
+	if !private && !declared(site, prefix) {
+		return store.RemoteAccess{}, fmt.Errorf("%w: %s", ErrNotDeclared, prefix)
 	}
 	box, err := s.siteBox(ctx, siteID)
 	if err != nil {
@@ -209,6 +223,71 @@ func (s *Service) Enable(ctx context.Context, siteID, cidr, actor string) (store
 	}
 	_ = s.Store.Audit(ctx, now, actor, "remote.enable", siteID, prefix.String())
 	return ra, nil
+}
+
+// Declare says that a network outside RFC 1918 is this site's own LAN — a
+// network somebody once numbered with public addresses — and switches remote
+// access on for it. It is an operator's statement about one site, never a
+// default: the box must sit in exactly that network, and the network must not
+// run into the technicians' overlay. A private network needs no declaration and
+// is simply switched on.
+func (s *Service) Declare(ctx context.Context, siteID, cidr, actor string) (store.RemoteAccess, error) {
+	prefix, private, err := parseLAN(cidr)
+	if err != nil {
+		return store.RemoteAccess{}, err
+	}
+	if private {
+		return s.Enable(ctx, siteID, prefix.String(), actor)
+	}
+	site, err := s.Store.Site(ctx, siteID)
+	if err != nil {
+		return store.RemoteAccess{}, err
+	}
+	box, err := s.siteBox(ctx, siteID)
+	if err != nil {
+		return store.RemoteAccess{}, err
+	}
+	attached := false
+	for _, n := range box.LANOther {
+		if n == prefix.String() {
+			attached = true
+		}
+	}
+	if !attached {
+		seen := "kein Netz außerhalb der privaten Bereiche"
+		if len(box.LANOther) > 0 {
+			seen = strings.Join(box.LANOther, ", ")
+		}
+		return store.RemoteAccess{}, fmt.Errorf("%w: %s (die Box meldet: %s)", ErrNotAttached, prefix, seen)
+	}
+	if op, err := netip.ParseAddr(box.NetbirdOpIP); err == nil {
+		// NetBird numbers an overlay out of a /16; a LAN inside it would swallow the peers
+		if overlay, err := op.Prefix(16); err == nil && overlay.Overlaps(prefix) {
+			return store.RemoteAccess{}, fmt.Errorf("%w: %s liegt im Adressbereich des Techniker-Overlays (%s)", ErrOverlap, prefix, overlay)
+		}
+	}
+	if !declared(site, prefix) {
+		nets := append(append([]string(nil), site.LocalNets...), prefix.String())
+		if s.SetLocalNets != nil {
+			err = s.SetLocalNets(ctx, siteID, nets, actor)
+		} else if err = s.Store.SetSiteLocalNets(ctx, siteID, nets); err == nil {
+			_ = s.Store.Audit(ctx, s.Now(), actor, "site.local_nets", siteID, strings.Join(nets, ", "))
+		}
+		if err != nil {
+			return store.RemoteAccess{}, err
+		}
+	}
+	return s.Enable(ctx, siteID, prefix.String(), actor)
+}
+
+// declared reports whether prefix lies inside one of the site's declared networks.
+func declared(site store.Site, prefix netip.Prefix) bool {
+	for _, n := range site.LocalNets {
+		if d, err := netip.ParsePrefix(n); err == nil && d.Bits() <= prefix.Bits() && d.Contains(prefix.Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 // Disable switches the resource off; the peer stays, the network stays, nothing is
@@ -402,17 +481,41 @@ func (s *Service) ensureLANs(ctx context.Context) {
 		return
 	}
 	for _, b := range boxes {
-		if b.RevokedAt != nil || b.SiteID == "" || b.NetbirdOpStatus != wire.NetbirdConnected || b.NetbirdOpIP == "" || len(b.LAN) == 0 {
+		if b.RevokedAt != nil || b.SiteID == "" || b.NetbirdOpStatus != wire.NetbirdConnected || b.NetbirdOpIP == "" || (len(b.LAN) == 0 && len(b.LANOther) == 0) {
 			continue
 		}
 		if _, err := s.Store.RemoteAccess(ctx, b.SiteID); err == nil {
 			continue
 		}
-		lan := b.LAN[0]
+		site, err := s.Store.Site(ctx, b.SiteID)
+		if err != nil {
+			continue
+		}
+		lan := ""
+		if len(b.LAN) > 0 {
+			lan = b.LAN[0]
+		} else {
+			for _, n := range b.LANOther {
+				if p, err := netip.ParsePrefix(n); err == nil && declared(site, p) {
+					lan = n
+					break
+				}
+			}
+		}
+		if lan == "" {
+			// The box sits in a network outside RFC 1918 and nothing else. That is
+			// not switched on by itself; the site's card says why and what to do,
+			// instead of staying empty (29.09.2026).
+			now := s.Now()
+			_ = s.Store.SetRemoteAccess(ctx, store.RemoteAccess{SiteID: b.SiteID, TenantID: site.TenantID, BoxID: b.ID, CIDR: b.LANOther[0], Enabled: false, State: store.RemoteError,
+				Detail:      "nicht automatisch eingeschaltet: " + b.LANOther[0] + " ist kein privater Adressbereich (RFC 1918). Ist das trotzdem das LAN dieses Kunden, das Netz für den Standort erklären — dann wird es wie jedes LAN behandelt.",
+				RequestedBy: "auto", CreatedAt: now, UpdatedAt: now})
+			s.Log.Info("remote access waits for a declaration", "site", b.SiteID, "network", b.LANOther[0])
+			continue
+		}
 		ra, err := s.Enable(ctx, b.SiteID, lan, "auto")
 		if err != nil {
 			// leave the reason where a person looks: the site's card
-			site, _ := s.Store.Site(ctx, b.SiteID)
 			now := s.Now()
 			_ = s.Store.SetRemoteAccess(ctx, store.RemoteAccess{SiteID: b.SiteID, TenantID: site.TenantID, BoxID: b.ID, CIDR: lan, Enabled: false, State: store.RemoteError,
 				Detail: "nicht automatisch eingeschaltet: " + err.Error(), RequestedBy: "auto", CreatedAt: now, UpdatedAt: now})
@@ -628,13 +731,23 @@ func (s *Service) resourceLabel(ctx context.Context, ra store.RemoteAccess) stri
 	return firstNonEmpty(tenant.Name, ra.TenantID) + " · " + firstNonEmpty(site.Name, ra.SiteID)
 }
 
-// parseLAN accepts a private IPv4 network in CIDR notation.
-func parseLAN(cidr string) (netip.Prefix, error) {
-	p, err := netip.ParsePrefix(strings.TrimSpace(cidr))
-	if err != nil || !p.Addr().Is4() || !p.Addr().IsPrivate() || p.Bits() < 8 || p.Bits() > 30 {
-		return netip.Prefix{}, ErrBadCIDR
+// parseLAN accepts an IPv4 network of hosts in CIDR notation and says whether
+// it is RFC 1918. What is never a LAN — loopback, link-local, multicast, the
+// zero network — is refused like a typo.
+func parseLAN(cidr string) (prefix netip.Prefix, private bool, err error) {
+	p, perr := netip.ParsePrefix(strings.TrimSpace(cidr))
+	if perr != nil || !p.Addr().Is4() || p.Bits() < 8 || p.Bits() > 30 {
+		return netip.Prefix{}, false, ErrBadCIDR
 	}
-	return p.Masked(), nil
+	p = p.Masked()
+	a := p.Addr()
+	if a.IsPrivate() {
+		return p, true, nil
+	}
+	if !a.IsGlobalUnicast() || a.IsLinkLocalUnicast() || a.As4()[0] == 0 {
+		return netip.Prefix{}, false, ErrBadCIDR
+	}
+	return p, false, nil
 }
 
 func firstNonEmpty(v ...string) string {

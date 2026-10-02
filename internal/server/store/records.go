@@ -62,6 +62,11 @@ type Site struct {
 	Lat     float64
 	Lon     float64
 	Located bool
+	// LocalNets are IPv4 networks outside RFC 1918 that an operator declared
+	// to be this site's own LAN (ADR-0024): a network somebody once numbered
+	// with public addresses. Remote access, the rules and the DNS sensor treat
+	// them as local; nothing else does.
+	LocalNets []string
 }
 
 // Box is an enrolled device. SiteID is empty until the console assigns it.
@@ -94,6 +99,9 @@ type Box struct {
 	NetbirdOpIP     string
 	// the box's own networks as it reports them, default-route interface first
 	LAN []string
+	// LANOther are the directly attached networks the box reports that are not
+	// RFC 1918: candidates for a site's LocalNets, never a LAN by themselves.
+	LANOther []string
 	// PublicIP is where the box's heartbeats come from: the site's public address.
 	PublicIP string
 	// Role is "box" (in a customer LAN) or "outpost" (in our infrastructure, scans

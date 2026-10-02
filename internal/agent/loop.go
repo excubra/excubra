@@ -373,7 +373,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		queued += len(r.Rounds)
 	}
 	box := boxInfo(a.st.Dir)
-	box.LAN = lanPrefixes()
+	box.LAN, box.LANOther = lanNetworks()
 	box.LANIP = lanAddress()
 	box.Caps = effectiveCaps()
 	box.Canary = a.sent.Armed()

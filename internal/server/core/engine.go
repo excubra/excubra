@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -571,7 +572,7 @@ func (e *Engine) config(ctx context.Context, box store.Box) (wire.Config, error)
 			}
 			cfg.Canary = wire.CanaryConfig{Enabled: site.CanaryEnabled}
 			if site.DNSEnabled {
-				cfg.DNS = wire.DNSConfig{Enabled: true, Block: site.DNSBlock, Upstreams: site.DNSUpstreams, ListVersion: e.Blocklist.Version()}
+				cfg.DNS = wire.DNSConfig{Enabled: true, Block: site.DNSBlock, Upstreams: site.DNSUpstreams, ListVersion: e.Blocklist.Version(), Local: site.LocalNets}
 			}
 		}
 		if box.Role == store.RoleOutpost {
@@ -911,7 +912,7 @@ func (e *Engine) evaluateRules(ctx context.Context, connectorID string, metrics 
 	if len(c.Facts) > 0 {
 		_ = json.Unmarshal(c.Facts, &facts)
 	}
-	found := rules.Evaluate(rules.Input{Kind: c.Kind, Facts: facts, Metrics: metrics, Pinned: c.TLSFingerprint != "", Now: now})
+	found := rules.Evaluate(rules.Input{Kind: c.Kind, Facts: facts, Metrics: metrics, Pinned: c.TLSFingerprint != "", Now: now, Local: localNets(e.sites[c.SiteID])})
 	if v, _ := facts["version"].(string); v != "" && c.Kind == "fortigate" && c.DeviceID != "" {
 		fw := []rules.Service{{Proto: "connector", Product: "FortiOS", Version: v, Name: c.Kind}}
 		e.versionFindings(ctx, c.TenantID, c.SiteID, c.DeviceID, fw, now)
@@ -1006,8 +1007,9 @@ func (e *Engine) absorbSignals(ctx context.Context, site store.Site, box store.B
 	if len(sigs) > wire.MaxSignals {
 		sigs = sigs[:wire.MaxSignals]
 	}
+	local := localNets(site)
 	for _, sg := range sigs {
-		f, ok := rules.EvaluateSignal(rules.Signal{Kind: sg.Kind, IP: sg.IP, MAC: sg.MAC, Port: sg.Port, Count: sg.Count, Detail: sg.Detail, First: sg.FirstAt, Last: sg.LastAt})
+		f, ok := rules.EvaluateSignal(rules.Signal{Kind: sg.Kind, IP: sg.IP, MAC: sg.MAC, Port: sg.Port, Count: sg.Count, Detail: sg.Detail, First: sg.FirstAt, Last: sg.LastAt, Local: local})
 		if !ok || (sg.IP == "" && sg.MAC == "") {
 			continue
 		}
@@ -1039,7 +1041,7 @@ func (e *Engine) absorbSignals(ctx context.Context, site store.Site, box store.B
 			if json.Unmarshal(prev.Evidence, &old) == nil && old.Count > 0 {
 				total := old.Count + sg.Count
 				sg.Count = total
-				if f2, ok := rules.EvaluateSignal(rules.Signal{Kind: sg.Kind, IP: sg.IP, MAC: sg.MAC, Port: sg.Port, Count: total, Detail: sg.Detail, First: prev.FirstSeen, Last: sg.LastAt}); ok {
+				if f2, ok := rules.EvaluateSignal(rules.Signal{Kind: sg.Kind, IP: sg.IP, MAC: sg.MAC, Port: sg.Port, Count: total, Detail: sg.Detail, First: prev.FirstSeen, Last: sg.LastAt, Local: local}); ok {
 					f = f2
 				}
 			}
@@ -1307,6 +1309,36 @@ func (e *Engine) SetSiteScan(ctx context.Context, siteID string, enabled bool, a
 		state = "on"
 	}
 	return e.audit(ctx, actor, "site.scan", siteID, state)
+}
+
+// SetSiteLocalNets declares which networks outside RFC 1918 are the site's own
+// LAN (ADR-0024): a network somebody once numbered with public addresses.
+// Remote access, the rules and the DNS sensor treat a declared network like a
+// private one. The caller has checked that the site's box really sits in it.
+func (e *Engine) SetSiteLocalNets(ctx context.Context, siteID string, nets []string, actor string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	site, ok := e.sites[siteID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if err := e.Store.SetSiteLocalNets(ctx, siteID, nets); err != nil {
+		return err
+	}
+	site.LocalNets = nets
+	e.sites[siteID] = site
+	return e.audit(ctx, actor, "site.local_nets", siteID, strings.Join(nets, ", "))
+}
+
+// localNets are a site's declared networks, parsed for the rules.
+func localNets(site store.Site) []netip.Prefix {
+	var out []netip.Prefix
+	for _, n := range site.LocalNets {
+		if p, err := netip.ParsePrefix(n); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // SetSiteDNS switches a site's DNS sensor (ADR-0020); the box picks it up with

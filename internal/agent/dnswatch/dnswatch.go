@@ -54,7 +54,13 @@ type Config struct {
 	Block       bool
 	Upstreams   []string // host:port
 	ListVersion string
+	// Local are networks outside RFC 1918 whose clients are answered like
+	// private ones: the site's operator declared them to be its LAN (ADR-0024).
+	Local []netip.Prefix
 }
+
+// maxLocal bounds the declared networks; a site has one LAN, rarely two.
+const maxLocal = 8
 
 // ParseConfig validates the pulled configuration and returns what the box will do
 // plus the reasons for what it refuses (for config_errors).
@@ -81,6 +87,20 @@ func ParseConfig(c wire.DNSConfig) (Config, []string) {
 			continue
 		}
 		cfg.Upstreams = append(cfg.Upstreams, net.JoinHostPort(a.String(), port))
+	}
+	for i, l := range c.Local {
+		if i >= maxLocal {
+			errs = append(errs, fmt.Sprintf("dns: more than %d local networks, ignoring the rest", maxLocal))
+			break
+		}
+		// a network of hosts, nothing wider: the sensor must stay a resolver for
+		// one LAN, whatever the server says
+		p, err := netip.ParsePrefix(strings.TrimSpace(l))
+		if err != nil || !p.Addr().Is4() || p.Bits() < 8 || p.Bits() > 30 {
+			errs = append(errs, fmt.Sprintf("dns: local network %q is not an IPv4 network of hosts", l))
+			continue
+		}
+		cfg.Local = append(cfg.Local, p.Masked())
 	}
 	return cfg, errs
 }
@@ -428,7 +448,7 @@ func writeTCP(wr io.Writer, msg []byte) error {
 // be an open resolver (a query from outside gets no answer at all, so there is
 // nothing to amplify).
 func (w *Watch) handle(ctx context.Context, msg []byte, src, network string) []byte {
-	if !servedAddress(src) {
+	if !servedAddress(src, w.config().Local) {
 		w.mu.Lock()
 		w.pending.Refused++
 		w.mu.Unlock()
@@ -486,14 +506,23 @@ func (w *Watch) handle(ctx context.Context, msg []byte, src, network string) []b
 }
 
 // servedAddress reports whether a client is one the sensor answers: private,
-// loopback or link-local addresses only.
-func servedAddress(src string) bool {
+// loopback or link-local addresses, and the networks the site's operator
+// declared to be its LAN although they are not RFC 1918.
+func servedAddress(src string, local []netip.Prefix) bool {
 	a, err := netip.ParseAddr(src)
 	if err != nil {
 		return false
 	}
 	a = a.Unmap()
-	return a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast()
+	if a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() {
+		return true
+	}
+	for _, p := range local {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // upstreams picks the resolvers: the config's, else the box's own that are not

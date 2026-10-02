@@ -2,6 +2,7 @@ package rules
 
 import (
 	"encoding/json"
+	"net/netip"
 	"strconv"
 	"strings"
 	"testing"
@@ -59,6 +60,25 @@ func TestFortiGateRules(t *testing.T) {
 				t.Fatalf("got  %q\nwant %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// A customer whose LAN was numbered with public addresses: once the site's
+// operator declared that network, the firewall's inside interface is inside —
+// administration there is not "reachable from outside". The real WAN still is.
+func TestADeclaredLANIsNotTheInternet(t *testing.T) {
+	f := `{"interfaces":[{"name":"internal","role":"lan","admin":"ping https ssh","ip":"192.0.2.111 255.255.255.0"},{"name":"wan1","role":"wan","admin":"https","ip":"198.51.100.34"}]}`
+	if got := rulesOf(Evaluate(Input{Kind: "fortigate", Facts: facts(t, f), Pinned: true, Now: now})); got != "fgt.admin_on_wan[internal] fgt.admin_on_wan[wan1]" {
+		t.Fatalf("undeclared, the address looks public and the rule says so: %q", got)
+	}
+	local := []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
+	if got := rulesOf(Evaluate(Input{Kind: "fortigate", Facts: facts(t, f), Pinned: true, Now: now, Local: local})); got != "fgt.admin_on_wan[wan1]" {
+		t.Fatalf("declared: %q", got)
+	}
+	for ip, want := range map[string]bool{"192.0.2.5": false, "198.51.100.5": true, "198.51.100.34": true, "192.168.1.1": false, "": false, "::ffff:192.0.2.5": false} {
+		if got := isPublic(ip, local); got != want {
+			t.Errorf("isPublic(%q) = %v", ip, got)
+		}
 	}
 }
 

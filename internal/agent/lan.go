@@ -8,10 +8,19 @@ import (
 	"strings"
 )
 
-// lanPrefixes lists the private IPv4 networks the box sits in, the interface with
-// the default route first. Overlay, virtual and container interfaces are left
-// out. The server takes the first entry as the site's LAN (ADR-0017).
-func lanPrefixes() []string {
+// lanNetworks lists the IPv4 networks the box sits in, the interface with the
+// default route first. Overlay, virtual and container interfaces are left out.
+//
+// private are the RFC 1918 networks; the server takes the first as the site's
+// LAN (ADR-0017). other are directly attached networks that are not RFC 1918:
+// a customer LAN somebody once numbered with public addresses. The box only
+// says that it sits in one — whether that network is the customer's own is an
+// operator's call on the server (ADR-0024), never the box's.
+func lanNetworks() (private, other []string) {
+	return filterLAN(interfaceNets(), defaultRouteInterface())
+}
+
+func interfaceNets() []ifaceNets {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil
@@ -38,7 +47,7 @@ func lanPrefixes() []string {
 		}
 		rows = append(rows, r)
 	}
-	return filterLAN(rows, defaultRouteInterface())
+	return rows
 }
 
 type ifaceNets struct {
@@ -57,34 +66,54 @@ var (
 	maxLAN       = 4
 )
 
-func filterLAN(rows []ifaceNets, first string) []string {
+// usableLAN says whether an interface's network can be a LAN at all: a real
+// network of hosts, not a point-to-point link and not a single address.
+func usableLAN(p netip.Prefix) bool {
+	return p.Addr().Is4() && p.Bits() >= 8 && p.Bits() <= 30
+}
+
+// otherLAN says whether a usable network that is not RFC 1918 is worth
+// reporting: ordinary unicast space. Loopback, link-local and multicast are
+// never anybody's LAN.
+func otherLAN(p netip.Prefix) bool {
+	a := p.Addr()
+	return usableLAN(p) && !a.IsPrivate() && a.IsGlobalUnicast()
+}
+
+func filterLAN(rows []ifaceNets, first string) (private, other []string) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		if (rows[i].Name == first) != (rows[j].Name == first) {
 			return rows[i].Name == first
 		}
 		return rows[i].Index < rows[j].Index
 	})
-	var out []string
 	seen := map[string]bool{}
 	for _, r := range rows {
 		if r.Flags&net.FlagLoopback != 0 || r.Flags&net.FlagUp == 0 || r.Flags&net.FlagPointToPoint != 0 || skipLAN(r.Name) {
 			continue
 		}
 		for _, p := range r.Nets {
-			if !p.Addr().IsPrivate() || p.Bits() < 8 || p.Bits() > 30 {
+			if !usableLAN(p) {
 				continue
 			}
 			m := p.Masked().String()
-			if !seen[m] {
-				seen[m] = true
-				out = append(out, m)
+			if seen[m] {
+				continue
+			}
+			seen[m] = true
+			switch {
+			case p.Addr().IsPrivate():
+				if len(private) < maxLAN {
+					private = append(private, m)
+				}
+			case otherLAN(p):
+				if len(other) < maxLAN {
+					other = append(other, m)
+				}
 			}
 		}
-		if len(out) >= maxLAN {
-			return out[:maxLAN]
-		}
 	}
-	return out
+	return private, other
 }
 
 func skipLAN(name string) bool {
@@ -99,41 +128,36 @@ func skipLAN(name string) bool {
 	return false
 }
 
-// lanAddress is the box's own private IPv4 address on the LAN interface (the
-// default route's, else the first that counts as LAN), "" without one.
+// lanAddress is the box's own IPv4 address on the LAN: a private one, the
+// default route's interface first. A box whose only network is outside RFC 1918
+// reports its address there — it is the address a router would point at for
+// the DNS sensor all the same. "" without any.
 func lanAddress() string {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	first := defaultRouteInterface()
-	best := ""
-	for _, ifi := range ifaces {
-		if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagLoopback != 0 || skipLAN(ifi.Name) {
+	return pickLANAddress(interfaceNets(), defaultRouteInterface())
+}
+
+func pickLANAddress(rows []ifaceNets, first string) string {
+	sort.SliceStable(rows, func(i, j int) bool {
+		if (rows[i].Name == first) != (rows[j].Name == first) {
+			return rows[i].Name == first
+		}
+		return rows[i].Index < rows[j].Index
+	})
+	fallback := ""
+	for _, r := range rows {
+		if r.Flags&net.FlagUp == 0 || r.Flags&net.FlagLoopback != 0 || r.Flags&net.FlagPointToPoint != 0 || skipLAN(r.Name) {
 			continue
 		}
-		addrs, err := ifi.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			ipn, ok := a.(*net.IPNet)
-			if !ok || ipn.IP.To4() == nil {
-				continue
-			}
-			addr, _ := netip.AddrFromSlice(ipn.IP.To4())
-			if !addr.IsPrivate() {
-				continue
-			}
-			if ifi.Name == first {
-				return addr.String()
-			}
-			if best == "" {
-				best = addr.String()
+		for _, p := range r.Nets {
+			switch {
+			case p.Addr().IsPrivate():
+				return p.Addr().String()
+			case fallback == "" && otherLAN(p):
+				fallback = p.Addr().String()
 			}
 		}
 	}
-	return best
+	return fallback
 }
 
 // defaultRouteInterface names the interface of the IPv4 default route on Linux

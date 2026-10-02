@@ -101,6 +101,42 @@ func TestBoxesAndAssignment(t *testing.T) {
 	}
 }
 
+// A LAN outside RFC 1918 (ADR-0024): what the box reports sitting in and what
+// an operator declared are two separate facts, both kept.
+func TestNetworksOutsideRFC1918(t *testing.T) {
+	s := open(t)
+	seed(t, s)
+	b, _ := s.Box(ctx, "box_1")
+	site, _ := s.Site(ctx, "site_a")
+	if len(b.LAN) != 0 || len(b.LANOther) != 0 || len(site.LocalNets) != 0 {
+		t.Fatalf("fresh: box %v %v, site %v", b.LAN, b.LANOther, site.LocalNets)
+	}
+	must(t, s.UpdateBoxHeartbeat(ctx, "box_1", wire.Heartbeat{Box: wire.BoxInfo{LAN: []string{"192.168.1.0/24"}, LANOther: []string{"192.0.2.0/24"}, LANIP: "192.0.2.79"}}, t0))
+	b, _ = s.Box(ctx, "box_1")
+	if len(b.LAN) != 1 || len(b.LANOther) != 1 || b.LANOther[0] != "192.0.2.0/24" || b.LANIP != "192.0.2.79" {
+		t.Fatalf("reported: %+v", b)
+	}
+	// a heartbeat from a box that no longer sits in one clears it
+	must(t, s.UpdateBoxHeartbeat(ctx, "box_1", wire.Heartbeat{Box: wire.BoxInfo{LAN: []string{"192.168.1.0/24"}}, DNS: &wire.DNSReport{}}, t0))
+	if b, _ = s.Box(ctx, "box_1"); len(b.LANOther) != 0 {
+		t.Fatalf("not cleared: %v", b.LANOther)
+	}
+	must(t, s.SetSiteLocalNets(ctx, "site_a", []string{"192.0.2.0/24"}))
+	if site, _ = s.Site(ctx, "site_a"); len(site.LocalNets) != 1 || site.LocalNets[0] != "192.0.2.0/24" {
+		t.Fatalf("declared: %v", site.LocalNets)
+	}
+	if sites, _ := s.Sites(ctx, "ten_a"); len(sites) != 1 || len(sites[0].LocalNets) != 1 {
+		t.Fatalf("listed: %+v", sites)
+	}
+	must(t, s.SetSiteLocalNets(ctx, "site_a", nil))
+	if site, _ = s.Site(ctx, "site_a"); len(site.LocalNets) != 0 {
+		t.Fatalf("withdrawn: %v", site.LocalNets)
+	}
+	if err := s.SetSiteLocalNets(ctx, "site_nope", []string{"192.0.2.0/24"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a site that does not exist: %v", err)
+	}
+}
+
 func TestEnrollmentKeyLifecycle(t *testing.T) {
 	s := open(t)
 	must(t, s.CreateEnrollmentKey(ctx, EnrollmentKey{ID: "key_1", SecretHash: "h1", CreatedAt: t0, ExpiresAt: t0.Add(30 * 24 * time.Hour)}))

@@ -122,6 +122,11 @@ type BoxInfo struct {
 	// LAN lists the private IPv4 networks the box sits in, the interface with the
 	// default route first; the server takes the first as the site's LAN (ADR-0017).
 	LAN []string `json:"lan,omitempty"`
+	// LANOther lists directly attached IPv4 networks that are not RFC 1918: a
+	// customer LAN somebody once numbered with public addresses (say 192.0.2.0/24).
+	// The box reports them and nothing follows by itself; an operator declares
+	// such a network to be the site's LAN first (ADR-0024).
+	LANOther []string `json:"lan_other,omitempty"`
 	// Canary lists the decoy ports the box currently listens on (ADR-0018 §7).
 	Canary []int `json:"canary,omitempty"`
 	// LANIP is the box's own address in the LAN: what a router points at for the
@@ -271,6 +276,9 @@ type DNSConfig struct {
 	Block       bool     `json:"block"`
 	Upstreams   []string `json:"upstreams,omitempty"` // resolvers to forward to; empty: the box's own
 	ListVersion string   `json:"list_version,omitempty"`
+	// Local are networks outside RFC 1918 that the site's operator declared to
+	// be its LAN (ADR-0024): the sensor answers their clients like private ones.
+	Local []string `json:"local,omitempty"`
 }
 
 // CanaryConfig switches the box's live detection on: decoy ports that look like the

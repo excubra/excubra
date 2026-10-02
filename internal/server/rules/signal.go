@@ -20,6 +20,8 @@ type Signal struct {
 	Detail string
 	First  time.Time
 	Last   time.Time
+	// Local are the site's declared networks outside RFC 1918 (ADR-0024).
+	Local []netip.Prefix
 }
 
 // decoyNames names the services the decoy ports pretend to be.
@@ -57,9 +59,9 @@ func EvaluateSignal(sg Signal) (Finding, bool) {
 		return Finding{Rule: "signal.arp_scan", Severity: High, Title: "Netz wird abgesucht (ARP)",
 			Detail: fmt.Sprintf("Das Gerät hat innerhalb einer Minute nach %d Adressen im LAN gefragt. So erkundet nmap, ein Wurm oder ein Angreifer das Netz. Ein Inventar- oder Monitoring-Werkzeug sieht genauso aus; dann ist es bekannt und wird einmal quittiert.", sg.Count), Evidence: ev}, true
 	case "fgt_admin_fail":
-		where := origin(sg.IP)
+		where := origin(sg.IP, sg.Local)
 		sev := Medium
-		if sg.Count >= 5 || !private(sg.IP) {
+		if sg.Count >= 5 || !private(sg.IP, sg.Local) {
 			sev = High
 		}
 		return Finding{Rule: "signal.fgt_admin_fail", Key: sg.IP, Severity: sev, Title: fmt.Sprintf("Admin-Login auf der FortiGate: %s", plural(sg.Count, "Fehlversuch", "Fehlversuche")),
@@ -74,7 +76,7 @@ func EvaluateSignal(sg Signal) (Finding, bool) {
 			title = fmt.Sprintf("SSL-VPN wird durchprobiert: %d Fehlversuche", sg.Count)
 		}
 		return Finding{Rule: "signal.fgt_vpn_fail", Key: sg.IP, Severity: sev, Title: title,
-			Detail: fmt.Sprintf("Von %s%s%s. Ein Anwender vertippt sich ein paarmal; Dutzende Versuche in Minuten sind ein Wörterbuch-Angriff auf das VPN. Bei Bedarf die Quelle sperren, Konten mit schwachen Passwörtern prüfen, Zwei-Faktor für das VPN.", sg.IP, origin(sg.IP), users(sg.Detail)), Evidence: ev}, true
+			Detail: fmt.Sprintf("Von %s%s%s. Ein Anwender vertippt sich ein paarmal; Dutzende Versuche in Minuten sind ein Wörterbuch-Angriff auf das VPN. Bei Bedarf die Quelle sperren, Konten mit schwachen Passwörtern prüfen, Zwei-Faktor für das VPN.", sg.IP, origin(sg.IP, sg.Local), users(sg.Detail)), Evidence: ev}, true
 	case "fgt_ips":
 		attack, ipsSev, action := splitIPS(sg.Detail)
 		sev := Medium
@@ -93,7 +95,7 @@ func EvaluateSignal(sg Signal) (Finding, bool) {
 		}
 		ev["attack"], ev["ips_severity"], ev["action"] = attack, ipsSev, action
 		return Finding{Rule: "signal.fgt_ips", Key: attack, Severity: sev, Title: fmt.Sprintf("IPS: %s von %s (%s)", attack, sg.IP, verdict),
-			Detail: fmt.Sprintf("Die FortiGate hat die Signatur „%s“ %s erkannt, Quelle %s%s, Einstufung %s, Aktion: %s. Geblockt heißt: der Versuch war da; nicht geblockt heißt: er ist durch, das Ziel prüfen.", attack, plural(sg.Count, "Mal", "Mal"), sg.IP, origin(sg.IP), firstNonEmptyStr(ipsSev, "unbekannt"), firstNonEmptyStr(action, "unbekannt")), Evidence: ev}, true
+			Detail: fmt.Sprintf("Die FortiGate hat die Signatur „%s“ %s erkannt, Quelle %s%s, Einstufung %s, Aktion: %s. Geblockt heißt: der Versuch war da; nicht geblockt heißt: er ist durch, das Ziel prüfen.", attack, plural(sg.Count, "Mal", "Mal"), sg.IP, origin(sg.IP, sg.Local), firstNonEmptyStr(ipsSev, "unbekannt"), firstNonEmptyStr(action, "unbekannt")), Evidence: ev}, true
 	case "dns_block":
 		listed, name, verdict := splitIPS(sg.Detail)
 		v := "nur gemeldet, nicht geblockt"
@@ -132,19 +134,19 @@ func CanaryDetail(port, count int) string {
 }
 
 // origin says whether an address is inside or outside.
-func origin(ip string) string {
+func origin(ip string, local []netip.Prefix) string {
 	if ip == "" {
 		return ""
 	}
-	if private(ip) {
+	if private(ip, local) {
 		return " (aus dem LAN)"
 	}
 	return " (aus dem Internet)"
 }
 
-func private(ip string) bool {
+func private(ip string, local []netip.Prefix) bool {
 	a, err := netip.ParseAddr(ip)
-	return err == nil && (a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast())
+	return err == nil && (a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || inAny(a, local))
 }
 
 // users renders the user list a signal carries in its detail.

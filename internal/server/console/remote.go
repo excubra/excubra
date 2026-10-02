@@ -23,6 +23,11 @@ type remoteView struct {
 	BoxOperator string              `json:"boxOperator"` // status of the box's second client
 	BoxOpIP     string              `json:"boxOpIp"`
 	Labels      map[string]string   `json:"labels"`
+	// A LAN outside RFC 1918 (ADR-0024): Other is what the box reports sitting
+	// in, Declared what an operator said is this site's own. A network in Other
+	// that is not declared needs the declaration before it can be switched on.
+	Other    []string `json:"other"`
+	Declared []string `json:"declared"`
 }
 
 var remoteLabels = map[string]string{
@@ -47,16 +52,26 @@ func (s *Server) apiSiteRemote(w http.ResponseWriter, r *http.Request) {
 	}
 	if box, err := s.siteBox(ctx, siteID); err == nil && box != nil {
 		v.BoxOperator, v.BoxOpIP = box.NetbirdOpStatus, box.NetbirdOpIP
+		v.Other = box.LANOther
+	}
+	if site, err := s.Store.Site(ctx, siteID); err == nil {
+		v.Declared = site.LocalNets
 	}
 	v.Suggested = s.suggestLAN(ctx, siteID)
 	writeJSON(w, http.StatusOK, v)
 }
 
-// suggestLAN is the network the box reports, else the /24 most of the site's
-// devices live in.
+// suggestLAN is the network the box reports — a private one first, else the
+// one outside RFC 1918 it sits in — else the /24 most of the site's devices
+// live in.
 func (s *Server) suggestLAN(ctx context.Context, siteID string) string {
-	if box, err := s.siteBox(ctx, siteID); err == nil && box != nil && len(box.LAN) > 0 {
-		return box.LAN[0]
+	if box, err := s.siteBox(ctx, siteID); err == nil && box != nil {
+		if len(box.LAN) > 0 {
+			return box.LAN[0]
+		}
+		if len(box.LANOther) > 0 {
+			return box.LANOther[0]
+		}
 	}
 	site, err := s.Store.Site(ctx, siteID)
 	if err != nil {
@@ -89,12 +104,24 @@ func (s *Server) remoteEnable(w http.ResponseWriter, r *http.Request) {
 		s.flashErr(w, r, "Fernzugriff ist auf diesem Server nicht aktiv.", back)
 		return
 	}
-	ra, err := s.Remote.Enable(r.Context(), siteID, r.PostForm.Get("cidr"), actor(r))
+	var ra store.RemoteAccess
+	var err error
+	if r.PostForm.Get("declare") == "1" {
+		// the operator's statement: this network is the customer's LAN although it
+		// is not RFC 1918 (ADR-0024)
+		ra, err = s.Remote.Declare(r.Context(), siteID, r.PostForm.Get("cidr"), actor(r))
+	} else {
+		ra, err = s.Remote.Enable(r.Context(), siteID, r.PostForm.Get("cidr"), actor(r))
+	}
 	switch {
 	case errors.Is(err, remote.ErrNotConfigured):
 		s.flashErr(w, r, "Erst den Techniker-Stack unter Verwaltung → Einstellungen eintragen (Management-URL und API-Token).", back)
 	case errors.Is(err, remote.ErrBadCIDR):
-		s.flashErr(w, r, "Das LAN muss ein privates IPv4-Netz in CIDR-Schreibweise sein, z. B. 192.168.10.0/24.", back)
+		s.flashErr(w, r, "Das LAN muss ein IPv4-Netz in CIDR-Schreibweise sein, z. B. 192.168.10.0/24.", back)
+	case errors.Is(err, remote.ErrNotDeclared):
+		s.flashErr(w, r, "Dieses Netz ist kein privater Adressbereich (RFC 1918). Ist es trotzdem das LAN dieses Kunden, das Einschalten mit der Bestätigung darunter wiederholen: Die Route im Techniker-Stack nimmt den echten Internetverkehr für diesen Bereich mit.", back)
+	case errors.Is(err, remote.ErrNotAttached):
+		s.flashErr(w, r, "Nur ein Netz, in dem die Box selbst steht, lässt sich zum LAN des Standorts erklären: "+err.Error(), back)
 	case errors.Is(err, remote.ErrOverlap):
 		s.flashErr(w, r, "Dieses Netz überschneidet sich mit einem anderen Standort im Techniker-Stack: "+err.Error(), back)
 	case errors.Is(err, remote.ErrNoBox):

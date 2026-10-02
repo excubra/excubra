@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -973,5 +974,83 @@ func TestVersionWindowAndRateLimit(t *testing.T) {
 	f.now = f.now.Add(10 * time.Minute)
 	if status, _ := f.do(boxClient, "GET", "/v1/config", nil, nil); status != 200 {
 		t.Fatalf("rate limit did not recover: %d", status)
+	}
+}
+
+// A customer LAN on public addresses, end to end through the ingest (ADR-0024):
+// the box says which network it sits in, the server keeps that apart from the
+// private ones, and once the site's operator declared the network, the box's
+// DNS sensor is told to serve it and a signal from inside it is "from the LAN".
+func TestADeclaredLANReachesTheBoxAndTheRules(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	boxID, boxClient, _ := f.enroll(f.key.String())
+	must(t, f.eng.AssignBox(ctx, boxID, "site_a", "test"))
+	beat := func(hb wire.Heartbeat) {
+		t.Helper()
+		f.now = f.now.Add(60 * time.Second)
+		hb.SentAt, hb.Agent = f.now, wire.AgentInfo{Version: "0.20.0", OS: "linux", Arch: "amd64"}
+		if status, body := f.do(boxClient, "POST", "/v1/heartbeat", hb, nil); status != 200 {
+			t.Fatalf("heartbeat: %d %s", status, body)
+		}
+	}
+	config := func() wire.Config {
+		t.Helper()
+		_, body := f.do(boxClient, "GET", "/v1/config", nil, nil)
+		var cfg wire.Config
+		must(t, json.Unmarshal(body, &cfg))
+		return cfg
+	}
+
+	beat(wire.Heartbeat{Box: wire.BoxInfo{LANOther: []string{"192.0.2.0/24"}, LANIP: "192.0.2.79"}})
+	b, err := f.st.Box(ctx, boxID)
+	must(t, err)
+	if len(b.LAN) != 0 || len(b.LANOther) != 1 || b.LANOther[0] != "192.0.2.0/24" || b.LANIP != "192.0.2.79" {
+		t.Fatalf("what the box reported: lan %v, other %v, ip %q", b.LAN, b.LANOther, b.LANIP)
+	}
+
+	// the sensor is on, the network not declared: the box is told nothing about it
+	must(t, f.eng.SetSiteDNS(ctx, "site_a", true, false, nil, "test"))
+	before := config()
+	if len(before.DNS.Local) != 0 {
+		t.Fatalf("undeclared: %+v", before.DNS)
+	}
+	// two mistyped admin passwords from a workstation of that LAN: undeclared,
+	// the address reads as the internet, and that is urgent
+	fail := func(ip string) store.Finding {
+		t.Helper()
+		beat(wire.Heartbeat{Signals: []wire.Signal{{Kind: wire.SignalFGTAdminFail, IP: ip, Count: 2, Detail: "admin", FirstAt: f.now, LastAt: f.now}}})
+		open, err := f.st.OpenFindings(ctx, "ten_a")
+		must(t, err)
+		for _, fd := range open {
+			if fd.Rule == "signal.fgt_admin_fail" && fd.Key == ip {
+				return fd
+			}
+		}
+		t.Fatalf("no finding for %s: %+v", ip, open)
+		return store.Finding{}
+	}
+	if fd := fail("192.0.2.56"); fd.Severity != "high" || !strings.Contains(fd.Detail, "aus dem Internet") {
+		t.Fatalf("undeclared: %s %q", fd.Severity, fd.Detail)
+	}
+
+	must(t, f.eng.SetSiteLocalNets(ctx, "site_a", []string{"192.0.2.0/24"}, "jeremia"))
+	// declared, the same two typos from the next desk are what they are
+	if fd := fail("192.0.2.57"); fd.Severity != "medium" || !strings.Contains(fd.Detail, "aus dem LAN") {
+		t.Fatalf("declared: %s %q", fd.Severity, fd.Detail)
+	}
+	after := config()
+	if len(after.DNS.Local) != 1 || after.DNS.Local[0] != "192.0.2.0/24" {
+		t.Fatalf("declared: %+v", after.DNS)
+	}
+	if after.Version == before.Version {
+		t.Fatal("a declaration must reach the box: the config version has to change")
+	}
+	if err := f.eng.SetSiteLocalNets(ctx, "site_nope", []string{"192.0.2.0/24"}, "jeremia"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a site the engine does not know: %v", err)
+	}
+	audit, _ := f.st.AuditEntries(ctx, 5, 0)
+	if len(audit) == 0 || audit[0].Action != "site.local_nets" || audit[0].Actor != "jeremia" || audit[0].Summary != "192.0.2.0/24" {
+		t.Fatalf("audit: %+v", audit)
 	}
 }

@@ -49,6 +49,9 @@ type Input struct {
 	Metrics map[string]float64
 	Pinned  bool // the device certificate is pinned in the connector
 	Now     time.Time
+	// Local are networks outside RFC 1918 the site's operator declared to be its
+	// LAN (ADR-0024): an address in one of them is inside, not on the internet.
+	Local []netip.Prefix
 }
 
 // LicenceWarnDays is how early an expiring licence becomes a finding.
@@ -102,7 +105,7 @@ func fortigate(in Input) []Finding {
 				plain = append(plain, tok)
 			}
 		}
-		wan := role == "wan" || strings.HasPrefix(strings.ToLower(name), "wan") || isPublic(ip)
+		wan := role == "wan" || strings.HasPrefix(strings.ToLower(name), "wan") || isPublic(ip, in.Local)
 		if wan && len(mgmt) > 0 {
 			out = append(out, Finding{Rule: "fgt.admin_on_wan", Key: name, Severity: High,
 				Title:    fmt.Sprintf("Verwaltung auf %s von außen erreichbar", name),
@@ -208,8 +211,10 @@ func number(v any) (float64, bool) {
 	return 0, false
 }
 
-// isPublic reports whether ip (possibly "addr mask") is a routable public IPv4/6 address.
-func isPublic(ip string) bool {
+// isPublic reports whether ip (possibly "addr mask") is a routable public IPv4/6
+// address. An address inside one of the site's declared networks is not: that
+// network is the customer's LAN, whatever range somebody took it from.
+func isPublic(ip string, local []netip.Prefix) bool {
 	fields := strings.Fields(ip)
 	if len(fields) == 0 {
 		return false
@@ -218,7 +223,20 @@ func isPublic(ip string) bool {
 	if err != nil || !a.IsValid() || a.IsUnspecified() {
 		return false
 	}
+	if inAny(a, local) {
+		return false
+	}
 	return !a.IsPrivate() && !a.IsLoopback() && !a.IsLinkLocalUnicast() && !a.IsMulticast()
+}
+
+func inAny(a netip.Addr, nets []netip.Prefix) bool {
+	a = a.Unmap()
+	for _, p := range nets {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 func orDash(s string) string {

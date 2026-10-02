@@ -303,6 +303,7 @@ func run(envFile string) error {
 	con.AI = aiSvc
 	go aiSvc.Run(ctx)
 	rem := remote.New(st, log)
+	rem.SetLocalNets = eng.SetSiteLocalNets // a declared LAN reaches the rules at once (ADR-0024)
 	con.Remote = rem
 	go rem.Run(ctx, 30*time.Second)
 	// The assistant's way in (ADR-0024): the MCP tools, served on a socket in the

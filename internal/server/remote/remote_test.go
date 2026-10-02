@@ -79,10 +79,14 @@ func TestEnableWiresTheLANOnceTheBoxJoined(t *testing.T) {
 	}
 
 	// bad and overlapping LANs are refused
-	for _, bad := range []string{"8.8.8.0/24", "192.168.10.5", "fe80::/64", "10.0.0.0/7"} {
+	for _, bad := range []string{"192.168.10.5", "fe80::/64", "10.0.0.0/7", "192.168.10.0/31", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/24", "0.0.0.0/8"} {
 		if _, err := w.svc.Enable(ctx, "site_a", bad, "jeremia"); !errors.Is(err, ErrBadCIDR) {
 			t.Fatalf("%s accepted: %v", bad, err)
 		}
+	}
+	// a network of hosts on public addresses is not a typo, but nobody declared it this site's LAN
+	if _, err := w.svc.Enable(ctx, "site_a", "8.8.8.0/24", "jeremia"); !errors.Is(err, ErrNotDeclared) {
+		t.Fatalf("an undeclared public network: %v", err)
 	}
 
 	// a LAN somebody already routes by hand in our stack is refused
@@ -347,5 +351,118 @@ func TestLANIsSwitchedOnByItself(t *testing.T) {
 	w.svc.Reconcile(ctx)
 	if _, err := w.st.RemoteAccess(ctx, "site_a"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("auto_lan=0 ignored: %v", err)
+	}
+}
+
+// A customer whose LAN was numbered with public addresses long ago (29.09.2026:
+// 192.0.2.0/24, and no way to renumber it). The box sits in it and says so;
+// nothing is switched on by itself, the site's row says why; an operator
+// declares the network to be the site's LAN, and from then on it is one.
+func TestALANOutsideRFC1918NeedsADeclaration(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	must(t, w.svc.SaveSettings(ctx, w.srv.URL, "tok", "", "", ""))
+	other := func(boxID, ip string, nets ...string) {
+		t.Helper()
+		must(t, w.st.UpdateBoxHeartbeat(ctx, boxID, wire.Heartbeat{Agent: wire.AgentInfo{Version: "0.20.0"}, Box: wire.BoxInfo{LANOther: nets}, NetbirdOperator: &wire.NetbirdInfo{Status: wire.NetbirdConnected, IP: ip}}, w.now))
+	}
+	other("box_a", "100.90.0.7", "192.0.2.0/24")
+	w.fake.Peers = []netbird.Peer{{ID: "peer_box_a", Hostname: "muster-box", IP: "100.90.0.7", Connected: true}}
+
+	// not by itself: the row explains, nothing exists in the stack
+	w.svc.Reconcile(ctx)
+	ra, err := w.st.RemoteAccess(ctx, "site_a")
+	if err != nil || ra.Enabled || ra.State != store.RemoteError || ra.CIDR != "192.0.2.0/24" || !strings.Contains(ra.Detail, "kein privater Adressbereich") || len(w.fake.Networks) != 0 {
+		t.Fatalf("the site must say why nothing was switched on: %+v %v", ra, err)
+	}
+	w.svc.Reconcile(ctx)
+	if again, _ := w.st.RemoteAccess(ctx, "site_a"); again.UpdatedAt != ra.UpdatedAt {
+		t.Fatal("the explanation is written once, not every tick")
+	}
+
+	// switching it on like a private LAN is refused; so is declaring a network the box is not in
+	if _, err := w.svc.Enable(ctx, "site_a", "192.0.2.0/24", "jeremia"); !errors.Is(err, ErrNotDeclared) {
+		t.Fatalf("undeclared: %v", err)
+	}
+	if _, err := w.svc.Declare(ctx, "site_a", "198.51.100.0/24", "jeremia"); !errors.Is(err, ErrNotAttached) || !strings.Contains(err.Error(), "192.0.2.0/24") {
+		t.Fatalf("a network the box does not sit in, and what it does report: %v", err)
+	}
+	if _, err := w.svc.Declare(ctx, "site_a", "192.0.0.0/16", "jeremia"); !errors.Is(err, ErrNotAttached) {
+		t.Fatalf("exactly the network, nothing wider: %v", err)
+	}
+	if site, _ := w.st.Site(ctx, "site_a"); len(site.LocalNets) != 0 {
+		t.Fatalf("a refused declaration leaves nothing: %v", site.LocalNets)
+	}
+
+	// the declaration: recorded on the site, and the LAN is wired like any other
+	ra, err = w.svc.Declare(ctx, "site_a", " 192.0.2.0/24 ", "jeremia")
+	if err != nil || ra.State != store.RemoteActive || ra.CIDR != "192.0.2.0/24" || !ra.Enabled {
+		t.Fatalf("declare: %+v %v", ra, err)
+	}
+	site, _ := w.st.Site(ctx, "site_a")
+	if len(site.LocalNets) != 1 || site.LocalNets[0] != "192.0.2.0/24" {
+		t.Fatalf("local nets: %v", site.LocalNets)
+	}
+	if res := w.fake.Res[ra.NetworkID]; len(res) != 1 || res[0].Address != "192.0.2.0/24" {
+		t.Fatalf("resource: %+v", res)
+	}
+	audit, _ := w.st.AuditEntries(ctx, 20, 0)
+	said := false
+	for _, a := range audit {
+		if a.Action == "site.local_nets" && a.Actor == "jeremia" && a.Target == "site_a" {
+			said = true
+		}
+	}
+	if !said {
+		t.Fatalf("a declaration is somebody's statement and must be on the record: %+v", audit)
+	}
+	// declaring twice changes nothing
+	if _, err := w.svc.Declare(ctx, "site_a", "192.0.2.0/24", "jeremia"); err != nil {
+		t.Fatal(err)
+	}
+	if site, _ := w.st.Site(ctx, "site_a"); len(site.LocalNets) != 1 {
+		t.Fatalf("declared twice: %v", site.LocalNets)
+	}
+
+	// a network that runs into the technicians' overlay is refused, declared or not
+	other("box_b", "100.90.0.8", "100.90.0.0/24")
+	w.fake.Peers = append(w.fake.Peers, netbird.Peer{ID: "peer_box_b", Hostname: "lager-box", IP: "100.90.0.8", Connected: true})
+	if _, err := w.svc.Declare(ctx, "site_b", "100.90.0.0/24", "jeremia"); !errors.Is(err, ErrOverlap) {
+		t.Fatalf("overlay: %v", err)
+	}
+
+	// a site whose network was declared before its box arrived (or came back):
+	// switched on by itself, because the statement is already there
+	must(t, w.st.SetSiteLocalNets(ctx, "site_b", []string{"11.22.0.0/16"}))
+	other("box_b", "100.90.0.8", "11.22.33.0/24")
+	w.svc.Reconcile(ctx)
+	rb, err := w.st.RemoteAccess(ctx, "site_b")
+	if err != nil || rb.State != store.RemoteActive || rb.CIDR != "11.22.33.0/24" || rb.RequestedBy != "auto" {
+		t.Fatalf("declared beforehand: %+v %v", rb, err)
+	}
+
+	// through the server's hook the engine hears about a declaration at once
+	w2 := newWorld(t)
+	must(t, w2.svc.SaveSettings(ctx, w2.srv.URL, "tok", "", "", ""))
+	var heard []string
+	w2.svc.SetLocalNets = func(_ context.Context, siteID string, nets []string, actor string) error {
+		heard = append(heard, siteID+"|"+strings.Join(nets, ",")+"|"+actor)
+		return w2.st.SetSiteLocalNets(ctx, siteID, nets)
+	}
+	must(t, w2.st.UpdateBoxHeartbeat(ctx, "box_a", wire.Heartbeat{Box: wire.BoxInfo{LANOther: []string{"192.0.2.0/24"}}, NetbirdOperator: &wire.NetbirdInfo{Status: wire.NetbirdDisconnected}}, w2.now))
+	if _, err := w2.svc.Declare(ctx, "site_a", "192.0.2.0/24", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	if len(heard) != 1 || heard[0] != "site_a|192.0.2.0/24|claude" {
+		t.Fatalf("hook: %v", heard)
+	}
+
+	// a private network needs no declaration: Declare is Enable
+	w.report(t, "box_a", wire.NetbirdConnected, "100.90.0.7", "192.168.50.0/24")
+	if ra, err := w.svc.Declare(ctx, "site_a", "192.168.50.0/24", "jeremia"); err != nil || ra.CIDR != "192.168.50.0/24" {
+		t.Fatalf("private through Declare: %+v %v", ra, err)
+	}
+	if site, _ := w.st.Site(ctx, "site_a"); len(site.LocalNets) != 1 {
+		t.Fatalf("a private network is not written into the declarations: %v", site.LocalNets)
 	}
 }

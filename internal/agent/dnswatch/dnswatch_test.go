@@ -295,9 +295,37 @@ func TestOutsideSourcesAreNotServed(t *testing.T) {
 		t.Fatalf("signals: %+v", s)
 	}
 	for src, want := range map[string]bool{"127.0.0.1": true, "169.254.10.4": true, "100.64.0.9": false, "8.8.8.8": false, "fd00::1": true, "2001:db8::1": false, "": false} {
-		if got := servedAddress(src); got != want {
+		if got := servedAddress(src, nil); got != want {
 			t.Errorf("servedAddress(%s) = %v", src, got)
 		}
+	}
+}
+
+// A LAN that was numbered with public addresses is still that customer's LAN
+// once its operator said so: the sensor answers its clients — and only them.
+func TestADeclaredLANIsServed(t *testing.T) {
+	cfg, errs := ParseConfig(wire.DNSConfig{Enabled: true, Local: []string{"192.0.2.0/24", "0.0.0.0/0", "8.8.8.8/32", "not a network", "2001:db8::/32"}})
+	if len(cfg.Local) != 1 || cfg.Local[0].String() != "192.0.2.0/24" || len(errs) != 4 {
+		t.Fatalf("only a network of hosts is taken, whatever the server sends: %v %v", cfg.Local, errs)
+	}
+	up := newUpstream(t)
+	cfg.Upstreams = []string{up.addr}
+	w, _, _, _ := sensor(t, cfg)
+	if resp := w.handle(context.Background(), query(1, "example.test", 1), "192.0.2.56", "udp"); resp == nil {
+		t.Fatal("a client of the declared LAN got no answer")
+	}
+	if resp := w.handle(context.Background(), query(2, "example.test", 1), "198.51.100.56", "udp"); resp != nil {
+		t.Fatal("the network next door is not the declared LAN")
+	}
+	if rep := w.Drain(); rep.Queries != 1 || rep.Refused != 1 {
+		t.Fatalf("report: %+v", rep)
+	}
+	many := make([]string, maxLocal+3)
+	for i := range many {
+		many[i] = "192.0.2.0/24"
+	}
+	if cfg, errs := ParseConfig(wire.DNSConfig{Local: many}); len(cfg.Local) != maxLocal || len(errs) != 1 {
+		t.Fatalf("bounded: %d %v", len(cfg.Local), errs)
 	}
 }
 
