@@ -96,16 +96,28 @@ we control on both ends.
 
 ## Assistant
 
-`excubra server mcp` serves EX0 over the Model Context Protocol on stdin/stdout:
-tenants, sites, devices and their services, findings, events, the situation of a
-site, and a tool that stores an assessment written by the assistant. Start it
-through SSH from a machine in the operator overlay, so nothing new listens:
+`excubra server mcp` serves EX0 over the Model Context Protocol on stdin/stdout.
+Start it through SSH from a machine in the operator overlay. The command is a pipe
+to a Unix socket of the running server, so nothing new listens on a network and a
+server restart does not end the session (ADR-0024):
 
 ```
 claude mcp add --scope user ex0 -- ssh -o BatchMode=yes root@<server> excubra server mcp --actor <you>
 ```
 
-It reads and proposes; it acknowledges nothing and executes nothing (ADR-0019).
+A session reads — tenants, sites, devices and their services, findings, events,
+the situation of a site — and stores an assessment it wrote (ADR-0019).
+
+It also sets a customer up, start to finish: tenant, site, the enrollment key
+inside the complete installer command (container values and the technicians' SSH
+keys included, see [image/README.md](image/README.md)), the site's LAN, the
+customer's own VPN, what to watch, and the scan with the customer's consent on
+record. `ex0_rollout_status` says for every step of a rollout what is missing.
+Each of these is an order to the server, audited under `--actor`; the one command
+on the customer's machine is run by whoever has root there.
+
+It acknowledges nothing and operates nothing: findings, outages, maintenance, the
+DNS sensor and a device's credentials stay with a person in the console.
 
 ## Licence
 
