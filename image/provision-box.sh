@@ -15,13 +15,28 @@
 #
 #   provision-box.sh --binary ./excubra_linux_amd64 --enroll-key 'EX0:1:…' \
 #                    [--hostname ex0-box-buero] [--netbird-version 0.78.1] [--ssh-lan]
+#                    [--ssh-key 'ssh-ed25519 AAAA… name']…
 #                    [--no-operator-peer] [--operator-lan-mode nat|macvlan]
 #                    [--netbird-url https://kunde.vpn.example.test --netbird-setup-key KEY]
+#
+# --ssh-key puts a technician's public key into root's authorized_keys. Without one
+# nobody can log in at all: sshd takes keys only, and the box has no password. The
+# keys come with the command a person runs on the box — never from the server,
+# which must not be able to open a door at a customer (ADR-0024).
+#
+# The last line says what happened, for a person and for a program alike:
+#   EX0-RESULT: ok box=box_… version=…      or      EX0-RESULT: failed — and why
+# and the exit status says the same.
 #
 # A machine that already ran NetBird before its first provisioning (a hand-built routing
 # peer) is somebody else's network device: no firewall, no package upgrades, its NetBird
 # is not touched ("guest"). Decided once, kept in /etc/excubra/provision.env.
 set -euo pipefail
+# Whoever calls this may run with a tight umask (a careful admin, a script that
+# just wrote a key file). What is installed here must be readable by the services
+# that use it — apt's sandbox user reads the NetBird keyring — so the modes are
+# ours, not the caller's. Secrets get their own mode where they are written.
+umask 022
 
 # best-effort steps: in an LXC container some of these are read-only or absent
 try() { "$@" 2>/dev/null || echo "   (übersprungen: $* — in Containern normal)"; }
@@ -35,6 +50,7 @@ NETBIRD_URL=""
 OPERATOR_PEER=1
 OPERATOR_LAN_MODE=nat
 SSH_LAN=0
+SSH_KEYS=()
 FORCE_GUEST=0
 STATE_DIR=/var/lib/excubra-agent
 BIN_DIR=/opt/excubra/bin
@@ -54,12 +70,20 @@ while [ $# -gt 0 ]; do
     --operator-lan-mode) OPERATOR_LAN_MODE="$2"; shift 2 ;;
     --guest) FORCE_GUEST=1; shift ;;
     --ssh-lan) SSH_LAN=1; shift ;;
+    --ssh-key) SSH_KEYS+=("$2"); shift 2 ;;
     *) echo "provision-box: unknown flag $1" >&2; exit 2 ;;
   esac
 done
 [ "$(id -u)" = 0 ] || { echo "provision-box: run as root" >&2; exit 1; }
 [ -n "$BINARY" ] && [ -x "$BINARY" ] || { echo "provision-box: --binary <excubra_linux_*> required" >&2; exit 2; }
 case "$OPERATOR_LAN_MODE" in nat|macvlan) ;; *) echo "provision-box: --operator-lan-mode nat|macvlan" >&2; exit 2 ;; esac
+# A public key is one line: type, base64, an optional name. Nothing else gets into
+# authorized_keys — no options, no second line.
+for k in ${SSH_KEYS[@]+"${SSH_KEYS[@]}"}; do
+  case "$k" in *$'\n'*|*$'\r'*) echo "provision-box: --ssh-key must be one line" >&2; exit 2 ;; esac
+  [[ "$k" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\ [A-Za-z0-9+/=]{40,}(\ [A-Za-z0-9@._:+-]{1,80})?$ ]] \
+    || { echo "provision-box: --ssh-key is not a public key (type, key, optional name): ${k:0:40}…" >&2; exit 2; }
+done
 
 # Guest or ours? Decided on the first run and remembered: a NetBird that was here before
 # us belongs to whoever built this machine (routing peer, exit node), and a firewall or
@@ -125,7 +149,24 @@ X11Forwarding no
 MaxAuthTries 3
 CONF
 install -d -m 0755 /run/sshd
-sshd -t && systemctl reload ssh || true
+if sshd -t; then
+  # socket-activated (Proxmox templates) or a plain service: either way the new
+  # settings apply to the next connection
+  systemctl reload ssh 2>/dev/null || systemctl try-restart ssh 2>/dev/null || true
+else
+  echo "   sshd refuses its configuration; SSH on this box will not work until that is fixed (sshd -t)"
+fi
+if [ ${#SSH_KEYS[@]} -gt 0 ]; then
+  echo "== ssh: ${#SSH_KEYS[@]} technician key(s) for root"
+  install -d -m 0700 /root/.ssh
+  touch /root/.ssh/authorized_keys
+  chmod 0600 /root/.ssh/authorized_keys
+  for k in "${SSH_KEYS[@]}"; do
+    grep -qxF "$k" /root/.ssh/authorized_keys || printf '%s\n' "$k" >> /root/.ssh/authorized_keys
+  done
+elif [ ! -s /root/.ssh/authorized_keys ]; then
+  echo "   no --ssh-key given and no key on the box: nobody can log in over SSH (run the installer again with --ssh-key to add one)"
+fi
 
 echo "== firewall: no inbound port$([ "$SSH_LAN" = 1 ] && echo ' except ssh (pilot)')"
 if [ "$NETBIRD_GUEST" = 1 ]; then
@@ -255,13 +296,17 @@ fi
 
 if [ -n "$NETBIRD_SETUP_KEY" ] && command -v netbird >/dev/null; then
   echo "== netbird up (hand-provisioned box)"
-  umask 077; printf '%s' "$NETBIRD_SETUP_KEY" > /root/.nb-setup-key
+  ( umask 077; printf '%s' "$NETBIRD_SETUP_KEY" > /root/.nb-setup-key )
   netbird up --management-url "$NETBIRD_URL" --setup-key-file /root/.nb-setup-key --hostname "${HOSTNAME_WANT:-$(hostname)}" 2>&1 | tail -1 || true
   rm -f /root/.nb-setup-key
-  netbird status 2>/dev/null | grep -E "Management|NetBird IP" || true
+  netbird status 2>/dev/null | grep -E "^(Management|NetBird IP):" || true
 fi
 
-if [ -n "$ENROLL_KEY" ]; then
+if [ -n "$ENROLL_KEY" ] && [ -s "$STATE_DIR/box.id" ]; then
+  # a second run of the same command: the box has its identity, the key is spent
+  echo "== enrollment key: not needed, the box is enrolled as $(tr -d '[:space:]' < "$STATE_DIR/box.id")"
+  ENROLL_KEY=""
+elif [ -n "$ENROLL_KEY" ]; then
   echo "== enrollment key"
   install -m 0600 -o excubra-agent -g excubra-agent /dev/null "$STATE_DIR/enroll"
   printf '%s\n' "$ENROLL_KEY" > "$STATE_DIR/enroll"
@@ -279,19 +324,67 @@ systemctl enable excubra-agent excubra-agent-unit.path excubra-agent-unit.servic
 systemctl start excubra-agent-unit.path 2>/dev/null || true
 systemctl restart excubra-agent
 sleep 5
-systemctl --no-pager --lines=0 status excubra-agent | sed -n '1,3p'
+systemctl --no-pager --lines=0 status excubra-agent | sed -n '1,3p' || true
+
+# ---- the truth at the end ---------------------------------------------------------------
+# A box is done when it has an identity, not when the script reached its last line
+# (29.09.2026: "is an EX0 box" was printed over a container with nothing in it).
+RESULT=ok
+WHY=""
+# what the agent said about the enrollment: the refusal or the failure, not the
+# "waiting for a key" that follows it
+enroll_line() {
+  local j; j="$(journalctl -u excubra-agent --no-pager -n 60 -o cat 2>/dev/null || true)"
+  { grep -iE 'enrollment (refused|failed)' <<<"$j" || grep -iE 'enroll' <<<"$j" || true; } | tail -1
+}
+if [ ! -s "$STATE_DIR/box.id" ]; then
+  if [ -z "$ENROLL_KEY" ] && [ ! -f "$STATE_DIR/enroll" ]; then
+    RESULT=failed
+    WHY="the box has no identity and no enrollment key was given (--enroll-key)"
+  else
+    WAIT="${EX0_ENROLL_WAIT:-120}"   # seconds; longer on a slow line
+    echo "== waiting for the enrollment (up to $WAIT s)"
+    for _ in $(seq 1 $(( (WAIT + 1) / 2 ))); do
+      [ -s "$STATE_DIR/box.id" ] && break
+      # the agent deletes a key the server refused; waiting longer changes nothing
+      [ -f "$STATE_DIR/enroll" ] || break
+      sleep 2
+    done
+    if [ ! -s "$STATE_DIR/box.id" ]; then
+      RESULT=failed
+      if [ -f "$STATE_DIR/enroll" ]; then
+        WHY="the box cannot enroll — it does not reach the server from this network (outbound 443 blocked, or TLS inspection in the way?). Last word of the agent: $(enroll_line)"
+      else
+        WHY="the server refused the enrollment key (used, expired or revoked — make a new one). Last word of the agent: $(enroll_line)"
+      fi
+    fi
+  fi
+fi
+if [ "$RESULT" = ok ] && ! systemctl is-active --quiet excubra-agent; then
+  RESULT=failed
+  WHY="the agent does not run: $(journalctl -u excubra-agent --no-pager -n 3 -o cat 2>/dev/null | tail -1 || true)"
+fi
+
 echo "== last lines"
-journalctl -u excubra-agent --no-pager -n 6 -o cat
+journalctl -u excubra-agent --no-pager -n 6 -o cat || true
 echo
-nb_line() { netbird "$@" status 2>/dev/null | grep -E "Management|NetBird IP" | tr -s ' \n' ' ' || true; }
-echo "provision-box: done. The package:"
-printf '   agent           %s · %s\n' "$(systemctl is-active excubra-agent)" "$("$BIN_DIR/excubra" version | head -1)"
+nb_line() { netbird "$@" status 2>/dev/null | grep -E "^(Management|NetBird IP):" | tr -s ' \n' ' ' || true; }
+echo "provision-box: the package:"
+printf '   agent           %s · %s\n' "$(systemctl is-active excubra-agent || true)" "$("$BIN_DIR/excubra" version | head -1)"
 if [ "$OPERATOR_PEER" = 1 ]; then
   op="$(nb_line --daemon-addr unix:///var/run/netbird-operator.sock)"
-  printf '   operator peer   %s · %s\n' "$(systemctl is-active netbird-operator 2>/dev/null || true)" "${op:-waits for its key from EX0 (assign the box to a site)}"
+  printf '   operator peer   %s · %s\n' "$(systemctl is-active netbird-operator 2>/dev/null || true)" "${op:-waits for its key from EX0 (comes by itself once the box is at its site)}"
 fi
 cu="$(nb_line)"
-printf '   customer peer   %s · %s\n' "$(systemctl is-active netbird 2>/dev/null || true)" "${cu:-idle until a key is put in through the console (opt-in)}"
+printf '   customer peer   %s · %s\n' "$(systemctl is-active netbird 2>/dev/null || true)" "${cu:-idle until the customer VPN is handed over (opt-in)}"
+printf '   ssh             %s key(s) for root\n' "$(grep -cE '^(ssh-|ecdsa-|sk-)' /root/.ssh/authorized_keys 2>/dev/null || echo 0)"
 echo "Open ports:"
 ss -tlnp | awk 'NR>1{print "   " $4}' | sort -u || true
 echo "   (SSH only if --ssh-lan was given, plus port 22 inside the operator namespace for the relay — that is the point)"
+echo
+if [ "$RESULT" = ok ]; then
+  echo "EX0-RESULT: ok box=$(tr -d '[:space:]' < "$STATE_DIR/box.id") version=$("$BIN_DIR/excubra" version | awk 'NR==1{print $2}')"
+else
+  echo "EX0-RESULT: failed — provision-box: $WHY" >&2
+  exit 1
+fi

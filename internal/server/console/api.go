@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -523,10 +524,16 @@ func (s *Server) apiKeysCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		tenant, _ := s.Store.Tenant(ctx, site.TenantID)
-		hostname = installer.Hostname(tenant.Name, site.Name)
+		hostname = installer.Hostname(site.TenantID, siteID)
 		if note == "" {
 			note = tenant.Name + " · " + site.Name
 		}
+	}
+	// What is known about the container goes into the command, not next to it.
+	opts, err := installerOptions(f)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Nicht erzeugt: " + err.Error()})
+		return
 	}
 	now := s.Now()
 	var secrets []string
@@ -545,7 +552,7 @@ func (s *Server) apiKeysCreate(w http.ResponseWriter, r *http.Request) {
 		_ = s.Store.Audit(ctx, now, actor(r), "key.new", rec.ID, note+" site="+siteID)
 		secrets = append(secrets, k.String())
 		if count == 1 {
-			commands = installer.Commands(k.String(), hostname)
+			commands = installer.Commands(k.String(), hostname, opts)
 		}
 	}
 	msg := "Key erzeugt. Einmalig sichtbar."
@@ -553,6 +560,44 @@ func (s *Server) apiKeysCreate(w http.ResponseWriter, r *http.Request) {
 		msg = "Key für den Standort erzeugt. Die Box ordnet sich damit selbst zu."
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg, "secrets": secrets, "commands": commands})
+}
+
+// installerOptions reads the optional container values and technician keys of
+// the "Neue Box" form; an empty form is the installer's defaults.
+func installerOptions(f url.Values) (installer.Options, error) {
+	num := func(key string) (int, error) {
+		v := strings.TrimSpace(f.Get(key))
+		if v == "" {
+			return 0, nil
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return 0, errors.New(key + ": eine Zahl")
+		}
+		return n, nil
+	}
+	o := installer.Options{
+		Bridge:  strings.TrimSpace(f.Get("bridge")),
+		IP:      strings.TrimSpace(f.Get("ip")),
+		GW:      strings.TrimSpace(f.Get("gw")),
+		Storage: strings.TrimSpace(f.Get("storage")),
+	}
+	var err error
+	if o.CTID, err = num("ctid"); err != nil {
+		return o, err
+	}
+	if o.Disk, err = num("disk"); err != nil {
+		return o, err
+	}
+	if o.Memory, err = num("memory"); err != nil {
+		return o, err
+	}
+	for _, line := range strings.Split(f.Get("ssh_keys"), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			o.SSHKeys = append(o.SSHKeys, line)
+		}
+	}
+	return o, o.Validate()
 }
 
 type tokenRowAPI struct {

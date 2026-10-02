@@ -1,0 +1,48 @@
+#!/bin/bash
+# A pretend Proxmox for test/box/run.sh: the "container" is the machine this runs
+# on. Enough of pct for ex0-box-pct.sh: create, set, start, status, list, config,
+# push, exec — recorded in /etc/pve/lxc like the real thing.
+set -euo pipefail
+LXC=/etc/pve/lxc
+mkdir -p "$LXC"
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  list)
+    printf '%-10s %-10s %-12s %-20s\n' VMID Status Lock Name
+    for c in "$LXC"/*.conf; do
+      [ -f "$c" ] || continue
+      id="$(basename "$c" .conf)"
+      printf '%-10s %-10s %-12s %-20s\n' "$id" "$(cat "$LXC/$id.state" 2>/dev/null || echo stopped)" "" "$(sed -n 's/^hostname: //p' "$c")"
+    done ;;
+  status)
+    [ -f "$LXC/$1.conf" ] || { echo "Configuration file 'nodes/pve/lxc/$1.conf' does not exist" >&2; exit 2; }
+    echo "status: $(cat "$LXC/$1.state" 2>/dev/null || echo stopped)" ;;
+  create)
+    id="$1"; shift 2
+    [ -f "$LXC/$id.conf" ] && { echo "CT $id already exists" >&2; exit 255; }
+    host="" desc=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --hostname) host="$2"; shift 2 ;;
+        --description) desc="$2"; shift 2 ;;
+        --*) echo "$1 $2" >> "$LXC/$id.args"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    printf '#%s\nhostname: %s\n' "$desc" "$host" > "$LXC/$id.conf"
+    echo stopped > "$LXC/$id.state" ;;
+  set) [ -f "$LXC/$1.conf" ] || exit 2 ;;
+  start) [ -f "$LXC/$1.conf" ] || exit 2; echo running > "$LXC/$1.state" ;;
+  config)
+    [ -f "$LXC/$1.conf" ] || exit 2
+    sed -n 's/^#\(.*\)$/description: \1%0A/p; /^hostname:/p' "$LXC/$1.conf" ;;
+  push)
+    id="$1" src="$2" dst="$3"; shift 3
+    perms=0644; [ "${1:-}" = --perms ] && perms="$2"
+    install -m "$perms" "$src" "$dst" ;;
+  exec)
+    shift; [ "${1:-}" = -- ] && shift
+    # the container has no Proxmox tools: run without the stubs on PATH
+    exec env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin "$@" ;;
+  *) echo "pct stub: $cmd not implemented" >&2; exit 64 ;;
+esac

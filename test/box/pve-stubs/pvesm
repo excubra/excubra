@@ -1,0 +1,9 @@
+#!/bin/bash
+# pvesm status --content vztmpl|rootdir, as a host with `local` and `local-zfs` prints it
+if [ "${1:-}" = status ]; then
+  printf '%-12s %-9s %-10s %15s %15s %15s %8s\n' Name Type Status Total Used Available %
+  case "${3:-}" in
+    vztmpl) printf '%-12s %-9s %-10s %15s %15s %15s %8s\n' local dir active 100 10 90 10.00% ;;
+    rootdir) for s in ${PVE_STUB_ROOTDIR:-local local-zfs}; do printf '%-12s %-9s %-10s %15s %15s %15s %8s\n' "$s" x active 100 10 90 10.00%; done ;;
+  esac
+fi

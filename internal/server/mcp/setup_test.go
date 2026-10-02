@@ -70,8 +70,8 @@ func TestSetupWithoutAPerson(t *testing.T) {
 		Commands []struct{ Title, Cmd string }
 	}
 	must(t, json.Unmarshal([]byte(out), &box))
-	if box.Hostname != "ex0-kanzlei-muster-kanzlei" {
-		t.Fatalf("hostname: %q", box.Hostname)
+	if box.Hostname != "ex0-muster-kanzlei" {
+		t.Fatalf("the hostname is made of the two slugs, not of the display names: %q", box.Hostname)
 	}
 	if len(box.Commands) != 2 || !strings.Contains(box.Commands[0].Cmd, "ex0-box-pct.sh") || !strings.Contains(box.Commands[1].Cmd, "ex0-box.sh") {
 		t.Fatalf("commands: %+v", box.Commands)
@@ -93,6 +93,51 @@ func TestSetupWithoutAPerson(t *testing.T) {
 	}
 	if _, err := s.call(ctx, "ex0_new_box", map[string]any{"site_id": "site_gibt_es_nicht"}); err == nil {
 		t.Fatal("a key for a site that does not exist would be a box nobody can place")
+	}
+	// a download is a file first and a run second; piped into a shell, a failed
+	// download is an empty script that ends quietly
+	if strings.Contains(box.Commands[0].Cmd, "| bash") || !strings.Contains(box.Commands[0].Cmd, "-o /tmp/ex0-box-pct.sh && bash /tmp/ex0-box-pct.sh --enroll-key") {
+		t.Fatalf("the command must load, then run: %s", box.Commands[0].Cmd)
+	}
+	if !strings.Contains(out, "ssh_keys") {
+		t.Fatalf("a box nobody can log in to deserves a warning: %s", out)
+	}
+
+	// What the session knows about the container is in the command, so nobody
+	// appends anything by hand — and the technicians' keys are in both.
+	key := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGlvZi4wdGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleQ jeremia@mac"
+	out, err = s.call(ctx, "ex0_new_box", map[string]any{"site_id": "site_kanzlei", "ctid": float64(200), "bridge": "vmbr0", "ip": "192.0.2.60/24", "gw": "192.0.2.111",
+		"storage": "local-zfs", "disk": float64(8), "memory": float64(1024), "ssh_keys": []any{key}})
+	must(t, err)
+	must(t, json.Unmarshal([]byte(out), &box))
+	for _, want := range []string{"--ctid 200", "--bridge vmbr0", "--ip 192.0.2.60/24 --gw 192.0.2.111", "--storage local-zfs", "--disk 8", "--memory 1024", "--ssh-key '" + key + "'"} {
+		if !strings.Contains(box.Commands[0].Cmd, want) {
+			t.Fatalf("the proxmox command misses %q: %s", want, box.Commands[0].Cmd)
+		}
+	}
+	if strings.Contains(box.Commands[1].Cmd, "--ctid") || !strings.Contains(box.Commands[1].Cmd, "--ssh-key '"+key+"'") {
+		t.Fatalf("a machine of its own takes the keys, not the container values: %s", box.Commands[1].Cmd)
+	}
+	if strings.Contains(out, "\"warning\"") {
+		t.Fatalf("with a key there is nothing to warn about: %s", out)
+	}
+	// nothing that a shell would read as more than a value
+	for _, bad := range []map[string]any{
+		{"site_id": "site_kanzlei", "bridge": "vmbr0; rm -rf /"},
+		{"site_id": "site_kanzlei", "storage": "$(reboot)"},
+		{"site_id": "site_kanzlei", "ip": "192.0.2.60/24"},                             // a fixed address without its gateway
+		{"site_id": "site_kanzlei", "ip": "192.0.2.60/24", "gw": "192.168.1.1"},        // a gateway from another network
+		{"site_id": "site_kanzlei", "ip": "192.0.2.0/24", "gw": "192.0.2.111"},         // the network, not an address
+		{"site_id": "site_kanzlei", "ssh_keys": []any{"ssh-ed25519 AAAA' ; reboot '"}}, // a quote would end the argument
+		{"site_id": "site_kanzlei", "ssh_keys": []any{"-----BEGIN OPENSSH PRIVATE KEY-----"}},
+		{"site_id": "site_kanzlei", "ctid": float64(5)},
+	} {
+		if _, err := s.call(ctx, "ex0_new_box", bad); err == nil {
+			t.Fatalf("must be refused: %v", bad)
+		}
+	}
+	if keys, _ := st.EnrollmentKeys(ctx); len(keys) != 2 {
+		t.Fatalf("a refused call must not leave a key behind: %d keys", len(keys))
 	}
 
 	// a server started without CA and ingest refuses this one tool, loudly

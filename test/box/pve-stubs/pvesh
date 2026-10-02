@@ -1,0 +1,3 @@
+#!/bin/bash
+# pvesh get /cluster/nextid
+n=100; while [ -f "/etc/pve/lxc/$n.conf" ]; do n=$((n+1)); done; echo "$n"

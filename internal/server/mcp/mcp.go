@@ -140,6 +140,10 @@ func schema(props map[string]any, required ...string) map[string]any {
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
+func integer(desc string) map[string]any {
+	return map[string]any{"type": "integer", "description": desc}
+}
+
 func tools() []tool {
 	return []tool{
 		{Name: "ex0_overview", Description: "Alle Kunden und Standorte mit Box-Zustand, Geräten und offenen Findings je Schwere. Der Einstieg.", InputSchema: schema(map[string]any{})},
@@ -152,7 +156,19 @@ func tools() []tool {
 		{Name: "ex0_briefs", Description: "Die bisherigen KI-Einschätzungen eines Standorts, neueste zuerst.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
 		{Name: "ex0_create_tenant", Description: "Legt einen Kunden (Mandanten) an. Einrichtung auf dem Server, kein Zugriff auf Kundensysteme. Kürzel wird zur Kennung ten_<kürzel> und taucht in Webhooks und der API auf: kurz, klein, ohne Umlaute.", InputSchema: schema(map[string]any{"slug": str("Kürzel, a-z 0-9 Bindestrich, z. B. muster"), "name": str("Anzeigename, z. B. Kanzlei Muster")}, "slug", "name")},
 		{Name: "ex0_create_site", Description: "Legt einen Standort für einen Kunden an; mit Adresse wird er serverseitig nachgeschlagen und steht auf der Karte. Einrichtung, kein Zugriff auf Kundensysteme.", InputSchema: schema(map[string]any{"tenant_id": str("Kunden-Kennung, z. B. ten_muster"), "slug": str("Kürzel des Standorts, z. B. kanzlei"), "name": str("Anzeigename, z. B. Kanzlei"), "address": str("Postadresse für die Karte (optional)")}, "tenant_id", "slug", "name")},
-		{Name: "ex0_new_box", Description: "Erzeugt einen Enrollment-Key für einen Standort und liefert die beiden Einzeiler (Proxmox-Host / Box selbst) mit der Release-Version dieses Servers — genau das, was die Konsole unter „Neue Box\" einmalig zeigt. Die Box ordnet sich mit dem Key selbst dem Standort zu (ADR-0017). Der Key ist einmalig und gehört nur in den Befehl.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung, z. B. site_kanzlei"), "note": str("Notiz zum Key, z. B. Container auf dem Kunden-Proxmox (optional)"), "expires_days": map[string]any{"type": "integer", "description": "Gültigkeit in Tagen, Standard 30, höchstens 365"}}, "site_id")},
+		{Name: "ex0_new_box", Description: "Erzeugt einen Enrollment-Key für einen Standort und liefert die beiden vollständigen Befehle (Proxmox-Host / Box selbst) mit der Release-Version dieses Servers. Alles, was über den Container bekannt ist, gehört in diesen Aufruf und steht dann im Befehl: nichts wird von Hand angehängt. Die Box ordnet sich mit dem Key selbst dem Standort zu (ADR-0017). Der Key ist einmalig und gehört nur in den Befehl.", InputSchema: schema(map[string]any{
+			"site_id":      str("Standort-Kennung, z. B. site_kanzlei"),
+			"note":         str("Notiz zum Key, z. B. Container auf dem Kunden-Proxmox (optional)"),
+			"expires_days": integer("Gültigkeit in Tagen, Standard 30, höchstens 365"),
+			"ctid":         integer("Proxmox: Container-ID; ohne Angabe die nächste freie"),
+			"bridge":       str("Proxmox: Bridge des Kunden-LANs, z. B. vmbr0 (Standard: vmbr0, sonst die der Default-Route)"),
+			"ip":           str("Proxmox: feste Adresse der Box mit Präfixlänge, z. B. 192.168.10.60/24 — oder dhcp (Standard). Fest ist besser: die Box wird Router fürs LAN"),
+			"gw":           str("Proxmox: Gateway des Netzes, bei fester Adresse Pflicht"),
+			"storage":      str("Proxmox: Speicher für die Container-Disk, z. B. local-lvm oder local-zfs (Standard: der erste passende)"),
+			"disk":         integer("Proxmox: Disk in GiB, Standard 8"),
+			"memory":       integer("Proxmox: RAM in MiB, Standard 1024"),
+			"ssh_keys":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "öffentliche SSH-Schlüssel der Techniker für root auf der Box (je einer: Typ, Schlüssel, optional Name). Ohne Schlüssel kommt niemand per SSH auf die Box"},
+		}, "site_id")},
 	}
 }
 
@@ -224,7 +240,7 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 		if d, ok := args["expires_days"].(float64); ok {
 			days = int(d)
 		}
-		return s.newBox(ctx, argString(args, "site_id"), argString(args, "note"), days)
+		return s.newBox(ctx, argString(args, "site_id"), argString(args, "note"), days, installerArgs(args))
 	}
 	return "", errors.New("unknown tool " + name)
 }

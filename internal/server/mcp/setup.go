@@ -100,11 +100,12 @@ func (s *Server) createSite(ctx context.Context, tenantID, slug, name, address s
 	return pretty(out), nil
 }
 
-// newBox mints one enrollment key for a site and returns the two one-liners,
-// exactly what the console shows once. The key is a one-time secret: it goes
-// into the command and nowhere else, is consumed on enrollment, and can be
-// revoked in the console until then.
-func (s *Server) newBox(ctx context.Context, siteID, note string, days int) (string, error) {
+// newBox mints one enrollment key for a site and returns the two commands,
+// exactly what the console shows once — with everything the session knows about
+// the container already in them. The key is a one-time secret: it goes into the
+// command and nowhere else, is consumed on enrollment, and can be revoked in
+// the console until then.
+func (s *Server) newBox(ctx context.Context, siteID, note string, days int, opts installer.Options) (string, error) {
 	if s.CAFingerprint == "" || s.Ingest == "" {
 		return "", errors.New("this MCP server was started without the CA and ingest address; enrollment keys need both")
 	}
@@ -114,6 +115,9 @@ func (s *Server) newBox(ctx context.Context, siteID, note string, days int) (str
 	}
 	tenant, err := s.Store.Tenant(ctx, site.TenantID)
 	if err != nil {
+		return "", err
+	}
+	if err := opts.Validate(); err != nil {
 		return "", err
 	}
 	if days < 1 || days > keyDaysMax {
@@ -133,15 +137,40 @@ func (s *Server) newBox(ctx context.Context, siteID, note string, days int) (str
 		return "", err
 	}
 	_ = s.Store.Audit(ctx, now, s.Actor, "key.new", rec.ID, note+" site="+siteID)
-	hostname := installer.Hostname(tenant.Name, site.Name)
+	hostname := installer.Hostname(site.TenantID, siteID)
 	_, ver := installer.Base()
-	return pretty(map[string]any{
+	out := map[string]any{
 		"key_id":     rec.ID,
 		"site_id":    siteID,
 		"expires_at": rec.ExpiresAt.UTC().Format(time.RFC3339),
 		"hostname":   hostname,
 		"version":    ver,
-		"commands":   installer.Commands(k.String(), hostname),
-		"note":       "Der Key steht nur im Befehl. Nicht in salt, nicht in ein Ticket. Beim Proxmox-Einzeiler bei Bedarf --ctid, --bridge, --ip/--gw, --storage, --disk, --memory anhängen (siehe image/README.md). Bis die Box ihn verbraucht hat, lässt er sich in der Konsole unter Enrollment-Keys widerrufen.",
-	}), nil
+		"commands":   installer.Commands(k.String(), hostname, opts),
+		"note":       "Der Key steht nur im Befehl. Nicht in salt, nicht in ein Ticket. Der Befehl ist vollständig: genau so ausführen, nichts anhängen. Er endet mit einer Zeile »EX0-RESULT: ok …« oder »EX0-RESULT: failed …«; danach zeigt ex0_rollout_status, wie weit die Box ist. Bis die Box den Key verbraucht hat, lässt er sich in der Konsole unter Enrollment-Keys widerrufen.",
+	}
+	if len(opts.SSHKeys) == 0 {
+		out["warning"] = "Ohne ssh_keys kommt niemand per SSH auf die Box: sshd nimmt nur Schlüssel, und die Box hat kein Passwort. Die öffentlichen Schlüssel der Techniker gehören in diesen Aufruf."
+	}
+	return pretty(out), nil
+}
+
+// installerArgs reads what ex0_new_box was told about the container and about
+// who may log in. Numbers arrive as JSON numbers.
+func installerArgs(args map[string]any) installer.Options {
+	num := func(key string) int {
+		if v, ok := args[key].(float64); ok {
+			return int(v)
+		}
+		return 0
+	}
+	o := installer.Options{CTID: num("ctid"), Bridge: argString(args, "bridge"), IP: argString(args, "ip"), GW: argString(args, "gw"),
+		Storage: argString(args, "storage"), Disk: num("disk"), Memory: num("memory")}
+	if list, ok := args["ssh_keys"].([]any); ok {
+		for _, v := range list {
+			if k, ok := v.(string); ok && strings.TrimSpace(k) != "" {
+				o.SSHKeys = append(o.SSHKeys, strings.TrimSpace(k))
+			}
+		}
+	}
+	return o
 }

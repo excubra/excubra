@@ -1,0 +1,8 @@
+#!/bin/bash
+T=debian-13-standard_13.6-1_amd64.tar.zst
+case "${1:-}" in
+  update) ;;
+  available) printf 'system          %s\nsystem          debian-12-standard_12.7-1_amd64.tar.zst\n' "$T" ;;
+  list) printf 'NAME                                                         SIZE\nlocal:vztmpl/%s  120.00MB\n' "$T" ;;
+  download) echo "downloading $3 to $2 (stub)" ;;
+esac
