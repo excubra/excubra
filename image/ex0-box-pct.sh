@@ -4,6 +4,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/excubra/excubra/<tag>/image/ex0-box-pct.sh -o /tmp/ex0-box-pct.sh \
 #     && bash /tmp/ex0-box-pct.sh --enroll-key 'EX0:1:…' [--hostname ex0-kunde-standort] [--version 0.20.0]
+#       (or --enroll-key-file /root/enroll.key: the key then never shows in a process list)
 #       [--ctid 200] [--bridge vmbr0] [--ip dhcp | --ip 192.168.10.60/24 --gw 192.168.10.1]
 #       [--storage local-lvm] [--disk 8] [--memory 1024] [--ssh-key 'ssh-ed25519 AAAA… name']…
 #       [--nameserver 192.168.10.1[,…]] [--searchdomain kunde.local]
@@ -52,6 +53,7 @@ main() {
     case "$1" in
       --version) VERSION="$2"; shift 2 ;;
       --enroll-key) ENROLL_KEY="$2"; shift 2 ;;
+      --enroll-key-file) [ -r "$2" ] || { echo "ex0-box-pct: cannot read $2" >&2; exit 2; }; ENROLL_KEY="$(tr -d '[:space:]' < "$2")"; shift 2 ;;
       --hostname) HOSTNAME_WANT="$2"; shift 2 ;;
       --ctid) CTID="$2"; shift 2 ;;
       --bridge) BRIDGE="$2"; shift 2 ;;
