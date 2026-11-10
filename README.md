@@ -117,7 +117,10 @@ Each of these is an order to the server, audited under `--actor`; the one comman
 on the customer's machine is run by whoever has root there.
 
 It acknowledges nothing and operates nothing: findings, outages, maintenance, the
-DNS sensor and a device's credentials stay with a person in the console.
+DNS sensor and a device's credentials stay with a person in the console. And a
+session is an AI: a tenant whose AI switch is off (ADR-0019) is named in the
+overview and nothing more — set-up and operation of such a customer happen in
+the console, and `ex0_create_tenant` takes the customer's written consent.
 
 ## Licence
 

@@ -97,7 +97,7 @@ func TestSessionThroughTheSocket(t *testing.T) {
 	if _, err := s.in.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
-	text, isErr := toolText(t, s.call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ex0_create_tenant","arguments":{"slug":"muster","name":"Muster GmbH"}}}`))
+	text, isErr := toolText(t, s.call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ex0_create_tenant","arguments":{"slug":"muster","name":"Muster GmbH","consent":"Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"}}}`))
 	if isErr || !strings.Contains(text, "ten_muster") {
 		t.Fatalf("create tenant: %s", text)
 	}
@@ -105,13 +105,19 @@ func TestSessionThroughTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(audit) == 0 || audit[0].Actor != "jeremia" || audit[0].Action != "tenant.create" {
+	created := false
+	for _, a := range audit {
+		if a.Action == "tenant.create" && a.Target == "ten_muster" {
+			created = a.Actor == "jeremia"
+		}
+	}
+	if !created {
 		t.Fatalf("the audit line must name the session's actor, not the server's: %+v", audit)
 	}
 
 	// a second session at the same time, with its own actor
 	other := startSession(t, ctx, sock, "claude kunde-x")
-	text, isErr = toolText(t, other.call(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ex0_create_tenant","arguments":{"slug":"zwei","name":"Zwei AG"}}}`))
+	text, isErr = toolText(t, other.call(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ex0_create_tenant","arguments":{"slug":"zwei","name":"Zwei AG","consent":"Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"}}}`))
 	if isErr {
 		t.Fatalf("second session: %s", text)
 	}
@@ -151,7 +157,7 @@ func TestSessionSurvivesARestart(t *testing.T) {
 	waitFor(t, func() bool { return Reachable(ctx, sock) })
 
 	s := startSession(t, ctx, sock, "jeremia")
-	if text, isErr := toolText(t, s.call(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ex0_create_tenant","arguments":{"slug":"vorher","name":"Vorher"}}}`)); isErr {
+	if text, isErr := toolText(t, s.call(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ex0_create_tenant","arguments":{"slug":"vorher","name":"Vorher","consent":"Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"}}}`)); isErr {
 		t.Fatalf("before the restart: %s", text)
 	}
 
@@ -164,7 +170,7 @@ func TestSessionSurvivesARestart(t *testing.T) {
 		time.Sleep(400 * time.Millisecond)
 		_ = srv.ServeSocket(second, sock)
 	}()
-	text, isErr := toolText(t, s.call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ex0_create_tenant","arguments":{"slug":"nachher","name":"Nachher"}}}`))
+	text, isErr := toolText(t, s.call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ex0_create_tenant","arguments":{"slug":"nachher","name":"Nachher","consent":"Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"}}}`))
 	if isErr || !strings.Contains(text, "ten_nachher") {
 		t.Fatalf("after the restart: %s", text)
 	}

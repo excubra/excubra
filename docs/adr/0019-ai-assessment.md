@@ -64,3 +64,25 @@ decided per tenant, and the model must never act.
 - Cost is one request per site per day plus manual runs; the packet is capped
   (200 devices, 800 services, 200 findings, 100 events).
 - The prompt lives in the code; changing it is a commit with a test.
+
+## Amendment, 10.11.2026: the switch binds the session too
+
+Section 6 made a session a provider; the code did not. `excubra server ai
+packet` and `import`, and every reading and set-up tool of the MCP server,
+answered about a tenant whose `ai_scope` was `off` — the preparation of a
+customer audit found it (`ex0_overview` on 28.09.2026). From now on:
+
+- `Packet` and `Import` refuse a tenant with the switch off, like `Assess` does.
+- The MCP refuses every tool that is about a tenant or one of its sites while
+  the switch is off — reading, assessing and setting up alike. The overview
+  names such a tenant and its sites and says why there is nothing more; the
+  findings over all sites leave it out.
+- `ex0_create_tenant` takes the customer's written consent as a sentence,
+  which goes into the audit log (`tenant.ai`), and makes the tenant on
+  `facts`. Without consent a person makes the customer in the console: a
+  session that cannot read a customer cannot set it up either, and that is
+  the point.
+
+Rejected: letting set-up tools through for a tenant with the switch off. What
+to watch is the customer's inventory, a rollout status names the box's
+network — data leaving to a provider, which is what the switch is about.

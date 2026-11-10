@@ -29,17 +29,17 @@ func TestSetupWithoutAPerson(t *testing.T) {
 	s := &Server{Store: st, Now: func() time.Time { return now }, Actor: "jeremia", CAFingerprint: ca.Fingerprint(), Ingest: "ingest.example.test", IngestPt: 443}
 
 	// the customer
-	out, err := s.call(ctx, "ex0_create_tenant", map[string]any{"slug": "MUSTER", "name": " Kanzlei Muster "})
+	out, err := s.call(ctx, "ex0_create_tenant", map[string]any{"slug": "MUSTER", "name": " Kanzlei Muster ", "consent": "Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"})
 	must(t, err)
 	var ten map[string]any
 	must(t, json.Unmarshal([]byte(out), &ten))
 	if ten["tenant_id"] != "ten_muster" || ten["name"] != "Kanzlei Muster" {
 		t.Fatalf("tenant: %s", out)
 	}
-	if _, err := s.call(ctx, "ex0_create_tenant", map[string]any{"slug": "muster", "name": "noch mal"}); err == nil {
+	if _, err := s.call(ctx, "ex0_create_tenant", map[string]any{"slug": "muster", "name": "noch mal", "consent": "Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"}); err == nil {
 		t.Fatal("a second customer with the same slug must be refused, not silently replaced")
 	}
-	if _, err := s.call(ctx, "ex0_create_tenant", map[string]any{"slug": "Kanzlei MUSTER", "name": "x"}); err == nil {
+	if _, err := s.call(ctx, "ex0_create_tenant", map[string]any{"slug": "Kanzlei MUSTER", "name": "x", "consent": "Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"}); err == nil {
 		t.Fatal("a slug with a space is not a slug")
 	}
 

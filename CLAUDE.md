@@ -46,7 +46,9 @@ Reports — das ist Phase 2 und darf durch das Design nur nicht verbaut werden.
   die Einrichtungs-Werkzeuge des MCP-Servers (ADR-0024: Kunde, Standort, Key mit
   vollständigem Befehl, LAN, Kunden-VPN, Überwachung, Scan mit Einwilligung), die
   dasselbe tun wie die Konsole, unter dem Actor der Sitzung. Nie von der Box aus.
-  Der MCP richtet ein; quittieren und betreiben bleibt beim Menschen.
+  Der MCP richtet ein; quittieren und betreiben bleibt beim Menschen. Eine Sitzung ist
+  eine KI (ADR-0019): Für Mandanten mit KI-Auswertung »aus« antwortet der MCP nur mit dem
+  Namen; `ex0_create_tenant` braucht die schriftliche Zustimmung des Kunden (`consent`).
 - Discovery-Modi: `passive`, `sweep`. Der Dienst-Scan (ADR-0018, E20) ist je Standort
   geschaltet, gedrosselt, liest nur; nie Exploits, nie Zugangsdaten. Die Live-Erkennung
   (ADR-0018 §7) öffnet Köder-Ports, antwortet nichts und sendet nichts. Der DNS-Sensor

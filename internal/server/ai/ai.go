@@ -262,6 +262,9 @@ func (s *Service) Packet(ctx context.Context, siteID string) (Packet, error) {
 	if err != nil {
 		return Packet{}, err
 	}
+	if tenant.AIScope != store.AIScopeFacts {
+		return Packet{}, ErrScopeOff
+	}
 	pk, _ := s.packet(ctx, tenant, site)
 	return pk, nil
 }
@@ -277,6 +280,9 @@ func (s *Service) Import(ctx context.Context, siteID, actor, provider, model str
 	tenant, err := s.Store.Tenant(ctx, site.TenantID)
 	if err != nil {
 		return store.AIBrief{}, err
+	}
+	if tenant.AIScope != store.AIScopeFacts {
+		return store.AIBrief{}, ErrScopeOff
 	}
 	_, devices := s.packet(ctx, tenant, site)
 	r = sanitize(r, devices)

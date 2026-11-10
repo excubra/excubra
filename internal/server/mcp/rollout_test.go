@@ -127,7 +127,7 @@ func TestARolloutInOneSession(t *testing.T) {
 	r := newRollout(t)
 	ctx := context.Background()
 
-	r.call("ex0_create_tenant", map[string]any{"slug": "muster", "name": "Muster GmbH"})
+	r.call("ex0_create_tenant", map[string]any{"slug": "muster", "name": "Muster GmbH", "consent": "Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"})
 	r.call("ex0_create_site", map[string]any{"tenant_id": "ten_muster", "slug": "werk", "name": "Werk"})
 	// the site went through the engine: a box that enrolls finds it at once
 	if st, _, done := r.status("site_werk"); st["box"] != "open" || done {
@@ -274,7 +274,7 @@ func TestARolloutInOneSession(t *testing.T) {
 func TestALANOutsideRFC1918TakesAConfirmation(t *testing.T) {
 	r := newRollout(t)
 	ctx := context.Background()
-	r.call("ex0_create_tenant", map[string]any{"slug": "kanzlei", "name": "Kanzlei"})
+	r.call("ex0_create_tenant", map[string]any{"slug": "kanzlei", "name": "Kanzlei", "consent": "Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"})
 	r.call("ex0_create_site", map[string]any{"tenant_id": "ten_kanzlei", "slug": "buero", "name": "Büro"})
 	r.box("box_k", "site_buero", wire.Heartbeat{Box: wire.BoxInfo{LANOther: []string{"192.0.2.0/24"}, LANIP: "192.0.2.79"}, NetbirdOperator: &wire.NetbirdInfo{Status: wire.NetbirdConnected, IP: "100.90.0.9"}})
 	r.fake.Peers = []netbird.Peer{{ID: "peer_k", Hostname: "ex0-kanzlei-buero", IP: "100.90.0.9", Connected: true}}
@@ -312,6 +312,7 @@ func TestSetUpToolsNeedTheRunningServer(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
 	must(t, st.CreateTenant(ctx, store.Tenant{ID: "ten_a", Name: "A", CreatedAt: now}))
+	must(t, st.SetTenantAI(ctx, "ten_a", store.AIScopeFacts)) // the switch is on; this test is about the missing server
 	must(t, st.CreateSite(ctx, store.Site{ID: "site_a", TenantID: "ten_a", Name: "A", CreatedAt: now}))
 	must(t, st.CreateBox(ctx, store.Box{ID: "box_a", SiteID: "site_a", HWID: "hw", CertSerial: "1", CertNotAfter: now.Add(time.Hour), EnrolledAt: now, LastSeen: now}))
 	s := &Server{Store: st, Now: func() time.Time { return now }, Actor: "x"}
@@ -335,7 +336,7 @@ func TestSetUpToolsNeedTheRunningServer(t *testing.T) {
 func TestADeviceBehindAnother(t *testing.T) {
 	r := newRollout(t)
 	ctx := context.Background()
-	r.call("ex0_create_tenant", map[string]any{"slug": "muster", "name": "Muster GmbH"})
+	r.call("ex0_create_tenant", map[string]any{"slug": "muster", "name": "Muster GmbH", "consent": "Herr Muster am 10.11.2026 per Mail, AVV liegt im Vertrag"})
 	r.call("ex0_create_site", map[string]any{"tenant_id": "ten_muster", "slug": "werk", "name": "Werk"})
 	r.box("box_werk", "site_werk", wire.Heartbeat{Box: wire.BoxInfo{LAN: []string{"192.168.10.0/24"}, LANIP: "192.168.10.60"}})
 	seen := func(mac, ip, vendor, host string) string {
@@ -436,5 +437,76 @@ func TestADeviceBehindAnother(t *testing.T) {
 	r.call("ex0_watch", map[string]any{"site_id": "site_werk", "devices": []any{map[string]any{"device_id": cam, "behind": ""}}})
 	if h, _ := r.st.Host(ctx, id[cam].ID); h.ParentID != "" {
 		t.Fatalf("taken out from behind the bridge: %+v", h)
+	}
+}
+
+// A session is a provider (ADR-0019): a tenant whose AI switch is off is named
+// and nothing more. Every tool about that tenant is refused, the findings over
+// all sites leave it out, and the switch is turned on only with the customer's
+// consent on the record.
+func TestAIOffMeansNoAnswer(t *testing.T) {
+	r := newRollout(t)
+	ctx := context.Background()
+	// a customer made in the console, AI off, with a site, a box and a device
+	must(t, r.st.CreateTenant(ctx, store.Tenant{ID: "ten_still", Name: "Stille GmbH", CreatedAt: r.now}))
+	must(t, r.eng.CreateSite(ctx, store.Site{ID: "site_halle", TenantID: "ten_still", Name: "Halle", CreatedAt: r.now}, "console"))
+	r.box("box_still", "site_halle", wire.Heartbeat{Box: wire.BoxInfo{LAN: []string{"192.168.30.0/24"}, LANIP: "192.168.30.60"}})
+	dev, _, _, err := r.st.UpsertSighting(ctx, "ten_still", "site_halle", wire.Sighting{MAC: "00:09:0f:00:00:09", IP: "192.168.30.1", Vendor: "Fortinet, Inc.", LastSeen: r.now}, r.now)
+	must(t, err)
+	_, _, err = r.st.UpsertServices(ctx, dev.ID, []store.Service{{DeviceID: dev.ID, Port: 23, Proto: "tcp", Name: "telnet"}}, r.now)
+	must(t, err)
+	// and one with consent, so the findings over all sites have something to show
+	r.call("ex0_create_tenant", map[string]any{"slug": "offen", "name": "Offen AG", "consent": "Frau Offen am 09.11.2026 per Mail, AVV im Vertrag"})
+	if ten, _ := r.st.Tenant(ctx, "ten_offen"); ten.AIScope != store.AIScopeFacts {
+		t.Fatalf("consent switches the customer to facts: %+v", ten)
+	}
+	audit, _ := r.st.AuditEntries(ctx, 5, 0)
+	found := false
+	for _, a := range audit {
+		if a.Action == "tenant.ai" && a.Target == "ten_offen" && strings.Contains(a.Summary, "Frau Offen") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the consent goes into the audit log: %+v", audit)
+	}
+	r.fails("ex0_create_tenant", map[string]any{"slug": "ohne", "name": "Ohne GmbH"}, "Zustimmung")
+	r.fails("ex0_create_tenant", map[string]any{"slug": "ohne", "name": "Ohne GmbH", "consent": "ja"}, "Zustimmung")
+	if _, err := r.st.Tenant(ctx, "ten_ohne"); err == nil {
+		t.Fatal("refused means not created")
+	}
+
+	// the overview names the silent customer and nothing else about it
+	raw, err := r.s.call(ctx, "ex0_overview", nil)
+	must(t, err)
+	if !strings.Contains(raw, "Stille GmbH") || !strings.Contains(raw, "site_halle") || strings.Contains(raw, "box_still") || strings.Contains(raw, "192.168.30") {
+		t.Fatalf("overview about a tenant with AI off: name and sites, no box, no network: %s", raw)
+	}
+	// every tool about the tenant or its site is refused, set-up included
+	for name, args := range map[string]map[string]any{
+		"ex0_site":             {"site_id": "site_halle"},
+		"ex0_devices":          {"site_id": "site_halle"},
+		"ex0_findings":         {"site_id": "site_halle"},
+		"ex0_events":           {"tenant_id": "ten_still"},
+		"ex0_briefs":           {"site_id": "site_halle"},
+		"ex0_create_site":      {"tenant_id": "ten_still", "slug": "lager", "name": "Lager"},
+		"ex0_new_box":          {"site_id": "site_halle"},
+		"ex0_rollout_status":   {"site_id": "site_halle"},
+		"ex0_site_lan":         {"site_id": "site_halle"},
+		"ex0_customer_vpn":     {"site_id": "site_halle", "management_url": "https://still.vpn.example.test", "setup_key": "0123456789abcdef0123"},
+		"ex0_watch_suggestion": {"site_id": "site_halle"},
+		"ex0_watch":            {"site_id": "site_halle", "suggested": true},
+		"ex0_site_scan":        {"site_id": "site_halle", "on": true, "consent": "Herr Still am 09.11.2026 per Mail"},
+	} {
+		r.fails(name, args, "KI-Auswertung ist aus")
+	}
+	if sites, _ := r.st.Sites(ctx, "ten_still"); len(sites) != 1 {
+		t.Fatalf("refused means nothing was made: %+v", sites)
+	}
+	// over all sites, the silent customer's findings stay out
+	all, err := r.s.call(ctx, "ex0_findings", map[string]any{})
+	must(t, err)
+	if strings.Contains(all, "ten_still") {
+		t.Fatalf("findings over all sites must not carry the silent tenant: %s", all)
 	}
 }

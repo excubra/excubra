@@ -144,7 +144,8 @@ const instructions = "EX0 (excubra) ist das Monitoring- und Präventionssystem v
 	"dann ex0_rollout_status, bis die Box da ist; ex0_site_lan nur, wenn der Status es verlangt (LAN außerhalb RFC 1918, überlappendes Netz); ex0_customer_vpn, wenn der Kunde ein eigenes VPN bekommt; " +
 	"ex0_watch_suggestion und ex0_watch für die Überwachung; ex0_site_scan nur mit festgehaltener Einwilligung. ex0_rollout_status sagt zu jedem Schritt, was fehlt. " +
 	"Das alles sind Aufträge an unseren Server, kein Zugriff auf ein Kundensystem. Der Befehl aus ex0_new_box läuft mit root auf dem Proxmox oder der Box des Kunden: Den führt aus, wer dort Zugang hat. " +
-	"Quittieren, Wartung, DNS-Sensor, Konnektor-Zugangsdaten und alles Operative bleiben bei einem Menschen in der Konsole."
+	"Quittieren, Wartung, DNS-Sensor, Konnektor-Zugangsdaten und alles Operative bleiben bei einem Menschen in der Konsole. " +
+	"Eine Sitzung ist eine KI (ADR-0019): Für Kunden mit KI-Auswertung »aus« nennt die Übersicht nur den Namen, jedes andere Werkzeug verweigert — Einrichtung und Betrieb laufen dann in der Konsole. ex0_create_tenant braucht deshalb die schriftliche Zustimmung des Kunden (consent) und setzt »Facts«."
 
 type tool struct {
 	Name        string         `json:"name"`
@@ -176,7 +177,7 @@ func tools() []tool {
 		{Name: "ex0_situation", Description: "Das vollständige Lagebild eines Standorts als JSON, genau das, was das Nacht-Modell bekommt: Box, Geräte mit Diensten, Außenansicht, Findings, Ereignisse, Konnektor-Facts. Grundlage für eine Einschätzung.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
 		{Name: "ex0_save_assessment", Description: "Speichert deine Einschätzung eines Standorts als KI-Bericht in der Konsole (Reiter KI) und legt gerätegebundene Findings der Quelle „ki“ an. Schema: {\"risk\":\"hoch|mittel|niedrig\",\"summary\":\"2-4 Sätze\",\"priorities\":[{\"title\",\"why\",\"action\",\"device_id\",\"severity\":\"high|medium|low\"}],\"findings\":[{\"device_id\",\"slug\",\"severity\",\"title\",\"detail\"}]}. Nur Geräte-Kennungen aus dem Lagebild.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung"), "result": map[string]any{"type": "object", "description": "die Einschätzung im Schema"}, "model": str("welches Modell du bist, z. B. claude-fable-5-1")}, "site_id", "result")},
 		{Name: "ex0_briefs", Description: "Die bisherigen KI-Einschätzungen eines Standorts, neueste zuerst.", InputSchema: schema(map[string]any{"site_id": str("Standort-Kennung")}, "site_id")},
-		{Name: "ex0_create_tenant", Description: "Legt einen Kunden (Mandanten) an. Einrichtung auf dem Server, kein Zugriff auf Kundensysteme. Kürzel wird zur Kennung ten_<kürzel> und taucht in Webhooks und der API auf: kurz, klein, ohne Umlaute.", InputSchema: schema(map[string]any{"slug": str("Kürzel, a-z 0-9 Bindestrich, z. B. muster"), "name": str("Anzeigename, z. B. Kanzlei Muster")}, "slug", "name")},
+		{Name: "ex0_create_tenant", Description: "Legt einen Kunden (Mandanten) an. Einrichtung auf dem Server, kein Zugriff auf Kundensysteme. Kürzel wird zur Kennung ten_<kürzel> und taucht in Webhooks und der API auf: kurz, klein, ohne Umlaute. Nur mit der schriftlichen Zustimmung des Kunden zur KI-Auswertung (ADR-0019): Sie kommt als Satz ins Audit-Log, der Kunde steht auf »Facts«, und die Sitzung kann weiterarbeiten. Ohne Zustimmung legt ein Mensch den Kunden in der Konsole an.", InputSchema: schema(map[string]any{"slug": str("Kürzel, a-z 0-9 Bindestrich, z. B. muster"), "name": str("Anzeigename, z. B. Kanzlei Muster"), "consent": str("wer hat wann der KI-Auswertung zugestimmt, wo liegt es (Vertrag, AVV) — ein Satz")}, "slug", "name", "consent")},
 		{Name: "ex0_create_site", Description: "Legt einen Standort für einen Kunden an; mit Adresse wird er serverseitig nachgeschlagen und steht auf der Karte. Einrichtung, kein Zugriff auf Kundensysteme.", InputSchema: schema(map[string]any{"tenant_id": str("Kunden-Kennung, z. B. ten_muster"), "slug": str("Kürzel des Standorts, z. B. kanzlei"), "name": str("Anzeigename, z. B. Kanzlei"), "address": str("Postadresse für die Karte (optional)")}, "tenant_id", "slug", "name")},
 		{Name: "ex0_new_box", Description: "Erzeugt einen Enrollment-Key für einen Standort und liefert die beiden vollständigen Befehle (Proxmox-Host / Box selbst) mit der Release-Version dieses Servers. Alles, was über den Container bekannt ist, gehört in diesen Aufruf und steht dann im Befehl: nichts wird von Hand angehängt. Die Box ordnet sich mit dem Key selbst dem Standort zu (ADR-0017). Der Key ist einmalig und gehört nur in den Befehl.", InputSchema: schema(map[string]any{
 			"site_id":      str("Standort-Kennung, z. B. site_kanzlei"),
@@ -227,6 +228,9 @@ func argString(args map[string]any, key string) string {
 }
 
 func (s *Server) call(ctx context.Context, name string, args map[string]any) (string, error) {
+	if err := s.gate(ctx, name, args); err != nil {
+		return "", err
+	}
 	switch name {
 	case "ex0_overview":
 		return s.overview(ctx)
@@ -281,7 +285,7 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 		}
 		return pretty(out), nil
 	case "ex0_create_tenant":
-		return s.createTenant(ctx, argString(args, "slug"), argString(args, "name"))
+		return s.createTenant(ctx, argString(args, "slug"), argString(args, "name"), argString(args, "consent"))
 	case "ex0_create_site":
 		return s.createSite(ctx, argString(args, "tenant_id"), argString(args, "slug"), argString(args, "name"), argString(args, "address"))
 	case "ex0_new_box":
@@ -317,6 +321,46 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 	return "", errors.New("unknown tool " + name)
 }
 
+// gate keeps the switch of ADR-0019: a session is a provider, so a tenant whose
+// AI scope is off is not read, not assessed and not set up from here. The
+// overview still names such a tenant, and ex0_create_tenant is where the
+// consent comes in; everything else about that tenant is refused.
+func (s *Server) gate(ctx context.Context, name string, args map[string]any) error {
+	var tenantID string
+	switch name {
+	case "ex0_overview", "ex0_create_tenant":
+		return nil
+	case "ex0_events", "ex0_create_site":
+		tenantID = argString(args, "tenant_id")
+	default:
+		siteID := argString(args, "site_id")
+		if siteID == "" {
+			return nil // findings over every site filter per tenant; the other tools say what is missing
+		}
+		site, err := s.Store.Site(ctx, siteID)
+		if err != nil {
+			return nil // the tool answers "not found" itself
+		}
+		tenantID = site.TenantID
+	}
+	if tenantID == "" {
+		return nil
+	}
+	t, err := s.Store.Tenant(ctx, tenantID)
+	if err != nil {
+		return nil
+	}
+	return aiOff(t)
+}
+
+// aiOff is the answer a session gets about a tenant with the AI switch off.
+func aiOff(t store.Tenant) error {
+	if t.AIScope == store.AIScopeFacts {
+		return nil
+	}
+	return fmt.Errorf("%s: KI-Auswertung ist aus — eine Sitzung ist eine KI und sieht von diesem Kunden nichts (ADR-0019). Einrichtung und Betrieb in der Konsole; mit schriftlicher Zustimmung des Kunden schaltet ein Mensch dort auf »Facts«", t.Name)
+}
+
 func (s *Server) overview(ctx context.Context) (string, error) {
 	tenants, err := s.Store.Tenants(ctx)
 	if err != nil {
@@ -326,6 +370,15 @@ func (s *Server) overview(ctx context.Context) (string, error) {
 	var out []map[string]any
 	for _, t := range tenants {
 		sites, _ := s.Store.Sites(ctx, t.ID)
+		if t.AIScope != store.AIScopeFacts {
+			names := make([]map[string]any, 0, len(sites))
+			for _, site := range sites {
+				names = append(names, map[string]any{"site_id": site.ID, "name": site.Name})
+			}
+			out = append(out, map[string]any{"tenant_id": t.ID, "name": t.Name, "ai_scope": t.AIScope, "sites": names,
+				"hinweis": "KI-Auswertung aus: dieser Kunde ist nur in der Konsole zu sehen und einzurichten (ADR-0019)"})
+			continue
+		}
 		open, _ := s.Store.OpenFindings(ctx, t.ID)
 		var siteRows []map[string]any
 		for _, site := range sites {
@@ -460,6 +513,9 @@ func (s *Server) findings(ctx context.Context, siteID, severity string) (string,
 	now := s.Now()
 	var out []map[string]any
 	for _, t := range tenants {
+		if t.AIScope != store.AIScopeFacts {
+			continue // the gate refused a named site already; across all sites, these stay out
+		}
 		open, err := s.Store.OpenFindings(ctx, t.ID)
 		if err != nil {
 			continue

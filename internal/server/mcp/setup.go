@@ -26,7 +26,12 @@ const (
 	keyDaysMax     = 365
 )
 
-func (s *Server) createTenant(ctx context.Context, slug, name string) (string, error) {
+// createTenant makes a customer the way the console does — and, because a
+// session is an AI (ADR-0019), only with the customer's written consent to the
+// AI assessment on the record: the tenant comes out on "facts", the sentence
+// goes into the audit log, and the session can go on. Without consent the
+// customer is made in the console, by a person.
+func (s *Server) createTenant(ctx context.Context, slug, name, consent string) (string, error) {
 	tid, err := id.FromSlug("ten", slug)
 	if err != nil {
 		return "", errors.New("Kürzel: a-z, 0-9, Bindestrich, 1-40 Zeichen")
@@ -34,6 +39,10 @@ func (s *Server) createTenant(ctx context.Context, slug, name string) (string, e
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", errors.New("name required")
+	}
+	consent = strings.TrimSpace(consent)
+	if len(consent) < 12 {
+		return "", errors.New("consent: Ohne schriftliche Zustimmung des Kunden zur KI-Auswertung legt ein Mensch den Kunden in der Konsole an (ADR-0019). Mit Zustimmung: wer hat wann zugestimmt, wo liegt sie (Vertrag, AVV) — ein Satz")
 	}
 	if _, err := s.Store.Tenant(ctx, tid); err == nil {
 		return "", fmt.Errorf("%s gibt es schon", tid)
@@ -43,7 +52,11 @@ func (s *Server) createTenant(ctx context.Context, slug, name string) (string, e
 		return "", err
 	}
 	_ = s.Store.Audit(ctx, now, s.Actor, "tenant.create", tid, name)
-	return pretty(map[string]any{"tenant_id": tid, "name": name, "next": "ex0_create_site mit tenant_id " + tid}), nil
+	if err := s.Store.SetTenantAI(ctx, tid, store.AIScopeFacts); err != nil {
+		return "", err
+	}
+	_ = s.Store.Audit(ctx, now, s.Actor, "tenant.ai", tid, "facts — "+consent)
+	return pretty(map[string]any{"tenant_id": tid, "name": name, "ai_scope": store.AIScopeFacts, "next": "ex0_create_site mit tenant_id " + tid}), nil
 }
 
 // createSite makes a site and, when an address is given, puts it on the map the

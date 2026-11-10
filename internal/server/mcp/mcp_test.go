@@ -25,6 +25,7 @@ func TestSessionOverStdio(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	must(t, st.CreateTenant(ctx, store.Tenant{ID: "ten_a", Name: "Muster GmbH", CreatedAt: now}))
+	must(t, st.SetTenantAI(ctx, "ten_a", store.AIScopeFacts)) // the session is a provider: the switch is on for this test
 	must(t, st.CreateSite(ctx, store.Site{ID: "site_a", TenantID: "ten_a", Name: "Werk", CreatedAt: now}))
 	must(t, st.CreateBox(ctx, store.Box{ID: "box_a", SiteID: "site_a", Name: "muster-box", HWID: "hw", CertSerial: "1", CertNotAfter: now.Add(time.Hour), EnrolledAt: now, LastSeen: now}))
 	dev, _, _, err := st.UpsertSighting(ctx, "ten_a", "site_a", wire.Sighting{MAC: "00:11:22:33:44:55", IP: "192.168.1.10", Hostname: "srv01", LastSeen: now}, now)
