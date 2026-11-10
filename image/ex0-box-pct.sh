@@ -6,6 +6,12 @@
 #     && bash /tmp/ex0-box-pct.sh --enroll-key 'EX0:1:…' [--hostname ex0-kunde-standort] [--version 0.20.0]
 #       [--ctid 200] [--bridge vmbr0] [--ip dhcp | --ip 192.168.10.60/24 --gw 192.168.10.1]
 #       [--storage local-lvm] [--disk 8] [--memory 1024] [--ssh-key 'ssh-ed25519 AAAA… name']…
+#       [--nameserver 192.168.10.1[,…]] [--searchdomain kunde.local]
+#
+# --nameserver: without it the container inherits the host's resolver. That is
+# wrong when the host resolves through a network the container cannot reach
+# (a management VLAN, a firewall that only admits the host); the box then waits
+# for DNS and never enrolls. Name the resolver the box's own network uses.
 #
 # What it does: downloads the Debian 13 template if missing, creates an unprivileged
 # container with nesting (for the operator namespace) and /dev/net/tun (for
@@ -36,6 +42,8 @@ main() {
   STORAGE=""
   DISK=8
   MEMORY=1024
+  NAMESERVER=""
+  SEARCHDOMAIN=""
   PASS=()
   STEP="arguments"
   MADE=0
@@ -52,11 +60,16 @@ main() {
       --storage) STORAGE="$2"; shift 2 ;;
       --disk) DISK="$2"; shift 2 ;;
       --memory) MEMORY="$2"; shift 2 ;;
+      --nameserver) NAMESERVER="$2"; shift 2 ;;
+      --searchdomain) SEARCHDOMAIN="$2"; shift 2 ;;
       --netbird-version|--operator-lan-mode|--ssh-key) PASS+=("$1" "$2"); shift 2 ;;
       --no-operator-peer|--ssh-lan) PASS+=("$1"); shift ;;
       *) echo "ex0-box-pct: unknown flag $1" >&2; exit 2 ;;
     esac
   done
+  DNSOPTS=()
+  [ -n "$NAMESERVER" ] && DNSOPTS+=(--nameserver "$NAMESERVER")
+  [ -n "$SEARCHDOMAIN" ] && DNSOPTS+=(--searchdomain "$SEARCHDOMAIN")
 
   trap 'failed "line $LINENO: $BASH_COMMAND"' ERR
 
@@ -141,9 +154,10 @@ main() {
     [ -n "$CTID" ] || CTID="$(pvesh get /cluster/nextid)"
     NET="name=eth0,bridge=$BRIDGE,ip=$IP"
     [ "$IP" != dhcp ] && NET="$NET,gw=$GW"
-    echo "== container $CTID ($HOSTNAME_WANT), $NET"
+    echo "== container $CTID ($HOSTNAME_WANT), $NET${NAMESERVER:+, dns $NAMESERVER}"
     pct create "$CTID" "$TPL_STORE:vztmpl/$TPL" --hostname "$HOSTNAME_WANT" --unprivileged 1 --features nesting=1 --ostype debian \
       --net0 "$NET" --rootfs "$STORAGE:$DISK" --memory "$MEMORY" --swap 256 --cores 2 --onboot 1 --start 0 \
+      ${DNSOPTS[@]+"${DNSOPTS[@]}"} \
       --description "EX0 box (ex0-box-pct.sh v$VERSION). Agent + operator peer + prepared customer peer. Managed from the EX0 console." >/dev/null
     MADE=1
     pct set "$CTID" --dev0 path=/dev/net/tun >/dev/null 2>&1 || {
@@ -151,6 +165,8 @@ main() {
       printf 'lxc.cgroup2.devices.allow: c 10:200 rwm\nlxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file\n' >> "/etc/pve/lxc/$CTID.conf"
     }
   fi
+  # a second run on a stopped container still gets the resolver it was asked for
+  [ "$MADE" = 0 ] && [ ${#DNSOPTS[@]} -gt 0 ] && [ "$(pct status "$CTID" 2>/dev/null)" != "status: running" ] && pct set "$CTID" "${DNSOPTS[@]}" >/dev/null 2>&1 || true
   [ "$(pct status "$CTID" 2>/dev/null)" = "status: running" ] || pct start "$CTID"
 
   STEP="network in the container"
